@@ -60,6 +60,32 @@ _LOGGER = logging.getLogger(__name__)
 _CUT_LABEL = "숏폼에 쓸 자리 나누기"
 
 
+def current_short_form_variant(
+    *, store: Any, project_id: str, session_id: str, session_revision: int
+) -> dict[str, Any] | None:
+    """이 세션에 지금 걸린 숏폼(세로 하이라이트) 변형본. 하나가 아니면 `None`.
+
+    **한 자리에 둔다** -- 이 판정을 부르는 자리가 이미 셋이다(유진 창작자
+    컨텍스트, 유진 편집 컨텍스트, 유진 편집 제안 적용기). 갈라 두면 한쪽만
+    고쳐진다(`output_variants.py`의 `build_variant_timeline_payload` 머리말과
+    같은 함정). 숏폼 모양이 여러 개면 싣지 않는다 -- 어느 것을 말하는지 정할
+    근거가 없고, 조용히 하나를 고르면 대표님이 안 본 쪽이 바뀐다(화면은
+    세션당 하나만 만들게 막는다).
+    """
+    try:
+        variants = store.list_output_variants(project_id=project_id, session_id=session_id)
+    except Exception:  # 조회 실패가 대화를 막지 않는다.
+        return None
+    matches = [
+        item
+        for item in variants or ()
+        if str(item.get("kind") or "") == "vertical_highlight"
+        and str(item.get("source_session_id") or "") == session_id
+        and int(item.get("source_session_revision") or 0) == session_revision
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
 def _board_source_asset_ids(segments: list[dict]) -> list[str]:
     """판에 실제로 깔려 있는 소재 id. 전사를 고를 때 대조용으로 쓴다.
 

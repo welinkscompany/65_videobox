@@ -41,6 +41,7 @@ from videobox_core_engine.output_variants import (
 )
 from videobox_api.short_form_scenes import (
     created_short_form_variant,
+    current_short_form_variant,
     remade_short_form_variant,
     scene_pick_payload,
 )
@@ -555,6 +556,13 @@ def build_director_proposals_router(
             # 지금 얹힌 사진. 전환·색감과 같은 이유로 준다 -- 목록과 지금 걸린
             # 값은 한 쌍이고, 한쪽만 주면 되돌리는 말이 막힌다.
             image_overlays_by_segment=_image_overlays_by_segment(session),
+            # "만들기"와 "다시 만들기"를 유진이 가르는 값. 목록과 지금 값은
+            # 한 쌍이다(owner 지시 2026-09-06).
+            has_short_form_variant=current_short_form_variant(
+                store=store, project_id=project_id, session_id=session_id,
+                session_revision=int(session["session_revision"]),
+            )
+            is not None,
         )
         result = YujinEditingProposalService(request.app.state.local_only_runtime_service_factory(store)).create(
             project_id=project_id, instruction=body.instruction, context=context
@@ -654,7 +662,7 @@ def build_director_proposals_router(
             raise HTTPException(status_code=404, detail="proposal_preview_not_current") from exc
 
     @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/yujin-editing-proposals/{proposal_id}/apply")
-    def apply_yujin_editing_proposal_route(project_id: str, session_id: str, proposal_id: str, body: YujinEditingProposalApplyRequest) -> dict:
+    def apply_yujin_editing_proposal_route(project_id: str, session_id: str, proposal_id: str, body: YujinEditingProposalApplyRequest, request: Request) -> dict:
         try:
             proposal = store.get_director_proposal(project_id, proposal_id)
             session = store.get_editing_session(project_id=project_id, session_id=session_id)
@@ -669,12 +677,87 @@ def build_director_proposals_router(
                 "base_session_revision": proposal.base_session_revision,
                 "operations": [_with_materialized_library_asset(project_id, dict(item)) for item in operations],
             })
+            # **숏폼 셋(만들기·다시 만들기·펼치기)은 세션을 안 건드린다.** 이
+            # 셋은 `output_variant`(별개 자원)를 짓거나 바꾸는 일이라 아래
+            # `apply_yujin_editing_proposal`/`update_editing_session`(편집 세션
+            # 문서 자체를 바꾸는 길)로 보내면 안 된다 -- 검증기
+            # (`_validate_current_targets`)가 이미 "혼자여야 한다"를 확인했으므로
+            # 여기서는 그 사실만 보고 가른다.
+            first_intent = editing.operations[0].intent
+            if len(editing.operations) == 1 and first_intent in {
+                "create_short_form", "remake_short_form", "unfold_short_form",
+            }:
+                return _apply_short_form_editing_intent(
+                    request=request, project_id=project_id, session_id=session_id,
+                    proposal_id=proposal_id, expected_session_revision=body.expected_revision,
+                    intent=first_intent,
+                )
             updated = apply_yujin_editing_proposal(session=session, proposal=editing)
             return store.update_editing_session(project_id=project_id, session_id=session_id, session_payload=updated, expected_revision=body.expected_revision)
         except HTTPException:
             raise
+        except EditingSessionRevisionConflict:
+            raise HTTPException(status_code=409, detail="editing_proposal_needs_refresh") from None
         except (KeyError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    def _apply_short_form_editing_intent(
+        *, request: Request, project_id: str, session_id: str, proposal_id: str,
+        expected_session_revision: int, intent: str,
+    ) -> dict:
+        """편집 채팅에서 "숏폼 만들어줘"/"다시 만들어줘"/"펼쳐줘"를 실행한다.
+
+        **화면 단추와 같은 코드를 부른다** -- 장면 판단은
+        `short_form_scenes.py`가 유일한 자리다(이 파일 머리말). 이 함수가
+        하는 일은 어느 함수를 부를지 가르는 것뿐이다.
+        """
+        runtime = request.app.state.local_only_runtime_service_factory(store)
+        if intent == "create_short_form":
+            try:
+                variant, pick = created_short_form_variant(
+                    store=store, project_id=project_id, proposal_id=proposal_id,
+                    session_id=session_id, expected_session_revision=expected_session_revision,
+                    runtime=runtime,
+                )
+            except sqlite3.IntegrityError as error:
+                # 채팅과 단추가 거의 동시에 눌린 경합. 단추 경로
+                # (`routers/output_variants.py`)와 같은 이유로 여기서도 맨
+                # `Internal Server Error` 대신 할 수 있는 일을 알려준다.
+                raise HTTPException(status_code=409, detail="short_form_already_exists") from error
+            return {"status": "short_form_created", "variant": variant, "scene_pick": scene_pick_payload(pick)}
+        current = current_short_form_variant(
+            store=store, project_id=project_id, session_id=session_id,
+            session_revision=expected_session_revision,
+        )
+        if current is None:
+            raise HTTPException(status_code=409, detail="short_form_missing")
+        variant_id = str(current["variant_id"])
+        expected_variant_revision = int(current["variant_revision"])
+        if intent == "remake_short_form":
+            updated_variant, pick = remade_short_form_variant(
+                store=store, project_id=project_id, variant_row=current, runtime=runtime,
+                expected_variant_revision=expected_variant_revision,
+            )
+            saved = store.apply_director_variant_proposal_transaction(
+                project_id=project_id, proposal_id=proposal_id, variant_id=variant_id,
+                expected_variant_revision=expected_variant_revision, variant=updated_variant,
+            )
+            return {"status": "short_form_remade", "variant": saved, "scene_pick": scene_pick_payload(pick)}
+        # unfold_short_form
+        unfolded = orchestrator.unfold_short_form_editing_session(
+            project_id=project_id, variant_id=variant_id,
+            expected_variant_revision=expected_variant_revision,
+        )
+        saved = store.apply_director_variant_proposal_transaction(
+            project_id=project_id, proposal_id=proposal_id, variant_id=variant_id,
+            expected_variant_revision=expected_variant_revision, variant=unfolded["unfolded_variant"],
+        )
+        # **되돌릴 수 없는 일이라 말없이 지나가지 않는다** -- 화면 단추 경로
+        # (`director_proposals.batch_apply`)와 같은 문장을 그대로 쓴다.
+        return {
+            "status": "short_form_unfolded", "variant": saved,
+            "editing_session": unfolded["editing_session"], "notice": UNFOLD_INDEPENDENCE_RULE,
+        }
 
     @router.get("/api/projects/{project_id}/director/sessions/{session_id}/reload")
     def reload_session(project_id: str, session_id: str) -> dict:

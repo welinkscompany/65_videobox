@@ -254,6 +254,47 @@ class RemoveMediaOperation(_SegmentOperation):
     media_type: Literal["broll", "bgm", "sfx"]
 
 
+class CreateShortFormOperation(_StrictFrozenModel):
+    """숏폼(세로 하이라이트)을 **처음** 만든다.
+
+    `_SegmentOperation`이 아니다 -- 이 판단은 장면 하나가 아니라 편집본
+    전체를 읽고 판단하는 일이라 자막 글꼴(`SetCaptionFontOperation`)과 같은
+    자리에 산다.
+
+    파라미터가 없는 이유: 장면을 고르는 일은 화면의 `숏폼으로 변환` 단추와
+    **같은 코드**(`short_form_scenes.created_short_form_variant`)가 한다.
+    유진이 채팅으로 장면을 직접 짚으면, 이 대화가 보는 장면 목록은 32개에서
+    잘리므로 롱폼에서는 단추보다 못한 판단이 된다 -- 그래서 판단 자체를
+    서버가 다시 돈다.
+
+    `has_short_form_variant`가 `true`일 때(이미 있을 때) 쓰면 거절된다 --
+    그때는 `remake_short_form`을 쓴다.
+    """
+
+    intent: Literal["create_short_form"]
+
+
+class RemakeShortFormOperation(_StrictFrozenModel):
+    """이미 있는 숏폼의 장면을 **처음부터 다시** 고르게 한다. 파라미터 없음(위와 같은 이유)."""
+
+    intent: Literal["remake_short_form"]
+
+
+class UnfoldShortFormOperation(_StrictFrozenModel):
+    """숏폼을 **따로 편집할 수 있는 편집본으로** 펼친다.
+
+    숏폼이 담을 수 있는 것은 장면 목록과 화면 전체 설정뿐이라, 한 장면만
+    고치려는 지시는 원본 영상에도 걸린다. 펼치면 그 뒤로는 이 파일의 16개
+    편집 의도가 새 편집본에서 그대로 돈다.
+
+    **대가는 원본과의 줄이 끊기는 것이다**
+    (`videobox_core_engine.output_variants.UNFOLD_INDEPENDENCE_RULE`) --
+    되돌릴 수 없으므로 안내문이 이 사실을 반드시 말해야 한다.
+    """
+
+    intent: Literal["unfold_short_form"]
+
+
 YujinEditingOperation = Annotated[
     SetSceneSpeedOperation
     | SetSegmentBoundsOperation
@@ -270,7 +311,10 @@ YujinEditingOperation = Annotated[
     | SetImageOverlayOperation
     | RemoveImageOverlayOperation
     | ApplyMediaOperation
-    | RemoveMediaOperation,
+    | RemoveMediaOperation
+    | CreateShortFormOperation
+    | RemakeShortFormOperation
+    | UnfoldShortFormOperation,
     Field(discriminator="intent"),
 ]
 
@@ -291,6 +335,9 @@ class YujinEditingResponse(_StrictFrozenModel):
 
 __all__ = [
     "ApplyMediaOperation",
+    "CreateShortFormOperation",
+    "RemakeShortFormOperation",
+    "UnfoldShortFormOperation",
     "RemoveImageOverlayOperation",
     "RemoveMediaOperation",
     "ReorderSegmentsOperation",

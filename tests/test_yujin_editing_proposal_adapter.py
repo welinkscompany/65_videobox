@@ -192,3 +192,83 @@ def test_music_and_a_sound_effect_can_land_on_the_same_scene() -> None:
         ],
     }
     assert interpret_yujin_editing_request(same_slot_twice, context).reason == "duplicate_conflicting_operation"
+
+
+def _short_form_response(intent: str) -> dict[str, object]:
+    return {
+        "schema_version": "videobox.yujin-editing-response.v1",
+        "reply_text": "숏폼을 만들었어요.",
+        "proposal": {
+            "proposal_id": "proposal-short-form",
+            "base_session_revision": 7,
+            "operations": [{"intent": intent}],
+        },
+    }
+
+
+def test_yujin_can_create_the_first_short_form_by_voice() -> None:
+    """실제 화면 채팅(`YujinEditingProposalService`)에서 "숏폼 만들어줘"가 된다.
+
+    `yujin_creator_proposals.py`(화면 어디서도 안 부르는 경로)가 아니라
+    **이 파일**이 진짜 채팅이 지나는 자리다(2026-09-12 프론트 코드 역추적으로
+    확인). 숏폼이 없을 때만 통과한다.
+    """
+    context = _context()
+
+    result = interpret_yujin_editing_request(_short_form_response("create_short_form"), context)
+
+    assert result.status == "candidate_only", result.reason
+    assert result.proposal is not None
+    assert result.proposal.operations[0].intent == "create_short_form"
+
+
+def test_creating_a_short_form_that_already_exists_is_refused() -> None:
+    context = YujinEditingContext(
+        session_id="session-1", session_revision=7, segment_ids=("scene-1",),
+        has_short_form_variant=True,
+    )
+
+    result = interpret_yujin_editing_request(_short_form_response("create_short_form"), context)
+
+    assert result.proposal is None
+    assert result.reason == "short_form_already_exists"
+
+
+def test_remaking_or_unfolding_a_short_form_that_does_not_exist_is_refused() -> None:
+    context = _context()  # has_short_form_variant defaults to False
+
+    remake = interpret_yujin_editing_request(_short_form_response("remake_short_form"), context)
+    unfold = interpret_yujin_editing_request(_short_form_response("unfold_short_form"), context)
+
+    assert remake.reason == "short_form_does_not_exist"
+    assert unfold.reason == "short_form_does_not_exist"
+
+
+def test_remaking_an_existing_short_form_by_voice() -> None:
+    context = YujinEditingContext(
+        session_id="session-1", session_revision=7, segment_ids=("scene-1",),
+        has_short_form_variant=True,
+    )
+
+    result = interpret_yujin_editing_request(_short_form_response("remake_short_form"), context)
+
+    assert result.status == "candidate_only", result.reason
+    assert result.proposal is not None
+    assert result.proposal.operations[0].intent == "remake_short_form"
+
+
+def test_a_short_form_operation_cannot_be_mixed_with_another_edit() -> None:
+    """만들기·다시 만들기·펼치기는 그릇을 바꾸는 일이라 다른 편집과 섞이면
+    어느 것이 최종인지 정할 근거가 없다."""
+    mixed = _short_form_response("create_short_form")
+    mixed["proposal"] = {
+        **mixed["proposal"],  # type: ignore[dict-item]
+        "operations": [
+            {"intent": "create_short_form"},
+            {"intent": "set_scene_speed", "segment_id": "scene-1", "rate": 2},
+        ],
+    }
+
+    result = interpret_yujin_editing_request(mixed, _context())
+
+    assert result.reason == "short_form_operation_must_be_alone"

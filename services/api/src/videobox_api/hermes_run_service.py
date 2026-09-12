@@ -18,6 +18,7 @@ from videobox_api.hermes_capabilities import (
     HermesCapabilityUnavailableError as HermesVerifierUnavailableError,
 )
 from videobox_api.models import HermesStreamEvent
+from videobox_api.short_form_scenes import current_short_form_variant
 from videobox_core_engine.yujin_creator_context import (
     attach_yujin_memories,
     build_yujin_creator_context,
@@ -564,33 +565,19 @@ class HermesRunService:
         넘기지 않아 그 조건이 **한 번도 참이 된 적이 없었다** -- 스키마와
         적용기가 다 있어도 실물에서는 절대 적용될 수 없었다.
 
-        고르는 규칙은 하나다: 지금 마스터 판과 **같은 판**에 붙어 있는 세로
-        하이라이트. 판이 어긋난 것을 넘기면 `build_yujin_creator_context`가
+        고르는 규칙은 `short_form_scenes.current_short_form_variant`에 있다
+        (지금 마스터 판과 같은 판에 붙은 것 하나여야 한다) -- 여기서 다시
+        판정하지 않는다. 판이 어긋난 것을 넘기면 `build_yujin_creator_context`가
         `creator_context_variant_not_current`로 죽어 **유진이 아예 대답을 못
         하게** 된다. 그래서 어긋났으면 그냥 싣지 않는다 -- 숏폼을 못 고를 뿐
         대화는 계속된다.
-
-        숏폼 모양이 여러 개면 싣지 않는다. 어느 것을 말하는지 정할 근거가
-        없고, 조용히 하나를 고르면 대표님이 안 본 쪽이 바뀐다. (화면은 세션당
-        하나만 만들게 막고 있다 -- `EditorWorkbenchRoute.createHighlightVariant`.)
         """
-        try:
-            variants = self.store.list_output_variants(  # type: ignore[attr-defined]
-                project_id=project_id,
-                session_id=session_id,
-            )
-        except Exception:  # 조회 실패가 대화를 막지 않는다.
+        variant = current_short_form_variant(
+            store=self.store, project_id=project_id, session_id=session_id, session_revision=session_revision,
+        )
+        if variant is None:
             return None
-        matches = [
-            item
-            for item in variants or ()
-            if str(item.get("kind") or "") == "vertical_highlight"
-            and str(item.get("source_session_id") or "") == session_id
-            and int(item.get("source_session_revision") or 0) == session_revision
-        ]
-        if len(matches) != 1:
-            return None
-        variant_id = str(matches[0].get("variant_id") or "")
+        variant_id = str(variant.get("variant_id") or "")
         return variant_id or None
 
     def _has_short_form_variant(
@@ -602,10 +589,11 @@ class HermesRunService:
     ) -> bool:
         """지금 마스터 판에 세로 하이라이트(숏폼)가 **이미 있는가**.
 
-        위 `_current_short_form_variant_id`와 다르다 -- 그쪽은 "정확히 하나일
-        때만" 값을 주고(둘 이상이면 `None`), 이건 "하나라도 있는가"를 묻는다.
-        "숏폼 만들어줘"는 하나도 없을 때만 옳다 -- 둘 이상 어긋난 상태에서도
-        만들기를 열어 두면 화면이 막는 "세션당 하나" 규칙을 유진이 깨게 된다.
+        위 `_current_short_form_variant_id`와 다르다 -- 그쪽은
+        `current_short_form_variant`가 "정확히 하나"일 때만 값을 주고, 이건
+        "하나라도 있는가"를 직접 셈해서 묻는다. "숏폼 만들어줘"는 하나도
+        없을 때만 옳다 -- 둘 이상 어긋난 상태에서도 만들기를 열어 두면 화면이
+        막는 "세션당 하나" 규칙을 유진이 깨게 된다.
         """
         try:
             variants = self.store.list_output_variants(  # type: ignore[attr-defined]

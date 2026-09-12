@@ -66,6 +66,11 @@ _EDITING_OPERATION_SCHEMA = {
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "remove_image_overlay"}, "segment_id": {"type": "string"}}, "required": ["intent", "segment_id"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "apply_media"}, "segment_id": {"type": "string"}, "media_type": {"enum": ["broll", "bgm", "sfx"]}, "asset_id": {"type": "string"}}, "required": ["intent", "segment_id", "media_type", "asset_id"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "remove_media"}, "segment_id": {"type": "string"}, "media_type": {"enum": ["broll", "bgm", "sfx"]}}, "required": ["intent", "segment_id", "media_type"]},
+        # 숏폼 셋. 파라미터가 없다 -- 장면 판단은 서버가 화면 단추와 같은
+        # 코드로 다시 돈다(`_short_form_catalogue` 참고).
+        {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "create_short_form"}}, "required": ["intent"]},
+        {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "remake_short_form"}}, "required": ["intent"]},
+        {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "unfold_short_form"}}, "required": ["intent"]},
     ]
 }
 
@@ -416,6 +421,34 @@ def _caption_catalogue(context: YujinEditingContext, instruction: str) -> str:
     )
 
 
+def _short_form_catalogue(context: YujinEditingContext) -> str:
+    """숏폼(세로 하이라이트) 셋. 색감·전환과 **같은 함정**을 막는다 -- 목록만
+    주고 지금 있는지를 안 주면 "숏폼 만들어줘"와 "다시 만들어줘"를 유진이
+    구분하지 못한다(목록과 지금 값은 한 쌍, owner 지시 2026-09-06).
+    """
+    if context.has_short_form_variant:
+        return (
+            "이 편집본에는 이미 숏폼(세로 하이라이트)이 있다. "
+            "'숏폼 다시 만들어줘'·'다시 골라줘'·'이 숏폼 마음에 안 들어'처럼 "
+            "다시 만들어 달라는 요청에는 remake_short_form을 쓴다 -- 장면은 직접 "
+            "고르지 않는다(서버가 영상 전 구간을 다시 읽고 판단한다). "
+            "'숏폼 만들어줘'를 다시 들어도 remake_short_form을 쓴다 -- 이미 있으니 "
+            "'다시'와 같은 뜻이다. "
+            "'이 숏폼만 따로 편집하고 싶어'·'숏폼 펼쳐줘'처럼 숏폼 자체를 손보려는 "
+            "요청에는 unfold_short_form을 쓴다 -- 펼치면 원본과의 연결이 끊기므로 "
+            "reply_text에 반드시 '펼치면 독립된 편집본이 되고, 그 뒤 원본을 고쳐도 "
+            "따라오지 않아요.'라고 말한다."
+        )
+    return (
+        "이 편집본에는 아직 숏폼(세로 하이라이트)이 없다. "
+        "'숏폼 만들어줘'·'세로로 하나 뽑아줘'처럼 처음 만들어 달라는 요청에는 "
+        "create_short_form을 쓴다 -- 장면은 직접 고르지 않는다(서버가 영상 전 "
+        "구간을 읽고 판단한다). remake_short_form과 unfold_short_form은 숏폼이 "
+        "없으면 쓸 수 없다 -- 그 요청을 들으면 아직 숏폼이 없다고 답하고 "
+        "먼저 만들어 주겠다고 답한다(create_short_form)."
+    )
+
+
 def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
     success_example = {
         "schema_version": "videobox.yujin-editing-response.v1",
@@ -472,7 +505,9 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         # 다시 사진 전용으로 되돌린다.
         "set_image_overlay(사진·영상을 화면 **위에** 얹는다 -- \"사진 오른쪽 아래에 작게 띄워줘\"가 이것이다), "
         "remove_image_overlay(얹은 사진·영상을 뺀다), "
-        "remove_media(깔아 둔 영상·음악·효과음을 뺀다 -- \"음악 빼줘\"가 이것이다)뿐이다. 요청이 모호하거나 안전한 후보를 만들 수 없으면 proposal은 null로 둔다. "
+        "remove_media(깔아 둔 영상·음악·효과음을 뺀다 -- \"음악 빼줘\"가 이것이다), "
+        "create_short_form(숏폼을 처음 만든다), remake_short_form(이미 있는 숏폼을 다시 만든다), "
+        "unfold_short_form(숏폼을 따로 편집할 수 있게 펼친다)뿐이다. 요청이 모호하거나 안전한 후보를 만들 수 없으면 proposal은 null로 둔다. "
         # 실사용(2026-09-01)으로 잡힌 결함: "3번째 장면을 빼줘"를 `remove_media`로
         # 읽어 그 장면에 깔아 둔 B-roll만 지웠다. 창작자가 뜻한 것은 장면 자체를
         # 완성본에서 빼는 것이었다. 한국어 "빼다"는 둘 다 되므로 어느 쪽인지를
@@ -498,6 +533,7 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         f"{_scene_transition_catalogue()} "
         f"{_caption_font_catalogue(context)} "
         f"{_image_overlay_catalogue(context)} "
+        f"{_short_form_catalogue(context)} "
         # 이 셋도 화면이 깔린 장면에만 걸 수 있다(색감과 같은 이유). 소리 정리는
         # 그 장면에 음악·효과음이 있어야 한다.
         "손떨림 보정·화면 노이즈는 set_picture_cleanup, 화면 맞춤·확대·위치·기울이기는 set_scene_transform이고 "
