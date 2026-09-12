@@ -1,5 +1,10 @@
 # 유진 채팅으로 숏폼 만들기·다시 만들기·펼치기가 실제로 된다 (2026-09-12 밤)
 
+**대체됨:** `2026-09-13-short-form-chat-and-render-done-reply-text-root-cause-found.ko.md`가
+렌더 배선까지 마치고, 이 문서의 §3에서 "고쳤다"고 적은 reply_text
+결함(`b5f3013b9`)이 사실은 **오진**이었다는 것까지 밝혔다. 최신 상태는
+그 문서를 봐라.
+
 앞 인계(`2026-09-12-title-band-closed-and-yujin-chat-backend-split-found.ko.md`)를
 잇는다. 그 인계가 찾아낸 문제 — "코드는 다 있는데 실제 화면 채팅은 완전히 다른
 백엔드(`yujin_editing_proposals.py`)를 쓰고 있어서 안 닿는다" — 를 이번 세션에
