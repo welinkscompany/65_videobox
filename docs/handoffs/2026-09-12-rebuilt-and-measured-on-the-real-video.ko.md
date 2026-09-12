@@ -175,6 +175,19 @@
   services/api/.../short_form_scenes.py
   ```
 
+  **세션이 끝난 뒤 내가 직접 확인한 상태(2026-09-12):**
+
+  - 새로 생긴 파일 넷 — `packages/core-engine/.../shorts_layout.py`,
+    `tests/test_shorts_layout.py`,
+    `apps/web/src/features/editor/variants/shortsTitleBand.{ts,test.ts}`
+  - `pytest tests/test_shorts_layout.py tests/test_yujin_creator_proposal_adapter.py`
+    -> **76 passed**
+  - `npx vitest run src/features/editor/variants/shortsTitleBand.test.ts` -> **3 passed**
+  - 합계 20개 파일 수정 + 4개 신규, `+763 / -55`
+
+  즉 **뼈대는 서 있고 시험도 초록이다.** 다만 **끝났다는 뜻은 아니다** -- 렌더러 결합,
+  화면 노출, 유진 배선이 어디까지 됐는지는 확인 안 했다.
+
   **먼저 `git diff`로 어디까지 됐는지 읽어라.** 완성 상태인지 중간 상태인지 모른다 —
   시험이 초록인지부터 확인하고(`.venv/Scripts/python.exe -m pytest`,
   `cd apps/web && npx vitest run`), 초록이면 이어받아 마무리하고, 깨져 있으면
