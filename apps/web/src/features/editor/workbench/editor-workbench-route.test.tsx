@@ -5232,11 +5232,19 @@ describe("숏폼 화면 정직성", () => {
       locks: [], conflicts: [], selected_segment_ids: ["seg-a"],
     };
     vi.spyOn(api, "listOutputVariants").mockResolvedValue({ variants: [highlight] } as never);
+    // **걸어 두고 물어본다**(2026-09-12). 유진이 대표님 영상 전 구간을 읽는 데
+    // 129.8초, 후보를 짜는 데 266.8초가 걸려서 한 요청으로는 서버 앞단이 끊는다.
     const repick = vi.spyOn(api, "repickShortFormScenes").mockResolvedValue({
-      variant: { ...highlight, variant_revision: 4, selected_segment_ids: ["seg-b"] },
-      scene_pick: {
-        judged_by: "yujin", notice: "유진이 전체 장면을 읽고 숏폼에 넣을 장면을 골랐어요.",
-        scenes_total: 3, scenes_read_by_yujin: 3,
+      job_id: "job-repick", status: "processing",
+    } as never);
+    const polled = vi.spyOn(api, "getShortFormRepickJob").mockResolvedValue({
+      job_id: "job-repick", status: "succeeded", error_detail: null,
+      result: {
+        variant: { ...highlight, variant_revision: 4, selected_segment_ids: ["seg-b"] },
+        scene_pick: {
+          judged_by: "yujin", notice: "유진이 전체 장면을 읽고 숏폼에 넣을 장면을 골랐어요.",
+          scenes_total: 3, scenes_read_by_yujin: 3,
+        },
       },
     } as never);
 
@@ -5246,11 +5254,12 @@ describe("숏폼 화면 정직성", () => {
     if (expand) fireEvent.click(expand);
     fireEvent.click(await screen.findByRole("button", { name: "숏폼 다시 만들기" }));
 
-    expect(await screen.findByText(/숏폼을 다시 만들었어요/)).toBeVisible();
+    expect(await screen.findByText(/숏폼을 다시 만들었어요/, undefined, { timeout: 8000 })).toBeVisible();
     // **새 모양을 만들지 않는다.** 만들려 하면 유일 제약에 걸려 500이 났다.
     expect(repick).toHaveBeenCalledWith("project-a", "variant-short", {
       expected_variant_revision: 3,
     });
+    expect(polled).toHaveBeenCalledWith("project-a", "variant-short", "job-repick");
   });
 
   it("채팅으로 고를 때 몇 장면 중 몇 개를 봤는지 말한다", () => {

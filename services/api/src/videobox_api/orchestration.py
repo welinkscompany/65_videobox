@@ -18,6 +18,7 @@ from videobox_core_engine.local_only_runtime import (
     LocalOnlyStructuredRuntime,
 )
 from videobox_core_engine.settings import LocalOpenAICompatibleRuntimeConfig
+from videobox_core_engine.short_form_scene_pick import BACKGROUND_BUDGET_SECONDS
 from videobox_provider_interfaces.local_qwen import LocalQwenHTTPTransport, LocalQwenStructuredProvider
 from videobox_provider_interfaces.llm import (
     LLMProviderError,
@@ -61,7 +62,14 @@ class LocalOnlyRuntimeService:
         prompt: str,
         response_schema: dict[str, Any],
         now: datetime | None = None,
+        wait_seconds: int | None = None,
     ) -> StructuredLLMResponse:
+        """`wait_seconds`는 이 한 호출만 기다리는 상한이다(없으면 설정값 30초).
+
+        숏폼 판단만 이 칸을 쓴다 -- 실측으로 한 호출이 130~267초라 전역 기본값에
+        통째로 끊겼다(2026-09-12). 전역값을 올리면 대화·자막처럼 짧아야 하는 일까지
+        같이 느려진다.
+        """
         del now
         try:
             return LocalOnlyStructuredRuntime(
@@ -72,6 +80,7 @@ class LocalOnlyRuntimeService:
                 task_type=task_type,
                 prompt=prompt,
                 response_schema=response_schema,
+                wait_seconds=wait_seconds,
             )
         except LocalOnlyStructuredGenerationError as exc:
             raise LocalOnlyRuntimeProviderError(
@@ -153,6 +162,14 @@ class ApiOrchestrator:
         # 같은 방식(메모리에만 둔 잡 딕셔너리)을 그대로 재사용한다.
         self._caption_translation_jobs: dict[str, dict[str, Any]] = {}
         self._caption_translation_jobs_lock = threading.Lock()
+        # 숏폼 장면 다시 고르기도 같은 이유로 비동기다(2026-09-12). 실측으로
+        # 훑기 129.8초 + 짜기 266.8초 = 약 400초라 nginx 330초 벽 안에서는 끝까지
+        # 기다릴 수가 없다. owner 결정은 "다른 모델 쓸 때는 잠시 기다리자"인데,
+        # 같은 요청 안에서 기다리면 대표님은 우리 문구 대신 프록시의 504 HTML을
+        # 본다. 더빙·자막 번역과 **같은 방식**(메모리에만 둔 잡 딕셔너리)이다 --
+        # 다시 눌러도 되는 일이라 재시작 사이 살아남을 큐를 새로 만들 값은 없다.
+        self._short_form_pick_jobs: dict[str, dict[str, Any]] = {}
+        self._short_form_pick_jobs_lock = threading.Lock()
 
     def create_creation_brief(self, **kwargs: Any) -> dict[str, Any]:
         return self.pipeline.create_creation_brief(runtime=self.creation_interview_runtime, **kwargs)
@@ -995,6 +1012,75 @@ class ApiOrchestrator:
                     "project_id": project_id, "status": "failed",
                     "result": None, "error_detail": safe_job_error_message(exc),
                 }
+
+    def start_short_form_pick(self, *, project_id: str) -> dict[str, Any]:
+        """숏폼 장면 다시 고르기를 **걸어만 두고** 돌아온다.
+
+        실측(2026-09-12, 대표님 영상 94장면): 훑기 129.8초 + 짜기 266.8초 = 약
+        400초. nginx가 330초에 끊으므로(`docker/workspace-nginx.conf`) 같은 요청
+        안에서는 유진을 끝까지 기다릴 수 없다. 더빙·자막 번역과 같은 이유다.
+        """
+        job_id = uuid4().hex
+        with self._short_form_pick_jobs_lock:
+            self._short_form_pick_jobs[job_id] = {
+                "project_id": project_id, "status": "processing", "result": None, "error_detail": None,
+            }
+        return {"job_id": job_id, "status": "processing"}
+
+    def run_short_form_pick_job(
+        self,
+        *,
+        project_id: str,
+        variant_id: str,
+        job_id: str,
+        runtime: Any,
+        expected_variant_revision: int,
+    ) -> None:
+        """백그라운드에서 실제로 판단한다. `BackgroundTasks`가 응답을 보낸 뒤 부른다.
+
+        **여기서만 `BACKGROUND_BUDGET_SECONDS`를 쓴다.** 프록시 벽이 없는 자리라
+        유진이 다 읽고 후보까지 짤 시간을 준다 -- 같은 요청 안에서 도는 자리(유진
+        채팅·처음 만들기)는 벽 아래 예산으로 돈다.
+        """
+        from videobox_api.short_form_scenes import remade_short_form_variant, scene_pick_payload
+
+        try:
+            current = self.store.get_output_variant(project_id=project_id, variant_id=variant_id)
+            updated, pick = remade_short_form_variant(
+                store=self.store,
+                project_id=project_id,
+                variant_row=current,
+                runtime=runtime,
+                expected_variant_revision=expected_variant_revision,
+                budget_seconds=BACKGROUND_BUDGET_SECONDS,
+            )
+            result = {
+                "variant": self.store.update_output_variant(
+                    project_id=project_id,
+                    variant_id=variant_id,
+                    expected_variant_revision=expected_variant_revision,
+                    variant=updated,
+                ),
+                "scene_pick": scene_pick_payload(pick),
+            }
+            with self._short_form_pick_jobs_lock:
+                self._short_form_pick_jobs[job_id] = {
+                    "project_id": project_id, "status": "succeeded",
+                    "result": result, "error_detail": None,
+                }
+        except Exception as exc:  # noqa: BLE001
+            with self._short_form_pick_jobs_lock:
+                self._short_form_pick_jobs[job_id] = {
+                    "project_id": project_id, "status": "failed",
+                    "result": None, "error_detail": safe_job_error_message(exc),
+                }
+
+    def get_short_form_pick_job(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        with self._short_form_pick_jobs_lock:
+            job = self._short_form_pick_jobs.get(job_id)
+        if job is None or job["project_id"] != project_id:
+            raise KeyError("short_form_pick_job_not_found")
+        return {"job_id": job_id, "status": job["status"], "result": job["result"], "error_detail": job["error_detail"]}
 
     def get_caption_translation_job(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         with self._caption_translation_jobs_lock:

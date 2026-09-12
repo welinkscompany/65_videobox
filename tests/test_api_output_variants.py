@@ -7,10 +7,18 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
-from videobox_api.orchestration import LocalOnlyRuntimeService
+from videobox_api.orchestration import (
+    LocalOnlyRuntimeService,
+    build_local_only_runtime_service,
+)
 from videobox_core_engine.settings import LocalOpenAICompatibleRuntimeConfig
+from videobox_core_engine.short_form_scene_pick import (
+    COMPOSE_WAIT_SECONDS,
+    SCAN_WAIT_SECONDS,
+)
 from videobox_provider_interfaces.llm import (
     LLMProviderError,
+    LLMTaskType,
     StructuredLLMRequest,
     StructuredLLMResponse,
 )
@@ -759,8 +767,10 @@ class _ChangingScenePickProvider:
     """
 
     sweeps: int = 0
+    calls: list[StructuredLLMRequest] = field(default_factory=list)
 
     def complete_structured(self, request: StructuredLLMRequest) -> StructuredLLMResponse:
+        self.calls.append(request)
         if "고를 대목:" in request.prompt:
             return _compose_answer(request.prompt)
         self.sweeps += 1
@@ -786,19 +796,35 @@ class _ChangingScenePickProvider:
         )
 
 
+def _repick(client: TestClient, project_id: str, variant: dict) -> dict:
+    """숏폼을 다시 고르라고 **걸어 두고** 결과를 받아 온다.
+
+    이 길은 2026-09-12부터 걸어 두고 물어보는 길이다(202 + 폴링) -- 실측으로 약
+    400초가 걸려 nginx 330초 벽 안에서는 한 요청으로 끝낼 수 없다. 시험이 이
+    도우미 한 자리를 쓰는 이유는 화면도 한 자리(`makeShortForm`)만 쓰기 때문이다.
+    """
+    started = client.post(
+        f"/api/projects/{project_id}/output-variants/{variant['variant_id']}/repick",
+        json={"expected_variant_revision": int(variant["variant_revision"])},
+    )
+    assert started.status_code == 202, started.text
+    job_id = started.json()["job_id"]
+    polled = client.get(
+        f"/api/projects/{project_id}/output-variants/{variant['variant_id']}/repick/{job_id}"
+    )
+    assert polled.status_code == 200, polled.text
+    body = polled.json()
+    assert body["status"] == "succeeded", body
+    return body["result"]
+
 def test_a_short_can_be_remade_and_yujin_judges_the_scenes_again(tmp_path: Path) -> None:
     """대표님이 숏폼을 **다시** 만들 수 있다. 유진이 판을 다시 읽고 목록을 갈아 끼운다."""
     provider = _ChangingScenePickProvider()
     app, client, project_id, session, variant = _short_form_project(tmp_path, provider=provider)
     assert variant["selected_segment_ids"] == ["seg-close"]
 
-    response = client.post(
-        f"/api/projects/{project_id}/output-variants/{variant['variant_id']}/repick",
-        json={"expected_variant_revision": int(variant["variant_revision"])},
-    )
+    body = _repick(client, project_id, variant)
 
-    assert response.status_code == 200, response.text
-    body = response.json()
     assert body["variant"]["selected_segment_ids"] == ["seg-middle"]
     assert body["variant"]["variant_revision"] == int(variant["variant_revision"]) + 1
     assert body["scene_pick"]["judged_by"] == "yujin"
@@ -823,13 +849,8 @@ def test_remaking_a_short_that_lands_on_the_same_scenes_still_succeeds(tmp_path:
     app, client, project_id, session, variant = _short_form_project(tmp_path)
     before = list(variant["selected_segment_ids"] or [])
 
-    response = client.post(
-        f"/api/projects/{project_id}/output-variants/{variant['variant_id']}/repick",
-        json={"expected_variant_revision": int(variant["variant_revision"])},
-    )
+    body = _repick(client, project_id, variant)
 
-    assert response.status_code == 200, response.text
-    body = response.json()
     assert body["variant"]["selected_segment_ids"] == before
     assert body["variant"]["variant_revision"] == int(variant["variant_revision"]) + 1
     assert body["scene_pick"]["judged_by"] == "caption_density"
@@ -989,3 +1010,104 @@ def test_the_short_form_is_judged_from_the_transcript_and_its_reason_reaches_the
         == "대놓고 솔직한 한마디라 남에게 보내고 싶어져요"
     )
     assert "뭐하러 알려" in "\n".join(call.prompt for call in provider.calls)
+
+
+def test_the_longer_wait_reaches_the_socket_not_just_the_engine(tmp_path: Path) -> None:
+    """**기다리기가 실제로 기다림이 되는지.**
+
+    상한은 `LocalQwenHTTPTransport`가 만들 때 한 번 박히고 소켓까지 내려간다.
+    그래서 엔진이 "150초 기다릴게"라고 말해도 그 값이 소켓에 닿지 않으면 호출은
+    여전히 30초에 끊긴다 -- 재지 않으면 못 볼 자리다(2026-09-12 실측: 30초
+    상한에서 대표님 영상의 묶음 여섯 중 넷이 끊겼다).
+    """
+    del tmp_path
+    seen: list[int] = []
+
+    class _Recording:
+        def __call__(self, request: object, timeout: int | None = None):
+            seen.append(int(timeout or 0))
+            raise LLMProviderError(
+                provider_name="local_qwen", message="여기까지만 본다", error_code="stop"
+            )
+
+    service = build_local_only_runtime_service(
+        store=None,  # type: ignore[arg-type]
+        local_runtime_config=LocalOpenAICompatibleRuntimeConfig(
+            enabled=True,
+            base_url="http://127.0.0.1:1234/v1",
+            model_name="Qwen3-32B",
+            timeout_seconds=30,
+        ),
+        local_http_client=_Recording(),
+    )
+
+    try:
+        service.generate_structured(
+            project_id="proj-1",
+            task_type=LLMTaskType.SHORT_FORM_SCENE_PICK,
+            prompt="아무 말",
+            response_schema={"type": "object", "properties": {"a": {"type": "string"}}},
+            wait_seconds=SCAN_WAIT_SECONDS,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+    assert seen == [SCAN_WAIT_SECONDS], seen
+
+
+def test_the_screen_waits_for_yujin_in_the_background_instead_of_hitting_the_proxy_wall(
+    tmp_path: Path,
+) -> None:
+    """숏폼 다시 만들기는 **걸어 두고 물어보는** 일이다.
+
+    실측(2026-09-12, 대표님 영상 94장면): 훑기 129.8초 + 짜기 266.8초 = 약 400초.
+    nginx는 330초에 끊는다(`docker/workspace-nginx.conf`) -- 같은 요청 안에서는
+    끝까지 기다릴 수가 없고, 끊기면 대표님은 우리 한국말 대신 프록시의 504 HTML을
+    본다. 더빙·자막 번역이 같은 이유로 이미 이 모양이다.
+    """
+    provider = _ChangingScenePickProvider()
+    app, client, project_id, session, variant = _short_form_project(tmp_path, provider=provider)
+
+    started = client.post(
+        f"/api/projects/{project_id}/output-variants/{variant['variant_id']}/repick",
+        json={"expected_variant_revision": int(variant["variant_revision"])},
+    )
+
+    assert started.status_code == 202, started.text
+    job_id = started.json()["job_id"]
+    assert started.json()["status"] == "processing"
+
+    polled = client.get(
+        f"/api/projects/{project_id}/output-variants/{variant['variant_id']}/repick/{job_id}"
+    )
+    assert polled.status_code == 200, polled.text
+    body = polled.json()
+    assert body["status"] == "succeeded", body
+    assert body["result"]["variant"]["selected_segment_ids"] == ["seg-middle"]
+    assert body["result"]["scene_pick"]["judged_by"] == "yujin"
+    # 뒤에서 도니까 짜기에 **꽉 찬 상한**을 줄 수 있다. 같은 요청 안에서 돌면
+    # 예산이 이 값을 깎는다.
+    compose_calls = [call for call in provider.calls if "고를 대목:" in call.prompt]
+    assert compose_calls, "짜기를 안 불렀으면 퍼질 이유가 안 나온다"
+    assert compose_calls[-1].provider_context["timeout_seconds"] == COMPOSE_WAIT_SECONDS
+    # 저장된 값까지 본다. 응답만 보면 화면이 받은 것과 저장된 것이 갈릴 수 있다.
+    stored = app.state.store.get_output_variant(
+        project_id=project_id, variant_id=variant["variant_id"]
+    )
+    assert stored["selected_segment_ids"] == ["seg-middle"]
+
+
+def test_a_stale_revision_is_refused_before_yujin_is_ever_called(tmp_path: Path) -> None:
+    """걸어 두기 **전에** 막는다. 400초를 기다린 뒤에 알리지 않는다."""
+    provider = _ChangingScenePickProvider()
+    app, client, project_id, session, variant = _short_form_project(tmp_path, provider=provider)
+    del app, session
+    calls_before = len(provider.calls)
+
+    response = client.post(
+        f"/api/projects/{project_id}/output-variants/{variant['variant_id']}/repick",
+        json={"expected_variant_revision": int(variant["variant_revision"]) + 5},
+    )
+
+    assert response.status_code == 409, response.text
+    assert len(provider.calls) == calls_before, "막을 요청에 유진을 불렀다"

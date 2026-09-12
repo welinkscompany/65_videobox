@@ -38,6 +38,7 @@ from videobox_core_engine.output_variants import (
     output_variant_from_row,
 )
 from videobox_core_engine.short_form_scene_pick import (
+    SYNCHRONOUS_BUDGET_SECONDS,
     ShortFormScenePick,
     pick_short_form_scenes,
 )
@@ -70,8 +71,12 @@ def short_form_scene_pick(
     project_id: str,
     session_id: str,
     runtime: Any | None,
+    budget_seconds: float = SYNCHRONOUS_BUDGET_SECONDS,
 ) -> ShortFormScenePick:
     """편집본을 읽어 숏폼을 고른다. 누가 골랐는지와 왜 퍼질지도 함께 돌려준다.
+
+    `budget_seconds` 기본값은 **같은 요청 안에서 도는 쪽**의 예산이다(프록시
+    330초 벽 아래). 뒤에서 도는 `다시 만들기`만 `BACKGROUND_BUDGET_SECONDS`를 준다.
 
     저장소에는 런타임이 없어서 고르는 일은 저장소 밖에서 한다(2026-09-11).
 
@@ -95,6 +100,7 @@ def short_form_scene_pick(
         project_id=project_id,
         runtime=runtime,
         utterances=utterances or None,
+        budget_seconds=budget_seconds,
     )
 
 
@@ -105,6 +111,7 @@ def remade_short_form_variant(
     variant_row: Mapping[str, object],
     runtime: Any | None,
     expected_variant_revision: int | None = None,
+    budget_seconds: float = SYNCHRONOUS_BUDGET_SECONDS,
 ) -> tuple[OutputVariant, ShortFormScenePick]:
     """숏폼 장면을 다시 판단해 갈아 끼운 모양을 돌려준다. **저장은 부르는 쪽이 한다.**
 
@@ -129,6 +136,7 @@ def remade_short_form_variant(
         project_id=project_id,
         session_id=variant.source_session_id,
         runtime=runtime,
+        budget_seconds=budget_seconds,
     )
     if not pick.segment_ids:
         # 고를 장면이 하나도 없으면 목록을 비우지 않는다. 빈 목록은

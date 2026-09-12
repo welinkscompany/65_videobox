@@ -11,13 +11,19 @@
 from __future__ import annotations
 
 import json
+import logging
+import threading
 
 import pytest
 
 from videobox_core_engine.short_form_scene_pick import (
+    BACKGROUND_BUDGET_SECONDS,
+    COMPOSE_MIN_WAIT_SECONDS,
     JUDGE_BATCH_SIZE,
     MAX_JUDGED_SCENES,
     MAX_SCAN_CALLS,
+    SCAN_WAIT_SECONDS,
+    SYNCHRONOUS_BUDGET_SECONDS,
     pick_short_form_scenes,
 )
 from videobox_provider_interfaces.llm import LLMProviderError, StructuredLLMResponse
@@ -34,7 +40,7 @@ class _JudgeRuntime:
         self._raise_error = raise_error
         self.prompts: list[str] = []
 
-    def generate_structured(self, *, project_id, task_type, prompt, response_schema):
+    def generate_structured(self, *, project_id, task_type, prompt, response_schema, wait_seconds=None):
         if self._raise_error is not None:
             self.prompts.append(prompt)
             raise self._raise_error
@@ -216,7 +222,7 @@ def test_a_broken_answer_is_not_dressed_up_as_yujins_choice() -> None:
         def __init__(self) -> None:
             self.prompts: list[str] = []
 
-        def generate_structured(self, *, project_id, task_type, prompt, response_schema):
+        def generate_structured(self, *, project_id, task_type, prompt, response_schema, wait_seconds=None):
             self.prompts.append(prompt)
             return StructuredLLMResponse(
                 provider_name="local_qwen",
@@ -239,7 +245,7 @@ def test_out_of_range_scene_numbers_are_dropped_not_guessed() -> None:
     ]
 
     class _OutOfRangeRuntime:
-        def generate_structured(self, *, project_id, task_type, prompt, response_schema):
+        def generate_structured(self, *, project_id, task_type, prompt, response_schema, wait_seconds=None):
             output = {
                 "schema_version": "videobox.short-form-scene-pick.v1",
                 "picks": [{"scene": 1, "worth": 5, "why": "conclusion"}, {"scene": 99, "worth": 5, "why": "hook"}],
@@ -381,7 +387,7 @@ def test_a_failed_batch_is_not_described_as_a_shortlist() -> None:
         def __init__(self) -> None:
             self.calls = 0
 
-        def generate_structured(self, *, project_id, task_type, prompt, response_schema):
+        def generate_structured(self, *, project_id, task_type, prompt, response_schema, wait_seconds=None):
             self.calls += 1
             if self.calls == 1:
                 raise LLMProviderError(provider_name="local_qwen", message="한 묶음 실패")
@@ -439,7 +445,7 @@ class _SpreadRuntime:
             rows.append((int(number_text), rest))
         return rows
 
-    def generate_structured(self, *, project_id, task_type, prompt, response_schema):
+    def generate_structured(self, *, project_id, task_type, prompt, response_schema, wait_seconds=None):
         if "고를 대목:" in prompt:
             self.compose_prompts.append(prompt)
             rows = self._lines(prompt, "고를 대목:")
@@ -642,3 +648,264 @@ def test_a_short_is_still_cut_when_the_project_has_no_transcript() -> None:
     assert result.segment_ids == ("seg-1",)
     assert result.judged_by == "yujin"
     assert "장면 자막" in result.notice
+
+
+class _FakeClock:
+    """가짜 벽시계.
+
+    **더하지 않고 `max`로 민다.** 동시에 도는 호출 둘이 각자 150초를 쓰면 벽시계는
+    150초를 지나는 것이지 300초가 아니다 -- 더하면 이 시험이 동시에 묻는 이득을
+    못 보고 예산을 두 배로 세게 된다.
+    """
+
+    def __init__(self) -> None:
+        self._now = 0.0
+        self._lock = threading.Lock()
+
+    def __call__(self) -> float:
+        return self._now
+
+    def reach(self, moment: float) -> None:
+        with self._lock:
+            self._now = max(self._now, moment)
+
+
+class _WaitingRuntime:
+    """호출마다 **실제로 기다리는** 가짜 유진. 시계는 가짜다.
+
+    2026-09-12 실물이 가르쳐 준 것: 훑기 한 호출이 26~130초, 짜기 한 호출이
+    267초다(대표님 기계에 모델 둘이 올라가 있어 초당 1~2낱말). 30초 상한으로는
+    전부 끊긴다. 이 대역이 그 모양을 시험에 들여온다 -- 받은 상한만큼 가짜 시계를
+    밀고, 상한보다 오래 걸리는 호출은 `LLMProviderError`를 던진다.
+    """
+
+    def __init__(self, *, scan_needs: float, compose_needs: float, clock: _FakeClock) -> None:
+        self._scan_needs = scan_needs
+        self._compose_needs = compose_needs
+        self._clock = clock
+        self.waits: list[tuple[str, int]] = []
+        self.in_flight = 0
+        self.max_in_flight = 0
+        self._lock = threading.Lock()
+        # 묶음 둘이 **동시에** 여기 있는지 실제로 확인한다. 차례로 부르면 둘째가
+        # 첫째를 기다리므로 이 문이 5초에 깨진다.
+        self._gate = threading.Barrier(2, timeout=5)
+
+    def generate_structured(
+        self, *, project_id, task_type, prompt, response_schema, wait_seconds=None
+    ):
+        stage = "compose" if "고를 대목:" in prompt else "scan"
+        entered_at = self._clock()
+        with self._lock:
+            self.waits.append((stage, int(wait_seconds or 0)))
+            self.in_flight += 1
+            self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        try:
+            if stage == "scan":
+                try:
+                    self._gate.wait()
+                except threading.BrokenBarrierError:
+                    pass
+            needs = self._scan_needs if stage == "scan" else self._compose_needs
+            allowed = float(wait_seconds or 0)
+            self._clock.reach(entered_at + min(needs, allowed))
+            if needs > allowed:
+                raise LLMProviderError(
+                    provider_name="local_qwen",
+                    message="Local Qwen request timed out.",
+                    retryable=True,
+                    error_code="LOCAL_TIMEOUT",
+                )
+            if stage == "compose":
+                rows = _SpreadRuntime._lines(prompt, "고를 대목:")
+                output = {
+                    "thinking": "생각",
+                    "candidates": [
+                        {"lines": [number for number, _ in rows], "reason": "퍼질 이유"}
+                    ],
+                    "chosen": 1,
+                    "schema_version": "videobox.short-form-compose.v1",
+                }
+            else:
+                output = {
+                    "schema_version": "videobox.short-form-spread-scan.v1",
+                    "picks": [
+                        {"scene": number, "worth": 5}
+                        for number, _ in _SpreadRuntime._lines(prompt, "고를 장면:")
+                    ],
+                }
+            return StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="qwen/qwen3.8-27b",
+                output_data=output,
+                raw_text=json.dumps(output, ensure_ascii=False),
+                metadata={},
+            )
+        finally:
+            with self._lock:
+                self.in_flight -= 1
+
+
+def _two_batch_board():
+    """묶음 둘이 나오는 판(대목 아홉 = 8 + 1)."""
+
+    board = _board(18, scene_sec=5.0)
+    utterances = [
+        {"start_sec": float(index) * 5.0, "end_sec": float(index + 1) * 5.0, "text": f"{index}번 퍼질 말"}
+        for index in range(18)
+    ]
+    return board, utterances
+
+
+def test_the_log_says_whether_each_batch_answered_or_never_came_back(caplog) -> None:
+    """**"못 찾았다"와 "못 물어봤다"를 로그로 가른다.**
+
+    기록된 사고: 유진이 "없다"고 할 때 후보가 안 간 것인지 갔는데 못 고른 것인지
+    가릴 로그가 없어 네 겹을 헛돌았다. 실물에서도 똑같이 걸렸다 -- 묶음 여섯 중
+    넷이 시간 초과했는데 문구는 "유진이 읽어 봤지만 못 찾아서"라고 말했다(2026-09-12).
+    """
+
+    board, utterances = _two_batch_board()
+    clock = _FakeClock()
+    runtime = _WaitingRuntime(scan_needs=10.0, compose_needs=10.0, clock=clock)
+
+    with caplog.at_level(logging.INFO, logger="videobox_core_engine.short_form_scene_pick"):
+        pick_short_form_scenes(
+            board, project_id="proj-1", runtime=runtime, utterances=utterances, clock=clock
+        )
+
+    text = caplog.text
+    assert "훑기 묶음 1/2" in text, "어느 묶음이 어떻게 됐는지 로그가 말해야 한다"
+    assert "훑기 묶음 2/2" in text
+    assert "고른 대목" in text, "유진이 무엇을 돌려줬는지 로그에 있어야 한다"
+    assert "짜기" in text
+    assert "묶음 2/2 답함" in text, "몇 묶음이 답했는지 한 줄로 요약해야 한다"
+
+
+def test_the_log_names_the_reason_a_batch_never_answered(caplog) -> None:
+    """시간 초과는 **시간 초과로** 로그에 남아야 한다. 조용히 넘기면 실물에서
+    무엇이 막혔는지 아무도 모른다."""
+
+    board, utterances = _two_batch_board()
+    clock = _FakeClock()
+    # 필요한 시간이 상한보다 길다 -- 두 묶음 다 끊긴다.
+    runtime = _WaitingRuntime(scan_needs=SCAN_WAIT_SECONDS + 10.0, compose_needs=10.0, clock=clock)
+
+    with caplog.at_level(logging.INFO, logger="videobox_core_engine.short_form_scene_pick"):
+        result = pick_short_form_scenes(
+            board, project_id="proj-1", runtime=runtime, utterances=utterances, clock=clock
+        )
+
+    assert result.fallback_reason == "yujin_unavailable"
+    assert "LOCAL_TIMEOUT" in caplog.text, "무엇 때문에 못 받았는지 로그가 말해야 한다"
+
+
+def test_the_found_nothing_notice_says_how_much_yujin_actually_read() -> None:
+    """**문구와 숫자가 어긋나면 안 된다.**
+
+    2026-09-12 실물: 문구는 "유진이 읽어 봤지만"인데 `scenes_read_by_yujin`은 0이었다.
+    이 기능의 정직성 계약은 "누가 골랐는지·얼마나 읽었는지를 속이지 않는다"이고,
+    읽지 않았는데 읽었다고 말하는 것은 반대 방향으로 그 계약을 깬다.
+    """
+
+    runtime = _SpreadRuntime(spreads=lambda text: False)
+
+    result = pick_short_form_scenes(
+        _board(6), project_id="proj-1", runtime=runtime, utterances=_owner_shaped_utterances()
+    )
+
+    assert result.judged_by == "caption_density"
+    assert result.fallback_reason == "yujin_found_nothing"
+    assert "읽어" in result.notice, "읽고 못 찾은 것과 못 물어본 것은 다르다"
+    assert result.scenes_read_by_yujin > 0, "읽었다고 말했으면 숫자도 읽은 것이어야 한다"
+    assert f"{result.scenes_read_by_yujin}개" in result.notice
+
+
+def test_a_notice_that_names_yujin_reading_never_comes_with_a_zero_count() -> None:
+    """반대 방향도 막는다. 아무것도 못 읽었으면 읽었다고 쓰지 않는다."""
+
+    for spreads in (lambda text: False, lambda text: True):
+        runtime = _SpreadRuntime(spreads=spreads)
+        result = pick_short_form_scenes(
+            _board(6), project_id="proj-1", runtime=runtime, utterances=_owner_shaped_utterances()
+        )
+        if any(word in result.notice for word in ("읽어", "읽고", "읽었")):
+            assert result.scenes_read_by_yujin > 0, result.notice
+
+
+def test_the_batches_are_read_at_the_same_time_so_each_one_can_wait_longer() -> None:
+    """**기다리기를 프록시 벽 안에 넣는 방법.**
+
+    실측(2026-09-12, 대표님 영상): 훑기 한 호출이 26~130초다. 차례로 부르면
+    여섯 묶음이 최악 780초가 되어 nginx 330초 벽을 넘는다. 동시에 부르면
+    벽시계가 **가장 느린 한 호출**이 된다(실측 129.8초, 여섯 묶음 다 답함).
+    """
+
+    board, utterances = _two_batch_board()
+    clock = _FakeClock()
+    runtime = _WaitingRuntime(scan_needs=20.0, compose_needs=20.0, clock=clock)
+
+    pick_short_form_scenes(
+        board, project_id="proj-1", runtime=runtime, utterances=utterances, clock=clock
+    )
+
+    assert runtime.max_in_flight >= 2, "묶음을 차례로 부르면 기다릴 시간이 안 남는다"
+    scan_waits = [wait for stage, wait in runtime.waits if stage == "scan"]
+    assert scan_waits and all(wait == SCAN_WAIT_SECONDS for wait in scan_waits), scan_waits
+    assert any(stage == "compose" for stage, _ in runtime.waits)
+
+
+def test_the_judgement_stops_before_the_proxy_cuts_the_owner_off() -> None:
+    """같은 요청 안에서 도는 부르는 쪽(유진 채팅·처음 만들기)은 예산을 넘지 않는다.
+
+    넘기면 대표님은 우리 한국말 대신 nginx의 504 HTML을 본다 -- 제품이 고장 난
+    것으로 보인다. 그래서 짜기를 시작할 시간이 없으면 **시작하지 않고** 그 사실을
+    문구로 말한다(인포그래픽의 `TOTAL_BUDGET_SECONDS`와 같은 방식).
+    """
+
+    board, utterances = _two_batch_board()
+    clock = _FakeClock()
+    # 훑기가 예산을 거의 다 쓴다 -- 짜기를 시작할 자리가 없다.
+    budget = float(SCAN_WAIT_SECONDS) + COMPOSE_MIN_WAIT_SECONDS - 10.0
+    runtime = _WaitingRuntime(
+        scan_needs=float(SCAN_WAIT_SECONDS), compose_needs=10.0, clock=clock
+    )
+
+    result = pick_short_form_scenes(
+        board,
+        project_id="proj-1",
+        runtime=runtime,
+        utterances=utterances,
+        clock=clock,
+        budget_seconds=budget,
+    )
+
+    assert clock() <= budget, clock()
+    assert not any(stage == "compose" for stage, _ in runtime.waits), "예산이 없으면 짜기를 시작하지 않는다"
+    assert result.spread_reason is None
+    assert "퍼질 이유는 남기지 못했어요" in result.notice
+
+
+def test_the_background_budget_lets_yujin_wait_longer_than_one_request_can() -> None:
+    """화면의 `다시 만들기`는 뒤에서 돌아 프록시 벽이 없다 -- 그래서 더 기다린다.
+
+    실측(2026-09-12): 훑기 129.8초 + 짜기 266.8초 = 약 400초. **한 요청 안에서는
+    절대 안 끝난다**(330초 벽). 뒤에서 돌면 끝난다.
+    """
+
+    board, utterances = _two_batch_board()
+    clock = _FakeClock()
+    runtime = _WaitingRuntime(scan_needs=130.0, compose_needs=267.0, clock=clock)
+
+    result = pick_short_form_scenes(
+        board,
+        project_id="proj-1",
+        runtime=runtime,
+        utterances=utterances,
+        clock=clock,
+        budget_seconds=BACKGROUND_BUDGET_SECONDS,
+    )
+
+    assert result.judged_by == "yujin"
+    assert result.spread_reason == "퍼질 이유", "뒤에서 돌면 왜 퍼질지가 살아 온다"
+    assert clock() > 330, "한 요청 안에서는 못 끝내는 일이라는 것이 이 시험의 뜻이다"

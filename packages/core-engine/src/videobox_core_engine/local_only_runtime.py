@@ -39,7 +39,14 @@ class LocalOnlyStructuredRuntime:
         task_type: LLMTaskType,
         prompt: str,
         response_schema: dict[str, Any],
+        wait_seconds: int | None = None,
     ) -> StructuredLLMResponse:
+        """`wait_seconds`는 **이 한 호출만** 기다리는 상한이다(없으면 설정값).
+
+        전역 기본값은 화면 응답성 때문에 30초인데, 숏폼 판단은 실측으로 한 호출이
+        130~267초다(2026-09-12). 전역값을 올리면 대화·자막 같은 짧은 일까지 느려
+        보이게 되므로, **오래 걸리는 일만** 자기 상한을 들고 온다.
+        """
         del project_id
         if not self.local_runtime_config.enabled:
             raise LocalOnlyStructuredGenerationError(
@@ -62,6 +69,11 @@ class LocalOnlyStructuredRuntime:
                         "model_name": self.local_runtime_config.model_name,
                         "routing_policy": "local_only",
                         "task_type": task_type.value,
+                        "timeout_seconds": (
+                            int(wait_seconds)
+                            if wait_seconds
+                            else self.local_runtime_config.timeout_seconds
+                        ),
                     },
                 )
             )

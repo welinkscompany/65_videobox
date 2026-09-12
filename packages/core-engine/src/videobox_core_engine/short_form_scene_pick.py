@@ -31,13 +31,40 @@ llm 이 구분 하도록 생각하면서 만들어야지."
 `MAX_JUDGED_PASSAGES`개를 넘으면 짧은 대목끼리 합쳐 줄인다. 버리지 않고 굵게 만든다.
 그래서 **영상의 어느 구간도 유진 눈에서 빠지지 않는다.**
 
-### 부르는 횟수 예산 (330초 프록시 벽)
+### 기다리기 -- 30초 상한이 이 기능을 통째로 못 쓰게 만들고 있었다 (2026-09-12 정정)
 
-훑기 `MAX_SCAN_CALLS`회 + 짜기 1회 = **최대 7회**. 여기가 핵심인데, 로컬 런타임의
-요청 상한이 30초(`LocalOpenAICompatibleRuntimeConfig.timeout_seconds`)이므로
-**느린 호출은 90초짜리가 되는 게 아니라 30초에 끊긴다.** 그래서 벽시계 상한이
-7 x 30 = **210초로 못박히고**, 기계가 얼마나 바쁘든 330초를 넘을 수 없다.
-2026-09-12 실측(호출당 약 25초)으로는 약 175초다.
+**첫 판(같은 날 아침)의 예산 계산이 틀렸다.** "훑기 6회 + 짜기 1회, 한 호출 30초
+상한이니 벽시계 210초"는 산수로는 맞지만, **30초 안에 답이 오지 않는다**는 것을
+안 재고 세운 계산이었다. 대표님 실제 영상(94장면·발화 213개)으로 컨테이너에서
+호출마다 재 보니 이렇다.
+
+| 무엇 | 실측 |
+|---|---|
+| 훑기 한 호출 (차례로, 상한 30초) | 여섯 중 **넷이 30.0초에 끊겼다.** 30초 안에 온 둘은 고른 대목이 1개·0개 |
+| 훑기 한 호출 (넉넉한 상한) | 34.8 / 56.9 / 79.3 / 105.2 / 111.8 / 129.8초 -- **여섯 다 답하고** 대목마다 4~5점 |
+| 짜기 한 호출 (넉넉한 상한) | **266.8초.** 후보 3개와 이유 셋이 제대로 왔다 |
+
+왜 이렇게 느린가: 대표님 기계에 다른 프로젝트의 모델이 같이 올라가 있어 32GB 카드에
+45GB를 올리려 하고, 그래서 초당 1~2낱말로 떨어진다. owner 결정(2026-09-12)은
+**"다른모댈 쓸데는 잠시 기다리자"** -- 기다린다.
+
+그런데 상한만 올리면 프록시가 끊는다(`docker/workspace-nginx.conf` 330초). 그래서 둘이다.
+
+1. **묶음을 동시에 묻는다.** 차례로 부르면 여섯 묶음이 최악 780초지만, 동시에
+   부르면 벽시계가 **가장 느린 한 호출**이 된다(실측 129.8초, 여섯 다 답함).
+2. **예산을 시계로 지킨다.** 같은 요청 안에서 도는 부르는 쪽(유진 채팅·처음
+   만들기)은 `SYNCHRONOUS_BUDGET_SECONDS`를 넘지 않는다 -- 짜기를 시작할 시간이
+   없으면 시작하지 않고 그 사실을 문구로 말한다(인포그래픽의 `TOTAL_BUDGET_SECONDS`와
+   같은 방식). 화면의 `다시 만들기`는 **뒤에서 돌기** 때문에 벽이 없어
+   `BACKGROUND_BUDGET_SECONDS`까지 기다린다 -- 훑기 130 + 짜기 267 = 약 400초는
+   한 요청 안에서 절대 못 끝내는 일이다.
+
+### 로그 -- "못 찾았다"와 "못 물어봤다"는 다른 원인이다
+
+첫 판은 시간 초과한 묶음을 조용히 넘겼다. 그래서 여섯 중 넷이 끊겼는데도 화면
+문구는 "유진이 읽어 봤지만 못 찾아서"라고 말했다. 기록된 사고와 같은 자리다 --
+유진이 "없다"고 할 때 **무엇을 받고 무엇을 돌려줬는지**를 남겨야 한다. 이제 묶음
+하나하나가 로그에 남는다(몇 초 걸렸는지·무엇을 골랐는지·왜 못 받았는지).
 
 ### 생각할 여지
 
@@ -56,9 +83,12 @@ llm 이 구분 하도록 생각하면서 만들어야지."
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import json
+import logging
+import time
 from typing import Any, Literal
 
 from videobox_core_engine.highlight_scoring import (
@@ -66,6 +96,8 @@ from videobox_core_engine.highlight_scoring import (
     target_duration_sec,
 )
 from videobox_provider_interfaces.llm import LLMProviderError, LLMTaskType
+
+_LOGGER = logging.getLogger(__name__)
 
 #: 한 번에 보내는 대목 수. **12가 아니라 8인 것은 실측 때문이다**(2026-09-12).
 #: 옛 값 12는 장면 자막 12개(대표님 판에서 약 64초 분량의 말)를 기준으로 정해졌는데,
@@ -85,6 +117,24 @@ SHORT_FORM_MIN_TARGET_SEC = 20.0
 SHORT_FORM_MAX_TARGET_SEC = 60.0
 #: 유진에게 짜 보라고 할 후보 숏폼 수.
 COMPOSE_CANDIDATES = 3
+
+#: 훑기 한 호출을 기다리는 상한. **실측으로 정했다**(2026-09-12, 대표님 영상):
+#: 넉넉한 상한을 주면 묶음이 34.8~129.8초에 답한다. 30초로는 여섯 중 넷이 끊겼다.
+#: 묶음을 동시에 묻기 때문에 이 값이 훑기 단계의 벽시계 상한이기도 하다.
+SCAN_WAIT_SECONDS = 150
+#: 짜기 한 호출을 기다리는 상한. 실측 266.8초라 여유를 조금 얹었다.
+COMPOSE_WAIT_SECONDS = 330
+#: 짜기를 아예 시작해 볼 최소 남은 시간. 이보다 적으면 시작하지 않는다 -- 시작해서
+#: 끊기면 기다린 시간만 버리고 결과는 같다.
+COMPOSE_MIN_WAIT_SECONDS = 30
+#: **같은 요청 안에서** 끝내야 하는 부르는 쪽의 예산(유진 채팅·처음 만들기).
+#: nginx가 330초에 끊는다(`docker/workspace-nginx.conf`) -- 넘기면 대표님은 우리
+#: 한국말 대신 프록시의 504 HTML을 본다. 인포그래픽의 `TOTAL_BUDGET_SECONDS`와
+#: 같은 자리이고 `tests/test_compose_contract.py`가 두 값을 맞대 본다.
+SYNCHRONOUS_BUDGET_SECONDS = 300
+#: 화면의 `다시 만들기`는 뒤에서 돌기 때문에 프록시 벽이 없다. 실측(훑기 130 +
+#: 짜기 267 = 약 400초)이 이 값을 요구한다 -- 한 요청 안에서는 못 끝내는 일이다.
+BACKGROUND_BUDGET_SECONDS = 900
 
 #: 예전 이름. 부르는 자리와 시험이 쓰고 있어 남겨 둔다.
 MAX_JUDGED_SCENES = MAX_JUDGED_PASSAGES
@@ -557,7 +607,14 @@ def _density_pick(
     reason: str,
     notice: str,
     max_target_sec: float,
+    scenes_read: int = 0,
 ) -> ShortFormScenePick:
+    """자막 밀도로 내려간 결과.
+
+    `scenes_read`가 **0으로 박혀 있었던 것이 2026-09-12 실물 결함이다** -- 문구는
+    "유진이 읽어 봤지만 못 찾아서"라고 말하는데 `scenes_read_by_yujin`은 0이어서
+    둘이 서로를 부정했다. 읽은 만큼을 받아서 문구와 숫자를 한 쌍으로 맞춘다.
+    """
     segment_ids = _clamp_to_max_sec(
         ordered,
         select_highlight_segment_ids(ordered, max_target_sec=max_target_sec),
@@ -576,7 +633,7 @@ def _density_pick(
         judged_by="caption_density",
         notice=notice,
         scenes_total=len(ordered),
-        scenes_read_by_yujin=0,
+        scenes_read_by_yujin=scenes_read,
         fallback_reason=reason,
     )
 
@@ -585,6 +642,80 @@ _YUJIN_OFF_NOTICE = (
     "유진이 지금 도와줄 수 없어서, 자막이 많은 장면 위주로 골랐어요. "
     "마음에 안 들면 전체 장면으로 되돌릴 수 있어요."
 )
+
+
+def _found_nothing_notice(*, scenes_total: int, scenes_read: int) -> str:
+    """읽고 못 찾았을 때의 문구. **읽은 숫자가 문구 안에 들어간다.**
+
+    읽은 것이 0이면 "읽어 봤지만"이라고 쓰지 않는다 -- 그건 거짓이고, 실물에서
+    실제로 그렇게 나갔다(2026-09-12).
+    """
+    if scenes_read <= 0:
+        return _YUJIN_OFF_NOTICE
+    return (
+        f"유진이 장면 {scenes_total}개 중 {scenes_read}개를 읽어 봤지만 숏폼에 넣을 만한 "
+        "대목을 못 찾아서, 자막이 많은 장면 위주로 골랐어요. "
+        "마음에 안 들면 전체 장면으로 되돌릴 수 있어요."
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class _ScanOutcome:
+    """훑기 묶음 하나의 결과. **답했는지와 무엇을 골랐는지를 따로 들고 다닌다** --
+    둘을 하나로 뭉개면 "못 찾았다"와 "못 물어봤다"가 구분되지 않는다."""
+
+    start: int
+    picks: tuple[tuple[int, int], ...] = ()
+    answered: bool = False
+    unusable: bool = False
+
+
+def _scan_one_batch(
+    runtime: object,
+    *,
+    project_id: str,
+    batch: Sequence[_Passage],
+    start: int,
+    number: int,
+    total: int,
+    wait_seconds: int,
+    clock: Callable[[], float],
+) -> _ScanOutcome:
+    """묶음 하나를 유진에게 묻고 **무슨 일이 있었는지 로그에 남긴다.**"""
+
+    # 프롬프트는 **try 밖에서** 만든다. 안에서 만들면 여기서 난 우리 실수가
+    # "유진이 바쁘다"로 둔갑한다(2026-09-02 자막 번역에서 실제로 겪었다).
+    prompt = _scan_prompt(batch)
+    started = clock()
+    try:
+        response = runtime.generate_structured(  # type: ignore[attr-defined]
+            project_id=project_id,
+            task_type=LLMTaskType.SHORT_FORM_SCENE_PICK,
+            prompt=prompt,
+            response_schema=_scan_schema(),
+            wait_seconds=wait_seconds,
+        )
+    except LLMProviderError as error:
+        _LOGGER.warning(
+            "숏폼 훑기 묶음 %d/%d 답을 못 받았어요: 대목 %d개, %.1f초, 상한 %d초, %s (%s)",
+            number, total, len(batch), clock() - started, wait_seconds,
+            error.error_code or "unknown", error.message,
+        )
+        return _ScanOutcome(start=start)
+    picks = _valid_picks(getattr(response, "output_data", None), batch_size=len(batch))
+    if picks is None:
+        raw = str(getattr(response, "raw_text", "") or "")[:200]
+        _LOGGER.warning(
+            "숏폼 훑기 묶음 %d/%d 답을 못 읽었어요: %.1f초, 받은 것 %r",
+            number, total, clock() - started, raw,
+        )
+        return _ScanOutcome(start=start, unusable=True)
+    _LOGGER.info(
+        "숏폼 훑기 묶음 %d/%d: 대목 %d개, %.1f초, 고른 대목 %d개 %s",
+        number, total, len(batch), clock() - started, len(picks),
+        [number_ for number_, _ in picks],
+    )
+    return _ScanOutcome(start=start, picks=tuple(picks), answered=True)
 
 
 def pick_short_form_scenes(
@@ -598,11 +729,17 @@ def pick_short_form_scenes(
     max_scan_calls: int = MAX_SCAN_CALLS,
     min_target_sec: float = SHORT_FORM_MIN_TARGET_SEC,
     max_target_sec: float = SHORT_FORM_MAX_TARGET_SEC,
+    budget_seconds: float = SYNCHRONOUS_BUDGET_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
 ) -> ShortFormScenePick:
     """숏폼을 고르고, **누가 골랐는지**와 **왜 퍼질지**를 같이 돌려준다.
 
     `utterances`는 전사의 발화(`start_sec`·`end_sec`·`text`)다. 주면 그것을 읽고
     판단하고, 없으면 장면 자막을 읽는다. 어느 쪽이든 판단 흐름은 하나다.
+
+    `budget_seconds`는 **벽시계 예산**이다. 기본값은 같은 요청 안에서 도는 쪽
+    (유진 채팅·처음 만들기)의 값이라 프록시 벽 아래에 머문다. 뒤에서 도는 쪽은
+    `BACKGROUND_BUDGET_SECONDS`를 준다 -- 실측으로 약 400초가 걸리는 일이다.
     """
 
     # **대표님이 이미 뺀 장면은 후보가 아니다.** 뺀 장면을 고르면 숏폼이 그
@@ -650,50 +787,73 @@ def pick_short_form_scenes(
             max_target_sec=max_target_sec,
         )
 
+    started = clock()
+    batches = [
+        (start, passages[start : start + batch_size])
+        for start in range(0, len(passages), batch_size)
+    ][:max_scan_calls]
+    # **한 호출을 얼마나 기다릴지.** 예산이 상한보다 작으면 예산이 이긴다 --
+    # 끊길 것이 뻔한 호출을 시작해서 기다린 시간만 버리지 않는다.
+    scan_wait = int(max(1.0, min(float(SCAN_WAIT_SECONDS), budget_seconds)))
+
+    def scan(job: tuple[int, tuple[_Passage, ...]], number: int) -> _ScanOutcome:
+        start, batch = job
+        return _scan_one_batch(
+            runtime,
+            project_id=project_id,
+            batch=batch,
+            start=start,
+            number=number,
+            total=len(batches),
+            wait_seconds=scan_wait,
+            clock=clock,
+        )
+
+    # **동시에 묻는다.** 차례로 부르면 여섯 묶음이 최악 780초(실측 기준)가 되어
+    # 프록시 벽을 넘는다. 동시에 부르면 벽시계가 가장 느린 한 호출이 된다
+    # (2026-09-12 실측: 여섯 묶음 동시에 129.8초, 여섯 다 답함).
+    if len(batches) <= 1:
+        outcomes = [scan(job, index + 1) for index, job in enumerate(batches)]
+    else:
+        with ThreadPoolExecutor(max_workers=len(batches)) as pool:
+            outcomes = list(
+                pool.map(lambda pair: scan(pair[1], pair[0] + 1), list(enumerate(batches)))
+            )
+
     scored: dict[int, int] = {}
     read_passages: list[int] = []
     answered = False
     unusable = False
-    for call_index, start in enumerate(range(0, len(passages), batch_size)):
-        if call_index >= max_scan_calls:
-            break
-        batch = passages[start : start + batch_size]
-        # 프롬프트는 **try 밖에서** 만든다. 안에서 만들면 여기서 난 우리 실수가
-        # "유진이 바쁘다"로 둔갑한다(2026-09-02 자막 번역에서 실제로 겪었다).
-        prompt = _scan_prompt(batch)
-        try:
-            response = runtime.generate_structured(  # type: ignore[attr-defined]
-                project_id=project_id,
-                task_type=LLMTaskType.SHORT_FORM_SCENE_PICK,
-                prompt=prompt,
-                response_schema=_scan_schema(),
-            )
-        except LLMProviderError:
+    for outcome, (_, batch) in zip(outcomes, batches, strict=True):
+        if outcome.unusable:
+            unusable = True
+        if not outcome.answered:
             # 유진이 못 한 것만 삼킨다. 한 묶음이 빠져도 나머지 판단은 살리되
             # 읽은 것으로 세지 않는다 -- 문구가 부풀지 않게.
             continue
-        picks = _valid_picks(getattr(response, "output_data", None), batch_size=len(batch))
-        if picks is None:
-            unusable = True
-            continue
         answered = True
-        read_passages.extend(range(start, start + len(batch)))
-        for number, worth in picks:
-            index = start + number - 1
+        read_passages.extend(range(outcome.start, outcome.start + len(batch)))
+        for number, worth in outcome.picks:
+            index = outcome.start + number - 1
             scored[index] = max(scored.get(index, 0), worth)
+
+    answered_batches = sum(1 for outcome in outcomes if outcome.answered)
+    _LOGGER.info(
+        "숏폼 훑기 끝: 묶음 %d/%d 답함, 점수 받은 대목 %d개, %.1f초 / 예산 %.0f초",
+        answered_batches, len(batches), len(scored), clock() - started, budget_seconds,
+    )
 
     read_scene_ids = set(
         _segment_ids_for_passages(ordered, [passages[index] for index in read_passages])
     )
     if answered and not scored:
+        read_count = len(read_scene_ids)
         return _density_pick(
             ordered,
             reason="yujin_found_nothing",
-            notice=(
-                "유진이 읽어 봤지만 숏폼에 넣을 만한 대목을 못 찾아서, 자막이 많은 "
-                "장면 위주로 골랐어요. 마음에 안 들면 전체 장면으로 되돌릴 수 있어요."
-            ),
+            notice=_found_nothing_notice(scenes_total=len(ordered), scenes_read=read_count),
             max_target_sec=max_target_sec,
+            scenes_read=read_count,
         )
     if not answered:
         return _density_pick(
@@ -716,30 +876,57 @@ def pick_short_form_scenes(
     # **대목이 하나여도 짜기를 부른다.** 짤 것이 없어 보이지만, 이 호출이
     # 화면에 나갈 "왜 퍼질까" 한 줄을 만드는 유일한 자리다. 빼면 숏폼 하나짜리
     # 결과에서 이유가 조용히 사라진다.
-    if shortlist:
+    # **남은 예산을 먼저 본다.** 짜기는 실측 266.8초짜리라, 남은 시간이 없으면
+    # 시작해도 끊길 뿐이고 그러면 기다린 시간만 버린다. 인포그래픽이 "한 판 더
+    # 돌 시간이 없으면 안 돈다"로 같은 자리를 지킨다.
+    compose_wait = int(min(float(COMPOSE_WAIT_SECONDS), budget_seconds - (clock() - started)))
+    if shortlist and compose_wait < COMPOSE_MIN_WAIT_SECONDS:
+        compose_failed = True
+        _LOGGER.info(
+            "숏폼 짜기를 시작하지 않았어요: 남은 예산 %d초 (최소 %d초 필요)",
+            compose_wait, COMPOSE_MIN_WAIT_SECONDS,
+        )
+    elif shortlist:
         compose_prompt = _compose_prompt(
             shortlist, min_target_sec=min_target_sec, max_target_sec=max_target_sec
         )
+        compose_started = clock()
         try:
             response = runtime.generate_structured(  # type: ignore[attr-defined]
                 project_id=project_id,
                 task_type=LLMTaskType.SHORT_FORM_SCENE_PICK,
                 prompt=compose_prompt,
                 response_schema=_compose_schema(),
+                wait_seconds=compose_wait,
             )
-        except LLMProviderError:
+        except LLMProviderError as error:
             compose_failed = True
+            _LOGGER.warning(
+                "숏폼 짜기 답을 못 받았어요: 대목 %d개, %.1f초, 상한 %d초, %s (%s)",
+                len(shortlist), clock() - compose_started, compose_wait,
+                error.error_code or "unknown", error.message,
+            )
         else:
             parsed = _valid_candidates(
                 getattr(response, "output_data", None), shortlist_size=len(shortlist)
             )
             if parsed is None:
                 compose_failed = True
+                _LOGGER.warning(
+                    "숏폼 짜기 답을 못 읽었어요: %.1f초, 받은 것 %r",
+                    clock() - compose_started,
+                    str(getattr(response, "raw_text", "") or "")[:200],
+                )
             else:
                 candidates, chosen = parsed
                 lines, reason = candidates[chosen - 1]
                 composed = tuple(shortlist_indexes[number - 1] for number in lines)
                 spread_reason = reason or None
+                _LOGGER.info(
+                    "숏폼 짜기: 후보 %d개 중 %d번, 대목 %d개, %.1f초, 퍼질 이유 %s",
+                    len(candidates), chosen, len(composed), clock() - compose_started,
+                    "있음" if spread_reason else "없음",
+                )
 
     if composed:
         # 유진이 짠 순서를 **중요도의 단서로** 쓴다 -- 훅을 앞에 놓으라고 했으므로
@@ -765,6 +952,7 @@ def pick_short_form_scenes(
                 "장면 위주로 골랐어요. 마음에 안 들면 전체 장면으로 되돌릴 수 있어요."
             ),
             max_target_sec=max_target_sec,
+            scenes_read=len(read_scene_ids),
         )
 
     read_count = len(read_scene_ids)
@@ -783,6 +971,11 @@ def pick_short_form_scenes(
             if compose_failed
             else ""
         )
+    _LOGGER.info(
+        "숏폼 판단 끝: 장면 %d개 중 %d개 읽음, 고른 장면 %d개, 퍼질 이유 %s, %.1f초 / 예산 %.0f초",
+        len(ordered), read_count, len(segment_ids),
+        "있음" if spread_reason else "없음", clock() - started, budget_seconds,
+    )
     return ShortFormScenePick(
         segment_ids=segment_ids,
         judged_by="yujin",

@@ -517,6 +517,18 @@ export type ShortFormScenePick = {
   spread_reason?: string | null;
 };
 
+/** 숏폼 장면을 **다시 고르라고 걸어 둔** 결과. 진행은 `ShortFormRepickStatus`로 본다.
+ *
+ *  실측(2026-09-12): 유진이 대표님 영상 전 구간을 읽는 데 129.8초, 후보를 짜는 데
+ *  266.8초. 한 요청으로는 프록시가 끊어서 끝을 못 본다. */
+export type ShortFormRepickStart = { job_id: string; status: "processing" };
+export type ShortFormRepickStatus = {
+  job_id: string;
+  status: "processing" | "succeeded" | "failed";
+  result: { variant: OutputVariant; scene_pick?: ShortFormScenePick } | null;
+  error_detail: string | null;
+};
+
 export type OutputVariantPatch = {
   overrides?: Partial<OutputVariant["overrides"]>;
   lock_fields?: string[];
@@ -2429,14 +2441,26 @@ export const api = {
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
     ),
   /**
-   * 이미 있는 숏폼의 장면을 **다시 판단해** 갈아 끼운다. 새 숏폼을 만들지
-   * 않는다 -- 한 편집본에 숏폼은 하나뿐이고, 두 번째 만들기는 유일 제약에
-   * 걸린다(그때는 서버가 `short_form_already_exists`를 보낸다).
+   * 이미 있는 숏폼의 장면을 **다시 판단해** 갈아 끼우라고 **걸어 둔다.** 바로
+   * 돌아오고, 진행 상황은 `getShortFormRepickJob`으로 물어본다.
+   *
+   * **왜 걸어 두는가(2026-09-12 실측)**: 대표님 영상(장면 94개)에서 유진이 전
+   * 구간을 읽는 데 129.8초, 후보를 짜는 데 266.8초가 걸린다. 한 요청으로 기다리면
+   * 프록시가 330초에 끊어서 대표님은 우리 문구 대신 서버 오류 화면을 본다.
+   * 더빙·자막 번역이 같은 이유로 이미 이 모양이다.
+   *
+   * 새 숏폼을 만들지 않는다 -- 한 편집본에 숏폼은 하나뿐이고, 두 번째 만들기는
+   * 유일 제약에 걸린다(그때는 서버가 `short_form_already_exists`를 보낸다).
    */
   repickShortFormScenes: (projectId: string, variantId: string, payload: { expected_variant_revision?: number }) =>
-    request<{ variant: OutputVariant; scene_pick?: ShortFormScenePick }>(
+    request<ShortFormRepickStart>(
       `/api/projects/${encodeURIComponent(projectId)}/output-variants/${encodeURIComponent(variantId)}/repick`,
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  /** 걸어 둔 숏폼 다시 고르기가 어디까지 왔는지. 끝나면 `result`에 모양과 판단이 온다. */
+  getShortFormRepickJob: (projectId: string, variantId: string, jobId: string) =>
+    request<ShortFormRepickStatus>(
+      `/api/projects/${encodeURIComponent(projectId)}/output-variants/${encodeURIComponent(variantId)}/repick/${encodeURIComponent(jobId)}`,
     ),
   patchOutputVariant: (projectId: string, variantId: string, payload: { expected_variant_revision: number; patch: OutputVariantPatch }) =>
     request<{ variant: OutputVariant }>(

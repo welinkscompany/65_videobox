@@ -1516,7 +1516,9 @@ def create_app(
     # (`short_form_scene_pick`, 2026-09-11). 유진이 대답을 못 하면 자막 밀도로
     # 내려가되 **그 사실을 응답에 실어** 화면 문구가 갈린다.
     app.include_router(
-        build_output_variants_router(store, yujin_runtime_service=runtime_service)
+        build_output_variants_router(
+            store, yujin_runtime_service=runtime_service, orchestrator=orchestrator
+        )
     )
 
     return app

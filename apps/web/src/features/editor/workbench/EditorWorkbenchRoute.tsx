@@ -5,6 +5,7 @@ import { voiceFailureMessage } from "./voiceFailureMessage";
 import { voiceSampleLabel } from "./voiceSampleLabel";
 import { dubbingOutcomeMessage, runDubbingWithProgress, type DubbingOutcome } from "./dubbingProgress";
 import { captionTranslationOutcomeMessage, runCaptionTranslationWithProgress, type CaptionTranslationOutcome } from "./captionTranslationProgress";
+import { repickShortFormWithProgress } from "./shortFormRepickProgress";
 
 import { ApiConflictError, ApiRequestError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type LibraryAsset, type MediaLibraryAsset, type OutputVariant, type YujinEditingProposalPreview, type OutputVariantPatch, type ShortFormScenePick, type PartialRegenerationJob, type PartialRegenerationPreflight, type SceneTransitionSuggestion, type YujinEditingProposal, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
 import { runPartialRegenerationWithProgress, type PartialRegenerationOutcome } from "../partialRegenerationProgress";
@@ -1393,9 +1394,30 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       // **누가 골랐는지를 서버가 말해 준다**(2026-09-11). 유진이 골랐을 때와
       // 자막 밀도로 내려갔을 때의 문구가 달라야 한다 -- 글자 수로 고른 결과를
       // 유진의 판단이라고 말하는 것이 이 기능에서 제일 나쁜 결과다.
-      const result = target
-        ? await api.repickShortFormScenes(projectId, target.variant_id, { expected_variant_revision: target.variant_revision })
-        : await api.createOutputVariant(projectId, { source_session_id: sessionId, kind: "vertical_highlight" });
+      // **다시 만들기는 걸어 두고 물어본다**(2026-09-12 실측). 유진이 대표님
+      // 영상 전 구간을 읽는 데 129.8초, 후보를 짜는 데 266.8초가 걸려서 한
+      // 요청으로 기다리면 서버 앞단이 끊는다 -- 그러면 대표님은 우리 문구 대신
+      // 오류 화면을 본다. 더빙·자막 번역이 같은 이유로 이미 이 모양이다.
+      let result: { variant: OutputVariant; scene_pick?: ShortFormScenePick };
+      if (target) {
+        const outcome = await repickShortFormWithProgress({
+          projectId,
+          variantId: target.variant_id,
+          expectedVariantRevision: target.variant_revision,
+          isStillRelevant: isCurrent,
+        });
+        if (outcome.kind === "cancelled") return;
+        if (outcome.kind !== "succeeded") {
+          const message = outcome.kind === "timed_out"
+            ? "숏폼을 고르는 데 너무 오래 걸려서 기다리기를 멈췄어요. 잠시 뒤 다시 눌러 주세요."
+            : shortFormFailureMessage(outcome.detail);
+          if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message, busy: false } : current);
+          return;
+        }
+        result = outcome.result;
+      } else {
+        result = await api.createOutputVariant(projectId, { source_session_id: sessionId, kind: "vertical_highlight" });
+      }
       const message = shortFormPickNotice(result.scene_pick, { remade: Boolean(target) });
       if (isCurrent()) setVariants((current) => current.key !== requestKey ? current : {
         ...current,

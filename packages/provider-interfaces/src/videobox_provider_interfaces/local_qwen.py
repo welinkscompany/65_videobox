@@ -17,8 +17,20 @@ from videobox_provider_interfaces.llm import (
 
 
 class LocalChatTransport(Protocol):
-    def complete_chat(self, *, model_name: str, prompt: str, response_schema: dict[str, Any]) -> dict[str, Any]:
-        """Execute a local structured chat completion and return the raw response payload."""
+    def complete_chat(
+        self,
+        *,
+        model_name: str,
+        prompt: str,
+        response_schema: dict[str, Any],
+        timeout_seconds: int | None = None,
+    ) -> dict[str, Any]:
+        """Execute a local structured chat completion and return the raw response payload.
+
+        `timeout_seconds`는 **이 한 호출만** 기다리는 상한이다. 없으면 설정값을 쓴다.
+        숏폼 판단처럼 오래 걸리는 일(2026-09-12 실측: 훑기 130초·짜기 267초)이
+        전역 기본값 30초에 통째로 끊기던 것을 여기서 연다.
+        """
 
 
 @dataclass(slots=True)
@@ -28,7 +40,15 @@ class LocalQwenHTTPTransport(LocalChatTransport):
     http_client: Callable[..., Any] = urlopen
     provider_name: str = "local_qwen"
 
-    def complete_chat(self, *, model_name: str, prompt: str, response_schema: dict[str, Any]) -> dict[str, Any]:
+    def complete_chat(
+        self,
+        *,
+        model_name: str,
+        prompt: str,
+        response_schema: dict[str, Any],
+        timeout_seconds: int | None = None,
+    ) -> dict[str, Any]:
+        wait_seconds = int(timeout_seconds) if timeout_seconds else self.timeout_seconds
         payload = {
             "model": model_name,
             "messages": [{"role": "user", "content": prompt}],
@@ -48,7 +68,7 @@ class LocalQwenHTTPTransport(LocalChatTransport):
             method="POST",
         )
         try:
-            with self.http_client(request, timeout=self.timeout_seconds) as response:
+            with self.http_client(request, timeout=wait_seconds) as response:
                 return json.loads(response.read().decode("utf-8"))
         except TimeoutError as exc:
             raise LLMProviderError(
@@ -105,10 +125,18 @@ class LocalQwenStructuredProvider(StructuredLLMProvider):
 
     def complete_structured(self, request: StructuredLLMRequest) -> StructuredLLMResponse:
         model_name = str(request.provider_context.get("model_name") or "qwen3-35b")
+        # 이 한 호출만 기다릴 상한. 부르는 쪽이 안 주면 설정값(기본 30초)이다 --
+        # 숏폼 판단이 이 칸으로 더 기다린다(2026-09-12).
+        raw_timeout = request.provider_context.get("timeout_seconds")
+        try:
+            timeout_seconds = int(raw_timeout) if raw_timeout else None
+        except (TypeError, ValueError):
+            timeout_seconds = None
         payload = self.transport.complete_chat(
             model_name=model_name,
             prompt=request.prompt,
             response_schema=request.response_schema,
+            timeout_seconds=timeout_seconds,
         )
         raw_text = self._extract_message_content(payload)
         try:

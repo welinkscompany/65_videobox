@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 
 from videobox_api.models import (
     OutputVariantCreateRequest,
@@ -87,7 +87,10 @@ def _sync_approved_variant_review(
 
 
 def build_output_variants_router(
-    store: LocalProjectStore, *, yujin_runtime_service: Any | None = None
+    store: LocalProjectStore,
+    *,
+    yujin_runtime_service: Any | None = None,
+    orchestrator: Any | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -141,41 +144,71 @@ def build_output_variants_router(
             _raise_variant_error(error)
             raise AssertionError("unreachable")
 
-    @router.post("/api/projects/{project_id}/output-variants/{variant_id}/repick")
+    @router.post(
+        "/api/projects/{project_id}/output-variants/{variant_id}/repick",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
     def repick_short_form_route(
-        project_id: str, variant_id: str, request: OutputVariantRepickRequest
+        project_id: str,
+        variant_id: str,
+        request: OutputVariantRepickRequest,
+        background_tasks: BackgroundTasks,
     ) -> dict[str, object]:
-        """숏폼을 **다시 만든다.** 판을 다시 판단해 장면 목록을 갈아 끼운다.
+        """숏폼을 **다시 만든다** -- 걸어 두고 바로 돌아온다.
+
+        진행 상황은 `GET .../repick/{job_id}`.
+
+        **비동기여야 한다(2026-09-12 실측).** 대표님 영상(94장면)에서 훑기 129.8초
+        + 짜기 266.8초 = 약 400초가 걸린다. nginx는 330초에 끊으므로
+        (`docker/workspace-nginx.conf`) 같은 요청 안에서 기다리면 대표님은 우리
+        한국말 대신 프록시의 504 HTML을 본다. owner 결정(2026-09-12)은 "다른 모델
+        쓸 때는 잠시 기다리자"인데, **기다리려면 요청 밖으로 나와야 한다.**
+        더빙·자막 번역이 같은 이유로 이미 이 모양이다.
 
         새 모양을 만들지 않는다 -- 유일 제약 때문에 그럴 수 없고, 지우는 문은
         "되돌릴 길이 없다"는 문제를 다시 연다(`short_form_scenes.py` 머리말).
         """
+        if orchestrator is None:  # pragma: no cover - 배선이 빠지면 바로 드러나야 한다
+            raise HTTPException(status_code=503, detail="short_form_repick_unavailable")
         try:
             current = store.get_output_variant(project_id=project_id, variant_id=variant_id)
-            expected = (
-                request.expected_variant_revision
-                if request.expected_variant_revision is not None
-                else int(current["variant_revision"])
-            )
-            updated, pick = remade_short_form_variant(
-                store=store,
-                project_id=project_id,
-                variant_row=current,
-                runtime=yujin_runtime_service,
-                expected_variant_revision=expected,
-            )
-            return {
-                "variant": store.update_output_variant(
-                    project_id=project_id,
-                    variant_id=variant_id,
-                    expected_variant_revision=expected,
-                    variant=updated,
-                ),
-                "scene_pick": scene_pick_payload(pick),
-            }
         except Exception as error:
             _raise_variant_error(error)
             raise AssertionError("unreachable")
+        expected = (
+            request.expected_variant_revision
+            if request.expected_variant_revision is not None
+            else int(current["variant_revision"])
+        )
+        # **걸기 전에 막는다.** 400초를 기다린 뒤에 "낡은 값이었어요"라고 알리지
+        # 않는다(자막 번역의 `start_caption_translation`과 같은 태도).
+        if expected != int(current["variant_revision"]):
+            raise HTTPException(status_code=409, detail="stale_variant_revision")
+        if str(current.get("kind")) != "vertical_highlight":
+            raise HTTPException(status_code=422, detail="only_vertical_highlight_can_be_remade")
+        started = orchestrator.start_short_form_pick(project_id=project_id)
+        background_tasks.add_task(
+            orchestrator.run_short_form_pick_job,
+            project_id=project_id,
+            variant_id=variant_id,
+            job_id=started["job_id"],
+            runtime=yujin_runtime_service,
+            expected_variant_revision=expected,
+        )
+        return dict(started)
+
+    @router.get("/api/projects/{project_id}/output-variants/{variant_id}/repick/{job_id}")
+    def get_repick_short_form_job(
+        project_id: str, variant_id: str, job_id: str
+    ) -> dict[str, object]:
+        """다시 고르는 일이 어디까지 왔는지. 끝나면 `result`에 모양과 판단이 온다."""
+        del variant_id
+        if orchestrator is None:  # pragma: no cover
+            raise HTTPException(status_code=503, detail="short_form_repick_unavailable")
+        try:
+            return orchestrator.get_short_form_pick_job(project_id=project_id, job_id=job_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="short_form_repick_job_missing") from error
 
     @router.patch("/api/projects/{project_id}/output-variants/{variant_id}")
     def patch_variant(

@@ -5,6 +5,11 @@ import yaml
 
 from videobox_core_engine.infographic_host_bridge import BRIDGE_PORT
 from videobox_core_engine.infographic_service import TOTAL_BUDGET_SECONDS
+from videobox_core_engine.short_form_scene_pick import (
+    BACKGROUND_BUDGET_SECONDS,
+    SCAN_WAIT_SECONDS,
+    SYNCHRONOUS_BUDGET_SECONDS,
+)
 
 
 ROOT = Path(__file__).parents[1]
@@ -435,3 +440,32 @@ def test_the_image_path_may_only_reach_this_machine() -> None:
     # 2-B와 같은 성격의 host bridge다. 컨테이너 안의 127.0.0.1은 컨테이너라서
     # loopback 기본값으로는 아무 데도 닿지 않는다.
     assert "host.docker.internal" in environment["VIDEOBOX_LOCAL_RUNTIME_BASE_URL"]
+
+
+def test_the_proxy_waits_longer_than_judging_a_short_inside_one_request() -> None:
+    """숏폼 판단도 **그림·인포그래픽과 정확히 같은 자리**다.
+
+    이 저장소의 시험은 전부 FastAPI를 직접 부르고 프록시를 한 번도 안 지난다 --
+    여기서 두 값을 맞대 보지 않으면 아무도 안 본다(업로드 1MB 벽이 그렇게 숨어 있었다).
+
+    2026-09-12 실측: 훑기 129.8초 + 짜기 266.8초 = 약 400초. **그래서 화면의 다시
+    만들기는 뒤에서 돈다.** 같은 요청 안에서 도는 자리(유진 채팅·처음 만들기)만
+    `SYNCHRONOUS_BUDGET_SECONDS`로 벽 아래에 머문다. 뒤에서 도는 예산이 벽보다
+    커야 한다는 것도 같이 잡는다 -- 벽 아래로 줄이면 비동기로 만든 이유가 사라진다.
+    """
+    config = (ROOT / "docker/workspace-nginx.conf").read_text(encoding="utf-8")
+    proxy = re.search(r"proxy_read_timeout\s+(\d+)s\s*;", config)
+    assert proxy is not None, "nginx가 기본 60초로 떨어진다"
+    proxy_seconds = int(proxy.group(1))
+
+    assert SYNCHRONOUS_BUDGET_SECONDS < proxy_seconds, (
+        f"같은 요청 안에서 {SYNCHRONOUS_BUDGET_SECONDS}초까지 기다리는데 nginx는 "
+        f"{proxy_seconds}초에 끊는다; 화면은 우리 문구 대신 504를 본다"
+    )
+    # 한 호출 상한이 예산을 넘으면 훑기 한 번에 예산이 다 나가고 짜기는 못 돈다.
+    assert SCAN_WAIT_SECONDS < SYNCHRONOUS_BUDGET_SECONDS, (
+        f"훑기 상한 {SCAN_WAIT_SECONDS}초가 예산 {SYNCHRONOUS_BUDGET_SECONDS}초를 다 먹는다"
+    )
+    assert BACKGROUND_BUDGET_SECONDS > proxy_seconds, (
+        "뒤에서 도는 예산이 프록시 벽보다 작으면 비동기로 옮긴 이유가 없어진다"
+    )
