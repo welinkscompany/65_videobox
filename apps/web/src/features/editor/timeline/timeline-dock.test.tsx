@@ -1215,6 +1215,116 @@ describe("타임라인을 늘리고 줄인다 (대표님 지시 2026-09-12)", ()
     expect(timelinePixelsPerSecond()).toBeCloseTo(1200 / 494.837, 6);
   });
 
+  it("Ctrl과 바퀴로 늘리고 줄인다 -- 캡컷과 같다", () => {
+    // 캡컷은 `Ctrl` + 바퀴로 타임라인을 늘리고 줄인다. 키와 단추만 있으면
+    // 손이 자판으로 갔다 와야 한다 -- 대표님: "내가 직접 조작할수 있게 해야지".
+    render(<TimelineDock view={ownerLongView} viewportWidthPx={1200} />);
+    const timeline = screen.getByRole("region", { name: "타임라인" });
+    mockTimelineTrackRect();
+
+    fireEvent.wheel(timeline, { ctrlKey: true, deltaY: -120, clientX: 600 });
+    expect(timelinePixelsPerSecond()).toBeCloseTo(25, 6);
+
+    fireEvent.wheel(timeline, { ctrlKey: true, deltaY: 120, clientX: 600 });
+    expect(timelinePixelsPerSecond()).toBeCloseTo(20, 6);
+  });
+
+  it("바퀴로 늘리면 **손가락이 있던 자리**가 제자리에 남는다 -- 재생 머리가 아니다", () => {
+    // 키는 재생 머리를 기준으로 늘린다(위 시험). 바퀴는 다르다 -- 손가락이 가리킨
+    // 자리가 움직이면 늘리는 느낌이 어긋난다. 그래서 `zoomAroundAnchor`가 기준점을
+    // 받는다.
+    render(<TimelineDock view={ownerLongView} viewportWidthPx={1200} />);
+    const timeline = screen.getByRole("region", { name: "타임라인" });
+    // 트랙 원점으로 잰다. 섹션 원점으로 재면 안쪽 여백만큼 어긋난다
+    // (`handleClick`이 같은 이유로 트랙을 본다).
+    mockTimelineTrackRect(40);
+
+    // 재생 머리는 0초에 있고, 손가락은 화면 가운데 600px -- 20px/초이니 30초다.
+    const timeAtPointer = () => {
+      const pps = Number(timeline.getAttribute("data-pixels-per-second"));
+      const start = Number(timeline.getAttribute("data-viewport-start-seconds"));
+      return 600 / pps + start;
+    };
+    expect(timeAtPointer()).toBeCloseTo(30, 6);
+
+    fireEvent.wheel(timeline, { ctrlKey: true, deltaY: -120, clientX: 640 });
+
+    expect(timelinePixelsPerSecond()).toBeCloseTo(25, 6);
+    // 기준점이 재생 머리(0초)였다면 시작이 0으로 남고 손가락 아래는 24초가 된다.
+    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "6");
+    expect(timeAtPointer()).toBeCloseTo(30, 6);
+  });
+
+  it("Shift와 바퀴는 타임라인을 옆으로 민다", () => {
+    render(<TimelineDock view={ownerLongView} viewportWidthPx={1200} />);
+    const timeline = screen.getByRole("region", { name: "타임라인" });
+
+    // 20px/초에서 100px이면 5초다.
+    fireEvent.wheel(timeline, { shiftKey: true, deltaY: 100 });
+    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "5");
+    expect(timelinePixelsPerSecond()).toBeCloseTo(20, 6);
+
+    fireEvent.wheel(timeline, { shiftKey: true, deltaY: -100 });
+    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "0");
+  });
+
+  it("맨 바퀴는 예전 그대로다 -- 세로는 건드리지 않고 가로만 민다", () => {
+    render(<TimelineDock view={ownerLongView} viewportWidthPx={1200} />);
+    const timeline = screen.getByRole("region", { name: "타임라인" });
+
+    // 세로 바퀴는 가로채지 않는다. 타임라인 칸은 `overflow:auto`라 위아래로
+    // 스크롤된다 -- 그걸 막으면 아래쪽 트랙을 볼 수 없다.
+    expect(fireEvent.wheel(timeline, { deltaY: 120 })).toBe(true);
+    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "0");
+    expect(timelinePixelsPerSecond()).toBeCloseTo(20, 6);
+
+    // 가로 바퀴(트랙패드)는 예전처럼 옆으로 민다.
+    fireEvent.wheel(timeline, { deltaX: 100 });
+    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "5");
+  });
+
+  it("바퀴로 늘릴 때 브라우저가 화면을 통째로 확대하지 않는다", () => {
+    // React는 `wheel`을 **passive로** 단다(19.1.0에서 실측: `{passive:true}`).
+    // 그래서 `onWheel` 안에서 `preventDefault()`를 불러도 아무 일이 없고,
+    // `Ctrl`+바퀴는 타임라인이 아니라 **브라우저 화면 전체**가 확대된다.
+    // 막으려면 passive가 아닌 listener를 직접 달아야 한다.
+    render(<TimelineDock view={ownerLongView} viewportWidthPx={1200} />);
+    const timeline = screen.getByRole("region", { name: "타임라인" });
+    mockTimelineTrackRect();
+
+    // `dispatchEvent`는 막혔으면 false를 준다.
+    expect(fireEvent.wheel(timeline, { ctrlKey: true, deltaY: -120, clientX: 600 })).toBe(false);
+    expect(fireEvent.wheel(timeline, { shiftKey: true, deltaY: 100 })).toBe(false);
+  });
+
+  it("타임라인을 닫으면 바퀴 listener도 같이 걷는다", () => {
+    // 뜨거운 면에 listener를 남기면 없는 기능보다 나쁘다.
+    const { unmount } = render(<TimelineDock view={ownerLongView} viewportWidthPx={1200} />);
+    const timeline = screen.getByRole("region", { name: "타임라인" });
+    const removeListener = vi.spyOn(timeline, "removeEventListener");
+
+    unmount();
+
+    expect(removeListener.mock.calls.filter(([type]) => type === "wheel")).toHaveLength(1);
+  });
+
+  it("단추·키·바퀴가 한계를 두고 다투지 않는다", () => {
+    // `cutShortcuts.ts`가 정한 규약이다. 한계 판단은 `zoomControls` 한 곳에만 있고
+    // 바퀴도 거기를 지난다 -- 세 갈래가 따로 세면 단추는 잠겼는데 바퀴로는
+    // 한 칸 더 가는 어긋남이 생긴다.
+    render(<TimelineDock view={ownerLongView} viewportWidthPx={1200} />);
+    const timeline = screen.getByRole("region", { name: "타임라인" });
+    mockTimelineTrackRect();
+
+    for (let step = 0; step < 40; step += 1) fireEvent.wheel(timeline, { ctrlKey: true, deltaY: -120, clientX: 600 });
+    expect(timelinePixelsPerSecond()).toBeCloseTo(400, 6);
+    expect(screen.getByRole("button", { name: "타임라인 확대" })).toBeDisabled();
+
+    for (let step = 0; step < 80; step += 1) fireEvent.wheel(timeline, { ctrlKey: true, deltaY: 120, clientX: 600 });
+    expect(timelinePixelsPerSecond()).toBeCloseTo(1200 / 494.837, 6);
+    expect(screen.getByRole("button", { name: "타임라인 축소" })).toBeDisabled();
+  });
+
   it("길이가 틀리게 와도 타임라인이 열린다", () => {
     // 같은 계획의 다른 조각이 고치는 결함 -- 494초 세션의 길이가 5.0으로 온다.
     // 그 값이 고쳐지기 전에도 배율은 유한해야 한다. 0으로 나누면

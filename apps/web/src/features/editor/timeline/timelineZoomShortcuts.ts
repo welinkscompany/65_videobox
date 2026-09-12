@@ -12,6 +12,10 @@
  * (`workbench/cutShortcuts.ts`, `EditorWorkbench.tsx`), 글자가 겹치지 않는다.
  * 양쪽 방향을 시험이 지킨다(`timelineZoomShortcuts.test.ts`).
  *
+ * **바퀴는 여기가 아니다.** 캡컷의 `Ctrl`+바퀴(늘리기·줄이기)와 `Shift`+바퀴(옆으로
+ * 밀기)는 `timelineWheelGesture.ts`에 있다 -- 누른 글자가 아니라 굴린 거리를 보는
+ * 다른 모양의 사건이고, React가 `wheel`을 passive로 달아서 다는 방식도 다르다.
+ *
  * **키는 단추가 정한 것을 그대로 쓴다**(`cutShortcuts.ts`가 정한 규약). 그래서
  * 이 함수는 "무엇을 눌렀는가"만 답하고, "지금 그게 되는가"는 답하지 않는다 --
  * 그 판단은 화면(`TimelineDock`)이 단추와 키에 한 벌로 내려 준다.

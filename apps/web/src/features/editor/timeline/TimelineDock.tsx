@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, type WheelEvent } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { Eye, EyeOff, Lock, Unlock, Volume2, VolumeX } from "lucide-react";
 import { clipContentLabel } from "./clipNames";
 
@@ -20,6 +20,7 @@ import {
 } from "./timelineNavigation";
 import { fitPixelsPerSecond, initialPixelsPerSecond, pixelsPerSecondBounds } from "./timelineZoomScale";
 import { timelineZoomShortcutFor, type TimelineZoomCommand } from "./timelineZoomShortcuts";
+import { timelineWheelGestureFor } from "./timelineWheelGesture";
 
 const LANE_HEIGHT_PX = 32;
 /** 눈·음소거를 그릴 트랙. 서버(`track_states.py`)가 받는 것과 같은 갈래이고,
@@ -300,6 +301,8 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     }
     void onUpdateTrackStates(next);
   };
+  // 바퀴 listener를 직접 달 자리이자, 늘릴 때 기준점을 재는 자리다(아래 `handleWheel`).
+  const surfaceRef = useRef<HTMLElement | null>(null);
   const previousSelectionResetKey = useRef(selectionResetKey);
   const onPlaybackSeekRef = useRef(onPlaybackSeek);
   useEffect(() => { onPlaybackSeekRef.current = onPlaybackSeek; }, [onPlaybackSeek]);
@@ -381,22 +384,26 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   };
   // **늘리기·줄이기·전체 보기는 여기 한 표에만 있다.** `cutShortcuts.ts`가 정한
   // 규약이다 -- "키는 툴바가 정한 것을 그대로 쓴다. 무엇을 할 수 있는지 다시
-  // 계산하지 않는다." 단추의 잠김과 키의 멈춤이 두 곳에서 따로 계산되면, 화면은
-  // 잠겼다는데 키로는 통하는 일이 생긴다.
+  // 계산하지 않는다." 단추의 잠김, 키의 멈춤, **바퀴의 멈춤**이 세 곳에서 따로
+  // 계산되면 화면은 잠겼다는데 키나 바퀴로는 통하는 일이 생긴다. 셋 다
+  // `runZoom`을 지나고, `runZoom`은 이 표의 `enabled`만 본다.
   //
   // 전체 보기가 가는 자리는 **줄이기의 바닥과 같은 값**이다(`zoomBounds.min`).
   // 그래서 줄이기를 계속 누른 자리와 전체 보기를 누른 자리가 정확히 겹친다.
   const fitTarget = fitPixelsPerSecond({ durationSec: view.output.durationSec, viewportWidthPx }) === null
     ? null
     : zoomBounds.min;
-  const zoomControls: Readonly<Record<TimelineZoomCommand, Readonly<{ enabled: boolean; run: () => void }>>> = {
+  // `anchorPx`를 안 주면 reducer가 **재생 머리**를 기준으로 잡는다(단추와 키가
+  // 그렇게 쓴다). 바퀴만 손가락이 가리킨 자리를 넘긴다 -- 한계 판단(`enabled`)은
+  // 셋이 똑같이 여기 한 곳을 본다.
+  const zoomControls: Readonly<Record<TimelineZoomCommand, Readonly<{ enabled: boolean; run: (anchorPx?: number) => void }>>> = {
     in: {
       enabled: state.pixelsPerSecond < zoomBounds.max * (1 - ZOOM_EPSILON),
-      run: () => dispatch({ type: "zoom", factor: ZOOM_STEP }),
+      run: (anchorPx?: number) => dispatch({ type: "zoom", factor: ZOOM_STEP, anchorPx }),
     },
     out: {
       enabled: state.pixelsPerSecond > zoomBounds.min * (1 + ZOOM_EPSILON),
-      run: () => dispatch({ type: "zoom", factor: 1 / ZOOM_STEP }),
+      run: (anchorPx?: number) => dispatch({ type: "zoom", factor: 1 / ZOOM_STEP, anchorPx }),
     },
     fit: {
       // 길이를 모르면 갈 자리도 없다. 눌러도 아무 일 없는 단추 대신 잠근다.
@@ -408,9 +415,9 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
       },
     },
   };
-  const runZoom = (command: TimelineZoomCommand) => {
+  const runZoom = (command: TimelineZoomCommand, anchorPx?: number) => {
     const control = zoomControls[command];
-    if (control.enabled) control.run();
+    if (control.enabled) control.run(anchorPx);
   };
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     const action = navigationKeyAction(event.key, isEditableTarget(event.target), { state, fps: view.fps });
@@ -450,12 +457,46 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     previousZoomRequestId.current = zoomCommand.requestId;
     runZoomRef.current(zoomCommand.command);
   }, [zoomCommand]);
-  const handleWheel = (event: WheelEvent<HTMLElement>) => {
-    if (event.deltaX === 0) return;
+  // **바퀴는 React의 `onWheel`로 못 받는다.** React 19.1.0은 `wheel`을 뿌리에
+  // **passive로** 단다(실측: `{passive:true}`와 `{capture:true,passive:true}` 둘).
+  // passive listener 안에서는 `preventDefault()`가 **조용히 아무 일도 하지 않는다.**
+  // 그래서 `Ctrl`+바퀴는 타임라인이 아니라 브라우저 화면 전체가 확대된다.
+  //
+  // 예전 `onWheel` 안에도 `preventDefault()`가 있었지만 그것도 똑같이 죽어 있었다.
+  // 눈에 안 띈 이유는 그 길이 가로 바퀴만 받았고, 타임라인은 가로로 넘치지 않아서
+  // (자기 폭 안에서 직접 구간을 그린다) 브라우저가 막을 기본 동작이 없었기 때문이다.
+  // `Ctrl`+바퀴는 다르다 -- 화면 확대는 눈에 바로 보인다.
+  //
+  // 그래서 passive가 아닌 listener를 직접 단다(바로 아래 effect). **떼는 것을 같이
+  // 둔다** -- 뜨거운 면에 남은 listener는 없는 기능보다 나쁘다.
+  const handleWheel = (event: globalThis.WheelEvent) => {
+    const gesture = timelineWheelGestureFor(event, isEditableTarget(event.target));
+    if (!gesture) return;
     event.preventDefault();
-    const deltaSec = pixelsToTime(event.deltaX, { pixelsPerSecond: state.pixelsPerSecond, originSec: 0 });
+    if (gesture.kind === "zoom") {
+      // **기준점은 손가락이 가리킨 자리다.** 단추와 키는 재생 머리를 쓰지만, 바퀴는
+      // 손가락 아래가 제자리에 있어야 늘리는 느낌이 맞는다. 클립·재생 머리와
+      // **같은 좌표계**(트랙 원점)로 잰다 -- `handleClick`이 같은 이유로 트랙을 본다.
+      const surface = surfaceRef.current;
+      const origin = surface?.querySelector<HTMLElement>("[data-timeline-track]") ?? surface;
+      runZoom(gesture.command, origin ? event.clientX - origin.getBoundingClientRect().left : 0);
+      return;
+    }
+    const deltaSec = pixelsToTime(gesture.deltaPx, { pixelsPerSecond: state.pixelsPerSecond, originSec: 0 });
     dispatch({ type: "scroll", seconds: state.viewportStartSec + deltaSec });
   };
+  // 매번 새로 만든 함수를 다시 달지 않는다. 다시 달면 그 사이에 굴린 바퀴를 놓치고,
+  // effect가 매 렌더마다 돌면서 붙였다 떼는 일만 반복한다. 키 단축키가 쓰는
+  // 방식과 같다(`runZoomRef`).
+  const handleWheelRef = useRef(handleWheel);
+  handleWheelRef.current = handleWheel;
+  useEffect(() => {
+    const surface = surfaceRef.current;
+    if (!surface) return;
+    const onWheel = (event: globalThis.WheelEvent) => handleWheelRef.current(event);
+    surface.addEventListener("wheel", onWheel, { passive: false });
+    return () => surface.removeEventListener("wheel", onWheel);
+  }, []);
   const selectClip = (rect: ClipRect, additive = false) => {
     const hit = classifyTimelineHit({
       point: { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 },
@@ -816,7 +857,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     data-viewport-start-seconds={formatSeconds(state.viewportStartSec)}
     onClick={handleClick}
     onKeyDown={handleKeyDown}
-    onWheel={handleWheel}
+    ref={surfaceRef}
     tabIndex={0}
   >
     {/* 안내는 지우지 않고 **한 줄로 모은다.** 재 보니 타임라인이 필요로 하는 449px
@@ -832,10 +873,12 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
       {/* 확대·축소는 `+`/`-` 키로만 됐다. 안내에 적어 두어도 **눈에 보이는 단추가
           없으면 안 쓰는 기능**이다 -- 2026-08-17에 컷 도구가 정확히 그랬다. */}
       {editToolbar}
-      {/* 단추와 키가 **같은 표**를 본다(`zoomControls`). 잠김도 같이 온다. */}
+      {/* 단추·키·바퀴가 **같은 표**를 본다(`zoomControls`). 잠김도 같이 온다. */}
       <span className="vb-editor-workbench__timeline-zoom">
-        <button data-native-control="timeline-zoom-out" type="button" aria-label="타임라인 축소" title="줄이기 (Ctrl과 - 키)" disabled={!zoomControls.out.enabled} onClick={() => runZoom("out")}>−</button>
-        <button data-native-control="timeline-zoom-in" type="button" aria-label="타임라인 확대" title="늘리기 (Ctrl과 = 키)" disabled={!zoomControls.in.enabled} onClick={() => runZoom("in")}>+</button>
+        {/* 바퀴로도 된다는 것을 여기 적어 둔다. 눈에 안 보이면 안 쓰는 기능이다 --
+            2026-08-17에 컷 도구가 정확히 그랬다. 옆으로 미는 것은 `Shift`와 바퀴다. */}
+        <button data-native-control="timeline-zoom-out" type="button" aria-label="타임라인 축소" title="줄이기 (Ctrl과 - 키, Ctrl과 바퀴)" disabled={!zoomControls.out.enabled} onClick={() => runZoom("out")}>−</button>
+        <button data-native-control="timeline-zoom-in" type="button" aria-label="타임라인 확대" title="늘리기 (Ctrl과 = 키, Ctrl과 바퀴)" disabled={!zoomControls.in.enabled} onClick={() => runZoom("in")}>+</button>
         <button data-native-control="timeline-fit" type="button" aria-label="타임라인 전체 보기" title="영상 전체가 한 화면에 들어오게 (Ctrl과 0 키)" disabled={!zoomControls.fit.enabled} onClick={() => runZoom("fit")}>전체</button>
       </span>
     </div>
