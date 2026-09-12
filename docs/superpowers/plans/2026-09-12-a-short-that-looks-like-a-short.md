@@ -81,36 +81,86 @@ LLM 호출을 하나 더 늘리면 예산(작업+폴링)에 어떤 영향인지 
 
 대표님 상시 지시: **"화면으로 되는 건 전부 유진에게도 되어야 한다."**
 
-### 조사 결과 (코드로 확인함, 짐작 아님)
+### 조사 결과 (코드로 확인함, 짐작 아님) — **2026-09-12 늦게 정정됨**
 
-| 의도 | 자리 | 되는가 |
+> **이 표 전체가 틀렸다.** 아래 넷은 전부 `yujin_creator_proposals.py` /
+> `hermes_run_service.py` / `director_proposals.py`의 `batch-apply`
+> (`is_yujin_variant_proposal`) 경로를 가리키는데, **그 경로를 부르는 화면이
+> 어디에도 없다.** `apps/web/src` 전체를 뒤져도 `api.createHermesRun`과
+> `hermesSseClient.ts`의 `streamHermesSseWithReconnect`를 실제로 부르는 `.tsx`가
+> **0건**이다(둘 다 자기 시험에서만 불린다). 실제로 화면에 있는 유일한 채팅
+> (`HomeYujinChat.tsx`, `EditorWorkbenchRoute.tsx`의 대화창)은 전부
+> `api.sendDirectorMessage` → `submit_conversation_message`
+> (`director_proposals.py:749`) → 필요하면 `interpretAndApplySpokenEdit` →
+> `api.createYujinEditingProposal` → `YujinEditingProposalService.create`
+> (`yujin_editing_proposal_service.py`)로 간다. 이 두 번째 경로의 도메인 모델
+> (`yujin_editing_proposals.py`)에는 `output_variant`도 `remake_short_form`도
+> `shorts`도 **한 글자도 없다** — 16개 편집 의도만 있다.
+>
+> 즉 "된다"로 적은 셋(`remake_short_form`·`unfold_to_editing_board`·모양
+> 조정)도 **실제로는 채팅으로 안 된다.** 이 세 션 자신을 포함해 여러 세션이
+> `tests/test_api_output_variants.py`처럼 `YujinCreatorContext`를 직접 만들어
+> `parse_and_project_yujin_creator_output`을 부르는 시험으로 "됨"을 확인했는데,
+> 그건 **API 단건 확인이 화면 확인을 대체한** 정확히 그 함정이다
+> (`CLAUDE.md` §4). 아래 표는 정정한 사실이다.
+
+| 의도 | 자리 | 화면 채팅으로 되는가 |
 |---|---|---|
-| "숏폼 다시 만들어줘" | `_is_short_form_remake` → `remake_short_form` | 된다 |
-| "이 숏폼 펼쳐줘" | `_is_short_form_unfold` → `unfold_to_editing_board` | 된다 |
-| 숏폼 모양 조정(`overrides`) | 변형본 patch | 된다 |
-| **"숏폼 만들어줘"(처음 만들기)** | 없다 | **안 된다** |
-| **"만든 숏폼 내보내줘"(렌더)** | 없다 | **안 된다** |
+| "숏폼 다시 만들어줘" | `_is_short_form_remake` → `remake_short_form` | 코드는 있다. **화면 채팅에서는 안 된다** — 이 action을 아는 프로필(`videobox-creator/SKILL.md`)은 어느 화면도 안 부르는 Hermes 경로용이다 |
+| "이 숏폼 펼쳐줘" | `_is_short_form_unfold` → `unfold_to_editing_board` | 위와 같음. **안 된다** |
+| 숏폼 모양 조정(`overrides`, 제목 띠 포함) | 변형본 patch | 위와 같음. **안 된다** |
+| "숏폼 만들어줘"(처음 만들기) | `create_short_form`(이번 세션에 추가) | 같은 이유로 **안 된다** — 같은 안 쓰이는 경로에 짰다 |
+| "만든 숏폼 내보내줘"(렌더) | 없다 | **안 된다** |
 
-막는 자리는 한 줄이다 — `routers/director_proposals.py:1198` `is_yujin_variant_proposal`이
-**`variant_id is not None`을 요구**한다. 처음 만들기는 번호가 없어 이 문을 못 지난다.
+**막았던 자리 하나(`is_yujin_variant_proposal`의 `variant_id is not None`)는
+이번 세션에 고쳤다** — `create_short_form` action을 인식하도록
+`_has_variant_action`으로 우회를 열었다(도메인 모델·라우터·저장소 트랜잭션·
+시험 전부 갖췄고 76+ 건이 초록이다). **다만 그 문을 여는 것 자체가 무의미했다**
+— 그 문 앞에 아무도 서 있지 않다(화면이 그 URL을 아예 안 부른다). 이 작업은
+**틀린 게 아니라 헛짚은 것**이다: 다음에 이 기능을 실제로 쓰게 하려면
+`yujin_creator_proposals.py` 쪽이 아니라 **`yujin_editing_proposals.py`
+(16개 의도가 있는 바로 그 파일)에 새 의도를 추가**해야 한다.
 
-화면 단추가 밟는 순서(`apps/web/src/app/OutputsPage.tsx`):
+화면 단추가 밟는 순서(`apps/web/src/app/OutputsPage.tsx`, 이건 여전히 맞다):
 `GET output-variants` → 없으면 `POST output-variants`(`routers/output_variants.py:112`) /
 있으면 `POST …/repick` → 작업 폴링 → 판 다시 읽기 → `POST variant-renders` → 내려받기.
+이 단추 경로는 실측으로 확인했다(아래 R3 참고) — 이번에 되돌린 것은 **채팅** 쪽이다.
 
-### 해야 할 것
+### 해야 할 것 — **다음 세션은 여기부터, 파일을 다시 확인하고 시작할 것**
 
-1. 처음 만들기 의도를 연다. 새 action(예: `create_short_form`)을 `_has_variant_action`
-   방식으로 알아보고 **patch 경로로 새지 않게** `_is_short_form_remake`와 같은 모양으로
-   분기한다. 그 docstring이 경고하는 `variant_action_forbidden` 422가 바로 그 함정이다.
-2. 렌더까지 잇는다. **화면이 쓰는 같은 자리를 쓴다. 새 렌더 경로를 만들지 마라.**
-3. 기다림 표시 — 이미 있는 작업+폴링을 재사용하고 **세 번째 방식을 만들지 마라.**
-4. 배선 세 겹: 의도 · 적용기 · **안내문**. 안내문은
-   `yujin_editing_proposal_service.py`의 `_editing_prompt`다
-   (`videobox-editor/SKILL.md`는 대화 전용이고 시험이 못박고 있으니 건드리지 마라).
-   **목록과 "지금 걸린 값"은 한 쌍이다** — 지금 숏폼이 있는지/몇 개인지를 같이 줘야
-   유진이 "만들기"와 "다시 만들기"를 구분한다.
+**밑줄 친 파일이 진짜다.** 위 정정에서 확인했듯 실제 채팅은 전부
+`yujin_editing_proposal_service.py`(`_editing_prompt`)를 지나 `yujin_editing_proposals.py`의
+16개 의도 중 하나로만 해석된다. `yujin_creator_proposals.py`/
+`yujin_creator_proposal_adapter.py`/`videobox-creator/SKILL.md`/
+`hermes_run_service.py`는 **화면 어디에서도 안 부른다** — 새 action을 그쪽에
+추가해도 아무도 못 쓴다(이번 세션이 그렇게 했다가 되짚었다).
+
+1. `yujin_editing_proposals.py`(16개 의도가 있는 그 도메인 모델)에 숏폼용
+   의도를 추가한다. 이 파일은 `session_id`/`instruction` 기준이고
+   `variant_id`/`output_variant` 개념이 아예 없다 — 새 필드가 필요하면
+   `YujinEditingContext`에 "지금 숏폼이 있는가"(`has_short_form_variant`류)를
+   더한다(이번 세션이 반대쪽 시스템에 만든 것과 같은 값, 재사용 가능한 판단
+   로직은 `short_form_scenes.py`에 이미 있다 -- `created_short_form_variant`·
+   `remade_short_form_variant`).
+2. `_editing_prompt`에 새 의도를 가르친다. "지금 숏폼이 있는지"를 프로필에
+   실어야 "만들기"와 "다시 만들기"를 유진이 구분한다(목록과 지금 값은 한 쌍).
+3. 적용기: `POST .../yujin-editing-proposals/{id}/apply`가 부르는 실행부
+   (`editing_session.py`의 `apply_yujin_editing_proposal` 근방)에 이 새 의도가
+   왔을 때 `short_form_scenes.created_short_form_variant`/
+   `remade_short_form_variant`를 부르는 분기를 추가한다. **이 세션이 만든
+   `create_short_form`/`PENDING_SHORT_FORM_TARGET_ID`/
+   `apply_director_variant_create_proposal_transaction` 등 저장소·도메인
+   조각은 재사용 가능하다** -- 잘못은 그 자리가 아니라 그 자리로 가는
+   **입구**(어느 프로필/컨텍스트가 그걸 부르는가)였다.
+4. 렌더("내보내줘")까지 잇는다. **화면이 쓰는 같은 자리(`POST variant-renders`)를
+   쓴다. 새 렌더 경로를 만들지 마라.** 이 apply 경로는 동기 응답 하나를
+   돌려주는 구조라, 렌더 잡을 **시작만 시키고** ("만들고 있어요, 출력
+   화면에서 확인해 주세요") 폴링은 기존 출력 화면 폴링에 맡기는 안을 먼저
+   검토한다 -- 채팅 안에서 진행률을 보여주는 **세 번째 방식을 만들지 않는다.**
 5. 유진이 만든 숏폼도 되돌리기 한 번으로 돌아가야 한다(`2be2ffb42`의 규칙을 따른다).
+6. 다 되면 **실제 화면 채팅창에서 직접 타이핑해서** 확인한다(R3). API로
+   `YujinCreatorContext`를 손으로 만들어 통과시키는 시험은 이 항목의 증거가
+   되지 못한다 -- 이번 세션이 그 함정에 걸렸다.
 
 ## 닫을 때 할 검증 — 아직 **안 한 것**만
 
@@ -125,19 +175,64 @@ LLM 호출을 하나 더 늘리면 예산(작업+폴링)에 어떤 영향인지 
 재는 동안 컨테이너가 재빌드되면 값이 오염되므로 `docker inspect -f '{{.State.StartedAt}}'`를
 앞뒤로 확인해라.
 
+> **2026-09-12 시도 기록.** 이 프로젝트(`2026-09-12-ca6dd9ed`)에서 실제로 시도했다 --
+> 완성본(마스터) 렌더가 **이번 세션 변경과 무관하게** `ffmpeg` 스레드 자원 오류로
+> 반복 실패한다(`frame=0`, `Terminating thread with return code -11`). 이 프로젝트가
+> 반복 프로빙으로 마스터 세그먼트 94개까지 쌓인 상태이고, 실패는 이 재빌드 이전
+> (job_004·010·016)에도 있었다 -- **새로 생긴 결함이 아니다.** 코드로도 확인했다:
+> 완성본(비-변형본) 렌더 경로는 `composition_plan.shorts_layout`을 아예 안 읽는다
+> (`build_variant_timeline_payload`만 `vertical_highlight` 변형본에 그 값을 싣는다) --
+> 그래서 제목 띠 작업이 완성본 렌더에 개입할 여지 자체가 구조적으로 없다. 다만
+> **실측 md5 비교 자체는 이 프로젝트에서 못 끝냈다** -- 완성본이 안 열려서 "전"
+> 값을 못 쟀다. 별도 결함으로 남겨 뒀다(`docs/handoffs/` 최신 인계 참고). 대신
+> **숏폼(세로 하이라이트) 렌더는 성공**했고(job_021, 35.4초), 제목 띠 코드가
+> 실제로 타는 그 렌더 자체는 실물로 확인됐다(R4). R1의 좁은 주장("완성본이
+> 안 바뀐다")은 코드 구조로는 참이지만 **md5로 다시 재지는 못했다** -- 이
+> 프로젝트의 완성본 렌더가 다시 성공하면 재확인이 필요하다.
+
 ### R2. 캡컷 초안에서 `blur`가 어떻게 보이는가
 
 `d7bd2d023` 구현자: *"캡컷 내보내기에서는 흐린 배경이 사라지고 위아래가 빈다"* —
 **경고만 확인했고 실물 초안을 안 열어 봤다.**
 
-### R3. 유진에게 실제로 말해서 숏폼이 나오는가 (Task 3)
+> **2026-09-12 확인.** CapCut 내보내기 코드(`capcut*.py`)를 grep했다 --
+> `shorts_layout`/`shorts_title` 언급이 **0건**이다. 즉 제목 띠는 CapCut 초안에
+> 아예 반영되지 않는다(그려지지도, 참조되지도 않는다) -- 켜져 있어도 CapCut
+> 초안에는 그냥 없는 것으로 나간다. 이건 이번 세션(제목 띠)의 새 문제가
+> 아니라 `d7bd2d023`(그 전 커밋)의 `blur` 기본값 변경에 대한 확인이 계속
+> 밀린 것이다. CapCut 앱이 이 환경에 없어 실물 초안을 열어 실측하지는
+> 못했다 -- 여전히 남은 항목이다.
 
-시험이 아니라 **새 편집판에서 직접 말해서**. 유진이 "없다"고 하면 로그부터 — 후보가 안
-간 것과 갔는데 못 고르는 것은 다른 원인이다.
+### R3. 유진에게 실제로 말해서 숏폼이 나오는가 (Task 3) — **2026-09-12: 시도해서 반증했다**
 
-### R4. 제목 띠가 참고 숏폼 비율과 맞는가 (Task 1)
+시험이 아니라 **새 편집판에서 직접 말해서** 확인하려고 화면의 실제 채팅창(`이야기`
+탭·홈의 `유진에게 물어보기`, `EditorWorkbenchRoute`의 대화창)을 전부 찾아 프론트
+코드로 역추적했다. 결과: **어느 채팅창도 `숏폼 만들기`/`다시 만들기`가 쓰는
+경로(`yujin_creator_proposals.py`/`hermes_run_service.py`)를 부르지 않는다.**
+전부 `sendDirectorMessage`→`createYujinEditingProposal`(`yujin_editing_proposal_service.py`)로
+가고, 그 도메인 모델에는 숏폼 관련 의도가 하나도 없다. 그래서 R3는
+**"안 된다"로 닫는다** — 위 "조사 결과 정정"과 "해야 할 것"에 원인과 다음
+할 일을 적었다. 유진이 "없다"고 답하면 그것도 정직한 답이다(안내문에 그
+의도가 없으니까) — 로그를 볼 필요도 없이 프로필에 없는 의도다.
+
+### R4. 제목 띠가 참고 숏폼 비율과 맞는가 (Task 1) — **2026-09-12 실측으로 닫음**
 
 참고 숏폼을 잰 **같은 스크립트**를 우리 결과물에 돌려 숫자로 대조한다. 눈으로 갈음하지 마라.
+
+> **실측 결과 (`2026-09-12-ca6dd9ed`, 실제로 렌더된 숏폼, job_021 35.4초).**
+> 프레임을 png로 뽑아 행별 밝기·대비로 같은 방식으로 쟀다.
+>
+> | | 실측 | 참고 범위 | 판정 |
+> |---|---|---|---|
+> | 제목 띠 | **20.83%** (0~400px / 1920) | 20.8%~28.6% | 범위 안 (하한과 사실상 일치) |
+> | 영상 띠 세로:가로 | **1.30:1** (831/1080) | 목표 1.3 | 정확히 일치 |
+> | 영상 letterbox | 실제 보이는 영상 510~1120px, 띠 안에서 위아래 균등 여백 | `fit`이면 검은 여백 | 설계대로(자르지 않음, blur 아님) |
+> | 제목 두 줄 | "정답을 안 주는 이유" / "일본 마켓 매출 3배의 비밀", "안"만 초록 | 1행 미끼·2행 결과, 강조 1낱말 | 일치 |
+>
+> 프레임을 눈으로도 봤다 -- 실제 공원 영상이 온전히 보이고, 원본에 구워진
+> 자막("이런 질문이 있을 때마다")이 영상 띠 **안에** 있고 우리 자막은 그
+> 프레임에서는 없었다(이 프로젝트는 구운 자막이 있어 우리 자막 레인이
+> 꺼져 있다 -- 설계대로).
 
 ### 갭 — 계획서 Step 대조 (특히 **안 한 것**)
 
