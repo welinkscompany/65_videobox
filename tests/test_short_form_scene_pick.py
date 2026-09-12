@@ -22,9 +22,11 @@ from videobox_core_engine.short_form_scene_pick import (
     JUDGE_BATCH_SIZE,
     MAX_JUDGED_SCENES,
     MAX_SCAN_CALLS,
-    SCAN_WAIT_SECONDS,
+    SCAN_WAIT_CEILING_SECONDS,
     SYNCHRONOUS_BUDGET_SECONDS,
+    compose_wait_seconds,
     pick_short_form_scenes,
+    scan_wait_seconds,
 )
 from videobox_provider_interfaces.llm import LLMProviderError, StructuredLLMResponse
 
@@ -789,7 +791,9 @@ def test_the_log_names_the_reason_a_batch_never_answered(caplog) -> None:
     board, utterances = _two_batch_board()
     clock = _FakeClock()
     # 필요한 시간이 상한보다 길다 -- 두 묶음 다 끊긴다.
-    runtime = _WaitingRuntime(scan_needs=SCAN_WAIT_SECONDS + 10.0, compose_needs=10.0, clock=clock)
+    runtime = _WaitingRuntime(
+        scan_needs=SCAN_WAIT_CEILING_SECONDS + 10.0, compose_needs=10.0, clock=clock
+    )
 
     with caplog.at_level(logging.INFO, logger="videobox_core_engine.short_form_scene_pick"):
         result = pick_short_form_scenes(
@@ -851,8 +855,54 @@ def test_the_batches_are_read_at_the_same_time_so_each_one_can_wait_longer() -> 
 
     assert runtime.max_in_flight >= 2, "묶음을 차례로 부르면 기다릴 시간이 안 남는다"
     scan_waits = [wait for stage, wait in runtime.waits if stage == "scan"]
-    assert scan_waits and all(wait == SCAN_WAIT_SECONDS for wait in scan_waits), scan_waits
+    expected = scan_wait_seconds(SYNCHRONOUS_BUDGET_SECONDS)
+    assert scan_waits and all(wait == expected for wait in scan_waits), scan_waits
     assert any(stage == "compose" for stage, _ in runtime.waits)
+
+
+def test_the_background_path_waits_longer_per_batch_than_one_request_can_afford() -> None:
+    """**한 묶음을 얼마나 기다릴지는 예산이 정한다.**
+
+    실물(2026-09-12, 대표님 영상): 여섯 묶음을 동시에 물었더니 셋은 42~143초에
+    답하고 셋은 150초 상한에서 끊겨 **94장면 중 44개만** 읽혔다. 뒤에서 도는
+    자리에는 벽이 없으니 더 기다릴 수 있다 -- 그리고 **빠른 날에는 공짜다.**
+    묶음이 동시에 도니까 훑기 단계는 상한만큼 걸리는 게 아니라 **가장 느린 한
+    호출이 끝나면** 끝난다(실측 129.8초).
+
+    같은 요청 안에서 도는 자리는 예산의 절반까지만 쓴다 -- 나머지 절반이 짜기
+    몫이다. 한 호출에 예산을 다 주면 짜기가 아예 못 돌아 "왜 퍼질까"가 사라진다.
+    """
+
+    assert scan_wait_seconds(BACKGROUND_BUDGET_SECONDS) > scan_wait_seconds(
+        SYNCHRONOUS_BUDGET_SECONDS
+    ), "뒤에서 돌 때 더 기다리지 않으면 영상 절반이 유진 눈에서 빠진다"
+    assert scan_wait_seconds(BACKGROUND_BUDGET_SECONDS) == SCAN_WAIT_CEILING_SECONDS
+    # 짜기 몫이 남아야 한다. 실측 짜기 266.8~295.0초.
+    for budget in (SYNCHRONOUS_BUDGET_SECONDS, BACKGROUND_BUDGET_SECONDS):
+        assert budget - scan_wait_seconds(budget) >= COMPOSE_MIN_WAIT_SECONDS, budget
+
+
+def test_the_compose_step_gets_more_time_than_one_request_could_ever_give_it() -> None:
+    """짜기도 예산이 정한다. **330초로는 실물에서 끊겼다.**
+
+    실측(2026-09-12, 대표님 영상): 짜기 한 호출이 266.8초·295.0초에 답했고, 다른
+    작업이 같은 모델을 쓰는 동안에는 330초 상한에서 끊겼다 -- 그때 화면에는
+    "후보를 여러 개 짜 보지는 못해서 퍼질 이유는 남기지 못했어요"가 나갔다.
+    뒤에서 도는 자리에는 벽이 없으니 프록시가 줄 수 있는 것보다 더 준다.
+
+    같은 요청 안에서 도는 자리는 예산 안에 갇힌다 -- 벽을 넘으면 대표님이 우리
+    문구 대신 프록시의 504 HTML을 본다.
+    """
+
+    # 실측대로 훑기가 221.5초를 쓴 뒤.
+    assert compose_wait_seconds(BACKGROUND_BUDGET_SECONDS, 221.5) > 330, (
+        "330초로는 실물에서 끊겼다 -- 그러면 화면에 나갈 퍼질 이유가 사라진다"
+    )
+    sync_spent = float(scan_wait_seconds(SYNCHRONOUS_BUDGET_SECONDS))
+    assert (
+        sync_spent + compose_wait_seconds(SYNCHRONOUS_BUDGET_SECONDS, sync_spent)
+        <= SYNCHRONOUS_BUDGET_SECONDS
+    ), "같은 요청 안에서는 예산을 넘을 수 없다"
 
 
 def test_the_judgement_stops_before_the_proxy_cuts_the_owner_off() -> None:
@@ -866,9 +916,9 @@ def test_the_judgement_stops_before_the_proxy_cuts_the_owner_off() -> None:
     board, utterances = _two_batch_board()
     clock = _FakeClock()
     # 훑기가 예산을 거의 다 쓴다 -- 짜기를 시작할 자리가 없다.
-    budget = float(SCAN_WAIT_SECONDS) + COMPOSE_MIN_WAIT_SECONDS - 10.0
+    budget = 2.0 * (COMPOSE_MIN_WAIT_SECONDS - 5.0)
     runtime = _WaitingRuntime(
-        scan_needs=float(SCAN_WAIT_SECONDS), compose_needs=10.0, clock=clock
+        scan_needs=float(scan_wait_seconds(budget)), compose_needs=10.0, clock=clock
     )
 
     result = pick_short_form_scenes(

@@ -50,14 +50,20 @@ llm 이 구분 하도록 생각하면서 만들어야지."
 
 그런데 상한만 올리면 프록시가 끊는다(`docker/workspace-nginx.conf` 330초). 그래서 둘이다.
 
-1. **묶음을 동시에 묻는다.** 차례로 부르면 여섯 묶음이 최악 780초지만, 동시에
-   부르면 벽시계가 **가장 느린 한 호출**이 된다(실측 129.8초, 여섯 다 답함).
-2. **예산을 시계로 지킨다.** 같은 요청 안에서 도는 부르는 쪽(유진 채팅·처음
-   만들기)은 `SYNCHRONOUS_BUDGET_SECONDS`를 넘지 않는다 -- 짜기를 시작할 시간이
-   없으면 시작하지 않고 그 사실을 문구로 말한다(인포그래픽의 `TOTAL_BUDGET_SECONDS`와
-   같은 방식). 화면의 `다시 만들기`는 **뒤에서 돌기** 때문에 벽이 없어
-   `BACKGROUND_BUDGET_SECONDS`까지 기다린다 -- 훑기 130 + 짜기 267 = 약 400초는
-   한 요청 안에서 절대 못 끝내는 일이다.
+1. **묶음을 동시에 묻는다.** 차례로 부르면 여섯 묶음이 최악 1800초지만, 동시에
+   부르면 벽시계가 **가장 느린 한 호출**이 된다(실측 129.8~221.5초, 여섯 다 답함).
+2. **예산을 시계로 지킨다.** 한 호출을 얼마나 기다릴지도 예산이 정한다
+   (`scan_wait_seconds`·`compose_wait_seconds`). 같은 요청 안에서 도는 부르는 쪽
+   (유진 채팅·처음 만들기)은 `SYNCHRONOUS_BUDGET_SECONDS`를 넘지 않는다 -- 짜기를
+   시작할 시간이 없으면 시작하지 않고 그 사실을 문구로 말한다(인포그래픽의
+   `TOTAL_BUDGET_SECONDS`와 같은 방식). 화면의 `다시 만들기`는 **뒤에서 돌기**
+   때문에 벽이 없어 `BACKGROUND_BUDGET_SECONDS`까지 기다린다.
+
+**실물로 잰 것(2026-09-12, 화면과 같은 HTTP 길로):** 훑기 여섯 묶음 동시에
+221.5초에 **94장면 전부** 읽고, 짜기까지 합쳐 445~558초. 상한을 150초로 두었을
+때는 여섯 중 셋이 끊겨 **94장면 중 44개**만 읽혔다 -- 그래서 상한을 예산에서
+끌어내게 바꿨다. 상한을 올리는 것은 **빠른 날에는 공짜다**: 묶음이 동시에 도니까
+훑기 단계는 상한만큼 걸리는 게 아니라 가장 느린 한 호출이 끝나면 끝난다.
 
 ### 로그 -- "못 찾았다"와 "못 물어봤다"는 다른 원인이다
 
@@ -118,12 +124,17 @@ SHORT_FORM_MAX_TARGET_SEC = 60.0
 #: 유진에게 짜 보라고 할 후보 숏폼 수.
 COMPOSE_CANDIDATES = 3
 
-#: 훑기 한 호출을 기다리는 상한. **실측으로 정했다**(2026-09-12, 대표님 영상):
-#: 넉넉한 상한을 주면 묶음이 34.8~129.8초에 답한다. 30초로는 여섯 중 넷이 끊겼다.
-#: 묶음을 동시에 묻기 때문에 이 값이 훑기 단계의 벽시계 상한이기도 하다.
-SCAN_WAIT_SECONDS = 150
-#: 짜기 한 호출을 기다리는 상한. 실측 266.8초라 여유를 조금 얹었다.
-COMPOSE_WAIT_SECONDS = 330
+#: 훑기 한 호출을 기다리는 **최대** 상한. 실제로 쓰는 값은 예산이 정한다
+#: (`scan_wait_seconds`). **실측으로 정했다**(2026-09-12, 대표님 영상): 묶음이
+#: 34.8~143초에 답하고, 150초 상한에서는 여섯 중 셋이 끊겨 94장면 중 44개만
+#: 읽혔다. 30초로는 여섯 중 넷이 끊겼다.
+SCAN_WAIT_CEILING_SECONDS = 300
+#: 짜기 한 호출을 기다리는 **최대** 상한. 실제로 쓰는 값은 남은 예산이 정한다
+#: (`compose_wait_seconds`). 실측(2026-09-12)으로 266.8초·295.0초에 답했고, 다른
+#: 작업이 같은 모델을 쓰는 동안에는 **330초에서 끊겼다** -- 그때 화면에 나갈
+#: "왜 퍼질까"가 사라진다. 그래서 벽이 없는 자리에서는 프록시가 줄 수 있는
+#: 것보다 더 준다.
+COMPOSE_WAIT_CEILING_SECONDS = 600
 #: 짜기를 아예 시작해 볼 최소 남은 시간. 이보다 적으면 시작하지 않는다 -- 시작해서
 #: 끊기면 기다린 시간만 버리고 결과는 같다.
 COMPOSE_MIN_WAIT_SECONDS = 30
@@ -135,6 +146,28 @@ SYNCHRONOUS_BUDGET_SECONDS = 300
 #: 화면의 `다시 만들기`는 뒤에서 돌기 때문에 프록시 벽이 없다. 실측(훑기 130 +
 #: 짜기 267 = 약 400초)이 이 값을 요구한다 -- 한 요청 안에서는 못 끝내는 일이다.
 BACKGROUND_BUDGET_SECONDS = 900
+
+
+def scan_wait_seconds(budget_seconds: float) -> int:
+    """훑기 한 호출을 기다릴 시간. **예산의 절반까지**, 상한 안에서.
+
+    절반인 이유: 나머지 절반은 짜기 몫이다. 한 호출에 예산을 다 주면 짜기가 아예
+    못 돌아 화면에 나갈 "왜 퍼질까"가 사라진다.
+
+    **상한을 올리는 것은 빠른 날에는 공짜다.** 묶음이 동시에 도니까 훑기 단계는
+    상한만큼 걸리는 게 아니라 가장 느린 한 호출이 끝나면 끝난다(실측 129.8초).
+    올린 값은 느린 날에만 쓰이고, 그때 기다리는 것이 owner 결정이다.
+    """
+    return int(max(1.0, min(float(SCAN_WAIT_CEILING_SECONDS), budget_seconds / 2.0)))
+
+
+def compose_wait_seconds(budget_seconds: float, spent_seconds: float) -> int:
+    """짜기 한 호출을 기다릴 시간. **남은 예산 전부**, 상한 안에서.
+
+    훑기와 달리 절반으로 나누지 않는다 -- 짜기는 마지막 호출이라 남은 것을 다 써도
+    뒤에 밀릴 일이 없다. 실측 266.8~295.0초이고 바쁠 때는 330초도 부족했다.
+    """
+    return int(min(float(COMPOSE_WAIT_CEILING_SECONDS), budget_seconds - spent_seconds))
 
 #: 예전 이름. 부르는 자리와 시험이 쓰고 있어 남겨 둔다.
 MAX_JUDGED_SCENES = MAX_JUDGED_PASSAGES
@@ -792,9 +825,10 @@ def pick_short_form_scenes(
         (start, passages[start : start + batch_size])
         for start in range(0, len(passages), batch_size)
     ][:max_scan_calls]
-    # **한 호출을 얼마나 기다릴지.** 예산이 상한보다 작으면 예산이 이긴다 --
-    # 끊길 것이 뻔한 호출을 시작해서 기다린 시간만 버리지 않는다.
-    scan_wait = int(max(1.0, min(float(SCAN_WAIT_SECONDS), budget_seconds)))
+    # **한 호출을 얼마나 기다릴지는 예산이 정한다**(절반까지). 뒤에서 도는 쪽이
+    # 더 기다리는 이유는 실물에 있다 -- 150초 상한에서 여섯 중 셋이 끊겨 94장면
+    # 중 44개만 읽혔다(2026-09-12).
+    scan_wait = scan_wait_seconds(budget_seconds)
 
     def scan(job: tuple[int, tuple[_Passage, ...]], number: int) -> _ScanOutcome:
         start, batch = job
@@ -879,7 +913,7 @@ def pick_short_form_scenes(
     # **남은 예산을 먼저 본다.** 짜기는 실측 266.8초짜리라, 남은 시간이 없으면
     # 시작해도 끊길 뿐이고 그러면 기다린 시간만 버린다. 인포그래픽이 "한 판 더
     # 돌 시간이 없으면 안 돈다"로 같은 자리를 지킨다.
-    compose_wait = int(min(float(COMPOSE_WAIT_SECONDS), budget_seconds - (clock() - started)))
+    compose_wait = compose_wait_seconds(budget_seconds, clock() - started)
     if shortlist and compose_wait < COMPOSE_MIN_WAIT_SECONDS:
         compose_failed = True
         _LOGGER.info(

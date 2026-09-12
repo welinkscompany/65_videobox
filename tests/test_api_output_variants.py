@@ -13,8 +13,8 @@ from videobox_api.orchestration import (
 )
 from videobox_core_engine.settings import LocalOpenAICompatibleRuntimeConfig
 from videobox_core_engine.short_form_scene_pick import (
-    COMPOSE_WAIT_SECONDS,
-    SCAN_WAIT_SECONDS,
+    COMPOSE_WAIT_CEILING_SECONDS,
+    SCAN_WAIT_CEILING_SECONDS,
 )
 from videobox_provider_interfaces.llm import (
     LLMProviderError,
@@ -1047,12 +1047,12 @@ def test_the_longer_wait_reaches_the_socket_not_just_the_engine(tmp_path: Path) 
             task_type=LLMTaskType.SHORT_FORM_SCENE_PICK,
             prompt="아무 말",
             response_schema={"type": "object", "properties": {"a": {"type": "string"}}},
-            wait_seconds=SCAN_WAIT_SECONDS,
+            wait_seconds=SCAN_WAIT_CEILING_SECONDS,
         )
     except Exception:  # noqa: BLE001
         pass
 
-    assert seen == [SCAN_WAIT_SECONDS], seen
+    assert seen == [SCAN_WAIT_CEILING_SECONDS], seen
 
 
 def test_the_screen_waits_for_yujin_in_the_background_instead_of_hitting_the_proxy_wall(
@@ -1089,7 +1089,7 @@ def test_the_screen_waits_for_yujin_in_the_background_instead_of_hitting_the_pro
     # 예산이 이 값을 깎는다.
     compose_calls = [call for call in provider.calls if "고를 대목:" in call.prompt]
     assert compose_calls, "짜기를 안 불렀으면 퍼질 이유가 안 나온다"
-    assert compose_calls[-1].provider_context["timeout_seconds"] == COMPOSE_WAIT_SECONDS
+    assert compose_calls[-1].provider_context["timeout_seconds"] == COMPOSE_WAIT_CEILING_SECONDS
     # 저장된 값까지 본다. 응답만 보면 화면이 받은 것과 저장된 것이 갈릴 수 있다.
     stored = app.state.store.get_output_variant(
         project_id=project_id, variant_id=variant["variant_id"]

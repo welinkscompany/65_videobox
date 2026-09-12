@@ -7,8 +7,8 @@ from videobox_core_engine.infographic_host_bridge import BRIDGE_PORT
 from videobox_core_engine.infographic_service import TOTAL_BUDGET_SECONDS
 from videobox_core_engine.short_form_scene_pick import (
     BACKGROUND_BUDGET_SECONDS,
-    SCAN_WAIT_SECONDS,
     SYNCHRONOUS_BUDGET_SECONDS,
+    scan_wait_seconds,
 )
 
 
@@ -463,8 +463,9 @@ def test_the_proxy_waits_longer_than_judging_a_short_inside_one_request() -> Non
         f"{proxy_seconds}초에 끊는다; 화면은 우리 문구 대신 504를 본다"
     )
     # 한 호출 상한이 예산을 넘으면 훑기 한 번에 예산이 다 나가고 짜기는 못 돈다.
-    assert SCAN_WAIT_SECONDS < SYNCHRONOUS_BUDGET_SECONDS, (
-        f"훑기 상한 {SCAN_WAIT_SECONDS}초가 예산 {SYNCHRONOUS_BUDGET_SECONDS}초를 다 먹는다"
+    sync_scan_wait = scan_wait_seconds(SYNCHRONOUS_BUDGET_SECONDS)
+    assert sync_scan_wait < SYNCHRONOUS_BUDGET_SECONDS, (
+        f"훑기 상한 {sync_scan_wait}초가 예산 {SYNCHRONOUS_BUDGET_SECONDS}초를 다 먹는다"
     )
     assert BACKGROUND_BUDGET_SECONDS > proxy_seconds, (
         "뒤에서 도는 예산이 프록시 벽보다 작으면 비동기로 옮긴 이유가 없어진다"
