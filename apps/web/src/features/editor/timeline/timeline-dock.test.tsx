@@ -815,6 +815,35 @@ describe("TimelineDock", () => {
     expect(timeline).toHaveAttribute("data-pixels-per-second", "100");
   });
 
+  it("듣는 자리는 단추·키뿐 아니라 밖에서 오는 명령도 같은 표를 탄다", () => {
+    // 유진에게 "타임라인 좀 늘려줘"라고 말해도 이 자리를 타야 한다(대표님 상시
+    // 지시, task-3-brief.md). `EditorWorkbenchRoute`는 이 컴포넌트의 `dispatch`를
+    // 모르므로, 단추·키와 같은 `runZoom` 표를 거치는 선언적 명령 하나가 필요하다.
+    // `requestId`가 바뀔 때만 실행한다 -- 같은 명령을 값만 유지한 채 다시
+    // 렌더하면(다른 상태 변화로) 또 실행되어 계속 늘어나는 사고를 막는다.
+    const { rerender } = render(
+      <TimelineDock view={view} viewportWidthPx={WIDTH_FOR_100_PX_PER_SECOND} zoomCommand={null} />,
+    );
+    const timeline = screen.getByRole("region", { name: "타임라인" });
+    expect(timeline).toHaveAttribute("data-pixels-per-second", "100");
+
+    rerender(
+      <TimelineDock view={view} viewportWidthPx={WIDTH_FOR_100_PX_PER_SECOND} zoomCommand={{ command: "in", requestId: 1 }} />,
+    );
+    expect(timeline).toHaveAttribute("data-pixels-per-second", "125");
+
+    // 같은 requestId로 다시 렌더해도 한 번 더 늘지 않는다.
+    rerender(
+      <TimelineDock view={view} viewportWidthPx={WIDTH_FOR_100_PX_PER_SECOND} zoomCommand={{ command: "in", requestId: 1 }} />,
+    );
+    expect(timeline).toHaveAttribute("data-pixels-per-second", "125");
+
+    rerender(
+      <TimelineDock view={view} viewportWidthPx={WIDTH_FOR_100_PX_PER_SECOND} zoomCommand={{ command: "out", requestId: 2 }} />,
+    );
+    expect(timeline).toHaveAttribute("data-pixels-per-second", "100");
+  });
+
   it("fits the whole timeline into view with one control", () => {
     // 확대·축소는 한 칸씩만 움직인다. 긴 영상에서 전체를 다시 보려면 축소를
     // 열 번 눌러야 했다 -- 캡컷에는 전체 맞춤이 따로 있다. 확대와 **같은

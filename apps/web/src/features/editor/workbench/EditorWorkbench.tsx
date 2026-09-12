@@ -14,6 +14,7 @@ import type { ApprovedTtsCandidate, InspectorAction, PartialRegenerationControls
 import { PreviewStage, type AuditionRequest, type AuditionSource } from "../preview/preview-stage";
 import { sceneNumbersBySegmentId } from "../sceneNames";
 import { TimelineDock } from "../timeline/TimelineDock";
+import type { TimelineZoomCommand } from "../timeline/timelineZoomShortcuts";
 import { activeSegmentIdAt, clampPlaybackSeconds } from "../transcript/playbackNavigation";
 import { isVideoAssetUri } from "../assetKind";
 import { EditorWorkbenchReadOnlyAdapters } from "./editorWorkbenchReadOnlyAdapters";
@@ -120,6 +121,9 @@ type EditorWorkbenchProps = Readonly<{
    *  조용히 죽는다(2026-09-11 실물 확인). */
   onVariantRemakeShortForm?: (variant: OutputVariant) => void | Promise<void>;
   variantBusy?: boolean;
+  /** 유진 채팅에서 온 확대·축소 명령(task-3-brief.md). `TimelineDock`에
+   *  그대로 흘려준다 -- 이 컴포넌트는 중간에서 판단하지 않는다. */
+  zoomCommand?: Readonly<{ command: TimelineZoomCommand; requestId: number }> | null;
 }>;
 
 export function EditorWorkbench(props: EditorWorkbenchProps) {
@@ -160,6 +164,7 @@ function EditorWorkbenchInstance({
   onVariantCreateHighlight,
   onVariantRemakeShortForm,
   variantBusy = false,
+  zoomCommand = null,
 }: EditorWorkbenchProps) {
   const viewRouteKey = `${view.projectId}:${view.sessionId}`;
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
@@ -815,6 +820,7 @@ function EditorWorkbenchInstance({
       selectedSegmentId={selectedSegmentId}
       view={view}
       viewportWidthPx={Math.max(1, Math.round(availableWorkbenchWidth))}
+      zoomCommand={zoomCommand}
     />
     {/* 팝업은 열었을 때만 그린다 -- 출력 화면은 스스로 상태를 읽으므로, 늘 그려
         두면 편집하는 내내 쓰지도 않을 요청이 돈다. */}

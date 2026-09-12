@@ -23,6 +23,8 @@ import { yujinEditingOperationSummary } from "./yujinEditingSummary";
 import { sceneLabelsBySegmentId, sceneNumbersBySegmentId } from "../sceneNames";
 import { canRestorePartialRegenerationResult, canRunPartialRegeneration, createPartialRegenerationTicket, PARTIAL_REGENERATION_FIELDS, preflightMatchesPartialRegenerationTicket, runMatchesPartialRegenerationTicket, type PartialRegenerationTicket } from "../partialRegenerationController";
 import { EditorWorkbench } from "./EditorWorkbench";
+import { timelineZoomCommandFromInstruction } from "../timeline/timelineZoomVoiceCommand";
+import type { TimelineZoomCommand } from "../timeline/timelineZoomShortcuts";
 import { buildQualityFollowUps } from "./qualityFollowUps";
 import type { RightDockCompletionEntry, RightDockDirector, RightDockEditingProposalPreview, RightDockMessage, RightDockProposal } from "./rightDockTypes";
 
@@ -268,6 +270,14 @@ function capDirectorMessages(messages: readonly RightDockMessage[]) {
   return messages.slice(-maxDirectorMessages);
 }
 
+/** 타임라인 확대·축소 채팅 답장. 화면 단추의 title과 같은 말을 쓴다
+ *  (`TimelineDock.tsx`의 "늘리기"·"줄이기"·"전체 보기"). */
+function timelineZoomReplyText(command: TimelineZoomCommand): string {
+  if (command === "in") return "타임라인을 확대했어요.";
+  if (command === "out") return "타임라인을 축소했어요.";
+  return "타임라인이 영상 전체가 보이도록 맞춰졌어요.";
+}
+
 export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId = null }: { projectId: string; sessionId: string | null; requestedSegmentId?: string | null }) {
   const requestKey = `${projectId}:${sessionId ?? "missing"}`;
   const [refreshToken, setRefreshToken] = useState(0);
@@ -316,6 +326,12 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const activeHermesRouteRun = useRef<ActiveHermesRouteRun | null>(null);
   const lastDirectorSubmission = useRef<{ conversationId: string; clientMessageId: string; text: string } | null>(null);
   const hermesOperationId = useRef(0);
+  // 유진 채팅으로 온 타임라인 확대·축소(task-3-brief.md). **세션 리비전도,
+  // 되돌리기 기록도, 창작 제안도 안 쓴다** -- 편집본을 안 바꾸는 보는 방식이라
+  // 위 두 편집 대화 경로(A/B) 어느 쪽에도 안 보낸다. `TimelineDock`은 이 값이
+  // 바뀔 때만 실행한다(`requestId`), 그래서 매번 새 번호를 매긴다.
+  const timelineZoomRequestId = useRef(0);
+  const [timelineZoomCommand, setTimelineZoomCommand] = useState<Readonly<{ command: TimelineZoomCommand; requestId: number }> | null>(null);
   const currentDirectorConversationId = useRef<string | null>(null);
   const partialInFlight = useRef(false);
   const currentEditorRevision = useRef(state.view?.expectedRevision ?? null);
@@ -1883,12 +1899,45 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       }
     }
   };
+  /** 유진 채팅으로 타임라인을 늘리고 줄인다(task-3-brief.md, 대표님 상시 지시
+   *  2026-09-11: "화면으로 되는 일은 전부 유진에게 말해서도 되어야 한다").
+   *
+   *  **직접 편집 대화(A)에도, 창작 제안(B)에도 안 보낸다.** 둘 다 세션
+   *  리비전을 다루려고 만들어졌다 -- A는 적용마다 되돌리기 기록을 쌓고, B는
+   *  사람이 눌러야 적용되는 후보만 만든다. 확대·축소는 편집본을 한 글자도
+   *  안 바꾸는 **보는 방식**이라 되돌릴 것도, 검토할 것도 없다. 그래서 모델도
+   *  거치지 않고 `timelineZoomCommandFromInstruction`이 결정적으로 판단하고,
+   *  걸리면 그 자리에서 `TimelineDock`에 명령만 내린 뒤 끝낸다
+   *  (`docs/surveys/2026-09-11-yujin-command-gap.ko.md` §0).
+   *
+   *  단추가 이미 눌러도 아무 일 없는 한계(`zoomControls[command].enabled`가
+   *  거짓)에서 잠기므로, 여기 답장은 그 한계를 모른 채 "확대했다"고 말할 수
+   *  있다 -- 사소한 낙관이지만 세션이 걸린 편집과 달리 되돌릴 것이 없는
+   *  view 상태라 위험이 없다(알려진 한계, task-3-report.md에 적음). */
+  const applyTimelineZoomCommand = (command: TimelineZoomCommand, submittedDraft: string, clientMessageId: string) => {
+    timelineZoomRequestId.current += 1;
+    setTimelineZoomCommand({ command, requestId: timelineZoomRequestId.current });
+    setDirector((current) => current.key === requestKey ? {
+      ...current,
+      draft: current.draft === submittedDraft ? "" : current.draft,
+      messages: capDirectorMessages([
+        ...current.messages,
+        { id: `zoom-user:${clientMessageId}`, role: "user", text: submittedDraft },
+        { id: `zoom-reply:${clientMessageId}`, role: "assistant", text: timelineZoomReplyText(command) },
+      ]),
+    } : current);
+  };
   const sendDirectorMessage = async (text: string) => {
     const submittedDraft = text.trim();
     if (!submittedDraft) return;
     const clientMessageId = globalThis.crypto?.randomUUID?.();
     if (!clientMessageId) {
       setDirector((current) => current.key === requestKey ? { ...current, runState: { kind: "unavailable", message: yujinUnavailableMessage } } : current);
+      return;
+    }
+    const zoomCommand = timelineZoomCommandFromInstruction(submittedDraft);
+    if (zoomCommand) {
+      applyTimelineZoomCommand(zoomCommand, submittedDraft, clientMessageId);
       return;
     }
     await submitDirectorMessage(submittedDraft, clientMessageId);
@@ -2436,6 +2485,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     onVariantRemakeShortForm={makeShortForm}
     variantBusy={variants.key === requestKey && variants.busy}
     view={state.view}
+    zoomCommand={timelineZoomCommand}
     />
   </>;
 }

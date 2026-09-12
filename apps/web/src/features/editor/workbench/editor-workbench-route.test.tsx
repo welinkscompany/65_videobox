@@ -4457,6 +4457,40 @@ describe("EditorWorkbenchRoute", () => {
     expect(clipSelectionButton("n-1")).toBeEnabled();
   });
 
+  // 대표님 상시 지시(2026-09-11): 화면으로 되는 일은 전부 유진에게 말해서도
+  // 되어야 한다 -- 타임라인 확대·축소도 예외가 아니다(task-3-brief.md). 다만
+  // 이건 편집본을 안 바꾸는 **보는 방식**이라 세션 리비전도, 되돌리기 기록도,
+  // 창작 제안(사람이 눌러야 적용되는 후보)도 필요 없다. 그래서 유진의 두
+  // 대화 경로(편집 대화 A, 창작 제안 B) 어느 쪽도 부르지 않고 그 자리에서
+  // 타임라인만 옮긴다 -- 세 경로를 그대로 뒀으면 이 시험은 방금 만든 후보를
+  // 사람이 또 눌러야 하는 화면을 봤을 것이다.
+  it("타임라인 확대는 유진의 편집 대화·창작 제안 어느 쪽도 부르지 않고 그 자리에서 옮긴다", async () => {
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000011");
+    const createConversation = vi.spyOn(api, "createDirectorConversation");
+    const sendMessage = vi.spyOn(api, "sendDirectorMessage");
+    const createEditingProposal = vi.mocked(api.createYujinEditingProposal);
+    createEditingProposal.mockClear();
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
+    const timeline = screen.getByRole("region", { name: "타임라인" });
+    // 처음 배율이 영상 길이에서 나오므로(`timelineZoomScale.ts`) 픽셀을
+    // 못박지 않는다 -- 위 2175번째 줄 근처의 기존 시험과 같은 이유다.
+    const before = Number(timeline.getAttribute("data-pixels-per-second"));
+
+    const composer = await screen.findByRole("textbox", { name: "유진에게 요청하기" });
+    fireEvent.change(composer, { target: { value: "타임라인 좀 늘려줘" } });
+    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+
+    await screen.findByText("타임라인을 확대했어요.");
+    expect(timeline).toHaveAttribute("data-pixels-per-second", String(before * 1.25));
+    expect(createConversation).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(createEditingProposal).not.toHaveBeenCalled();
+  });
+
   // owner 2026-09-01: "바로 적용하자". 예전에는 이 시험이 정반대를 재고 있었다 --
   // 보낸 말로는 편집안조차 만들지 않는다는 것. 부품은 전부 있었고 대화가 그 경로를
   // 부르지 않았을 뿐이라, owner는 말로 컷 편집이 되는 것을 한 번도 볼 수 없었다.

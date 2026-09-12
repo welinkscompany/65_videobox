@@ -79,6 +79,12 @@ type Props = Readonly<{
    *  전부 `EditorWorkbench`가 갖고 있으므로 여기서는 다시 짜지 않고
    *  그린 결과만 받는다. */
   editToolbar?: ReactNode;
+  /** 유진 채팅에서 온 확대·축소 명령(task-3-brief.md). 소유자(`EditorWorkbenchRoute`)는
+   *  이 컴포넌트의 내부 `dispatch`를 모르므로, 단추·키와 **같은 `runZoom` 표**를
+   *  선언적으로 부르는 자리가 하나 더 필요하다. `requestId`는 `playbackSec`처럼
+   *  밖에서 오는 값이 바뀔 때만 실행하기 위한 표식이다 -- 없으면 명령 내용이
+   *  같은 채로 다시 렌더될 때마다(다른 상태 변화로) 또 실행되어 계속 늘어난다. */
+  zoomCommand?: Readonly<{ command: TimelineZoomCommand; requestId: number }> | null;
 }>;
 
 type PointerDraft = Readonly<{
@@ -216,7 +222,7 @@ function navigationReducer(
   return reduceTimelineNavigation(state, action, options);
 }
 
-export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, onTrimNarration, onReorderNarration, onUpdatePlacements, onUpdateTrackStates, onSelectSegment, onPlaybackSeek, onDropAsset, selectedSegmentId = null, selectionResetKey = null, playbackSec, isSaving = false, mutationMessage, editToolbar }: Props) {
+export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, onTrimNarration, onReorderNarration, onUpdatePlacements, onUpdateTrackStates, onSelectSegment, onPlaybackSeek, onDropAsset, selectedSegmentId = null, selectionResetKey = null, playbackSec, isSaving = false, mutationMessage, editToolbar, zoomCommand = null }: Props) {
   // 늘리기·줄이기의 한계는 **영상 길이와 화면 폭에서 나온다.** 줄이기는 영상
   // 전체가 한 화면에 들어온 자리에서 멈추고, 늘리기는 프레임이 보이는 자리에서
   // 멈춘다(`timelineZoomScale.ts`).
@@ -433,6 +439,17 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+  // 유진 채팅에서 온 명령(`zoomCommand`)도 **단추·키와 같은 표**(`runZoomRef`)를
+  // 거친다 -- 한계에서 채팅으로는 한 칸 더 가는 어긋남을 막는다. `requestId`가
+  // 실제로 바뀐 순간에만 실행한다(`selectionResetKey`와 같은 이유,
+  // 위 328번째 줄 근처 주석 참고) -- 없으면 다른 상태 변화로 다시 렌더될
+  // 때마다 같은 명령이 또 실행돼 계속 늘어난다.
+  const previousZoomRequestId = useRef<number | null>(null);
+  useEffect(() => {
+    if (!zoomCommand || previousZoomRequestId.current === zoomCommand.requestId) return;
+    previousZoomRequestId.current = zoomCommand.requestId;
+    runZoomRef.current(zoomCommand.command);
+  }, [zoomCommand]);
   const handleWheel = (event: WheelEvent<HTMLElement>) => {
     if (event.deltaX === 0) return;
     event.preventDefault();
