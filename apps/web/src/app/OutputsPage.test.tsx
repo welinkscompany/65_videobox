@@ -2702,4 +2702,250 @@ describe("완성본 실패 이유", () => {
     });
     expect(vi.mocked(api.listJobs).mock.calls.length).toBe(callsWhenDone);
   });
+
+  /** task-6-brief.md (대표님 지시 2026-09-12): *"숏폼으로 변환 버튼을 누르면
+   *  ... 자동으로 만들어내는거야."*
+   *
+   *  판단은 이미 된다(실물: `judged_by: yujin`, 94/94 읽음). 없는 것은 **누를
+   *  자리**다 -- 지금은 편집기의 `가로·세로 비교` 모드에 들어가 모양을 만들고
+   *  렌더까지 여러 단계다. 아래 시험들이 재는 것은 "한 번 눌러 받을 수 있는가"
+   *  하나이고, 그 안에 단계가 몇 개인지는 화면 밖 사정이다. */
+  const shortFormVariant = {
+    variant_id: "variant-short-1",
+    kind: "vertical_highlight",
+    source_session_id: "session-a",
+    source_session_revision: 7,
+    variant_revision: 3,
+    overrides: { crop: null, focal: null, caption: null, safe_area: null, audio: null },
+    locks: [],
+    conflicts: [],
+    selected_segment_ids: ["segment-a", "segment-b"],
+    master_segment_ids: ["segment-a", "segment-b", "segment-c"],
+  };
+  const shortFormScenePick = {
+    judged_by: "yujin",
+    notice: "유진이 전 구간을 읽고 퍼질 대목을 골랐어요.",
+    scenes_total: 94,
+    scenes_read_by_yujin: 94,
+    spread_reason: "알려주지 않겠다는 반어로 훅을 걸고, 매출 3배라는 결과로 끝까지 붙잡는다.",
+    board_scenes_cut: 0,
+  };
+  const shortFormRenderJob = {
+    job_id: "variant-job-s1", project_id: "project_a", job_type: "final_render", status: "running",
+    input_ref: "variant-materialized-timeline-s1", output_ref: null, error_message: null, started_at: null, finished_at: null,
+  };
+
+  /** 숏폼 렌더가 실제 파일로 끝나는 자리까지 깔아 둔다 -- 버튼이 판단만 하고
+   *  멈추면 대표님은 "받아봤는데"를 못 한다. */
+  function stubShortFormRenderTail() {
+    vi.spyOn(api, "startVariantRenders").mockResolvedValue({
+      project_id: "project_a",
+      status: "accepted",
+      items: [{ variant_id: "variant-short-1", variant_kind: "vertical_highlight", job_id: "variant-job-s1", status: "pending", error_code: null }],
+    });
+    vi.mocked(api.listJobs).mockResolvedValue([activeTimelineJob, shortFormRenderJob] as never);
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: "variant-job-s1", status: "succeeded", render: {
+        export_id: "variant-job-s1", timeline_id: "variant-materialized-timeline-s1", export_type: "final_render",
+        file_uri: "local://vertical-highlight.mp4", status: "succeeded", source_session_id: null, source_session_revision: null, is_current: true,
+      },
+    } as never);
+  }
+
+  it("숏폼으로 변환을 한 번 누르면 고르기부터 내려받기까지 이어서 끝낸다", async () => {
+    stubCanonicalSubtitleApi();
+    vi.spyOn(api, "listOutputVariants").mockResolvedValue({ variants: [] as never });
+    const createOutputVariant = vi.spyOn(api, "createOutputVariant").mockResolvedValue({
+      variant: shortFormVariant as never,
+      // 판을 두 군데 나눴다 -- 그러면 판 버전이 올라가므로 화면이 다시 읽어야
+      // 한다. 안 읽으면 나누기 전 장면을 보여 주고 다음 편집이 낡은 버전으로 나간다.
+      scene_pick: { ...shortFormScenePick, board_scenes_cut: 2 } as never,
+    });
+    stubShortFormRenderTail();
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    const convert = await screen.findByRole("button", { name: "숏폼으로 변환" });
+    await waitFor(() => expect(convert).toBeEnabled());
+    fireEvent.click(convert);
+
+    // 1) 유진이 고른다.
+    await waitFor(() => expect(createOutputVariant).toHaveBeenCalledWith("project_a", {
+      source_session_id: "session-a", kind: "vertical_highlight",
+    }));
+    // 2) 판단 결과를 **누가 골랐는지까지** 같은 문구 함수로 말한다.
+    expect(await screen.findByText(/유진이 전 구간을 읽고 퍼질 대목을 골랐어요\./)).toBeVisible();
+    expect(screen.getByText(/퍼질 이유: 알려주지 않겠다는 반어로/)).toBeVisible();
+    // 3) 이어서 렌더까지 건다 -- 대표님이 두 번째 단추를 찾지 않는다.
+    await waitFor(() => expect(api.startVariantRenders).toHaveBeenCalledWith("project_a", {
+      session_id: "session-a", variant_ids: ["variant-short-1"],
+    }));
+    // 4) 받을 수 있다.
+    expect(await screen.findByRole("link", { name: "세로 하이라이트 내려받기" })).toHaveAttribute(
+      "href", "/api/projects/project_a/final-renders/variant-job-s1/content",
+    );
+    // 판을 나눴으면 다시 읽는다(맨 처음 읽기 + 나눈 뒤 읽기).
+    expect(vi.mocked(api.getLatestEditingSession).mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("숏폼이 이미 있으면 두 번째 누름이 막히지 않고 장면을 다시 고른다", async () => {
+    vi.useFakeTimers();
+    stubCanonicalSubtitleApi();
+    vi.spyOn(api, "listOutputVariants").mockResolvedValue({ variants: [shortFormVariant] as never });
+    const createOutputVariant = vi.spyOn(api, "createOutputVariant");
+    const repickShortFormScenes = vi.spyOn(api, "repickShortFormScenes").mockResolvedValue({ job_id: "pick-job-1", status: "processing" });
+    vi.spyOn(api, "getShortFormRepickJob").mockResolvedValue({
+      job_id: "pick-job-1", status: "succeeded", error_detail: null,
+      result: { variant: { ...shortFormVariant, variant_revision: 4 }, scene_pick: shortFormScenePick } as never,
+    });
+    stubShortFormRenderTail();
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    await flush(12);
+    fireEvent.click(screen.getByRole("button", { name: "숏폼으로 변환" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); await flush(12); });
+
+    // 한 편집본에 숏폼은 하나뿐이라 두 번 만들면 409다 -- 그래서 만들지 않고 다시 고른다.
+    expect(createOutputVariant).not.toHaveBeenCalled();
+    expect(repickShortFormScenes).toHaveBeenCalledWith("project_a", "variant-short-1", { expected_variant_revision: 3 });
+    expect(screen.getByText(/숏폼을 다시 만들었어요\./)).toBeVisible();
+    expect(api.startVariantRenders).toHaveBeenCalledWith("project_a", { session_id: "session-a", variant_ids: ["variant-short-1"] });
+  });
+
+  it("숏폼 고르기가 끝나면 스스로 묻기를 멈춘다", async () => {
+    vi.useFakeTimers();
+    stubCanonicalSubtitleApi();
+    vi.spyOn(api, "listOutputVariants").mockResolvedValue({ variants: [shortFormVariant] as never });
+    vi.spyOn(api, "repickShortFormScenes").mockResolvedValue({ job_id: "pick-job-1", status: "processing" });
+    const getShortFormRepickJob = vi.spyOn(api, "getShortFormRepickJob")
+      .mockResolvedValueOnce({ job_id: "pick-job-1", status: "processing", result: null, error_detail: null })
+      .mockResolvedValue({
+        job_id: "pick-job-1", status: "succeeded", error_detail: null,
+        result: { variant: { ...shortFormVariant, variant_revision: 4 }, scene_pick: shortFormScenePick } as never,
+      });
+    stubShortFormRenderTail();
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    await flush(12);
+    fireEvent.click(screen.getByRole("button", { name: "숏폼으로 변환" }));
+    // 두 번 물어서 끝난다(처리 중 -> 완료).
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000 * 2); await flush(12); });
+    expect(screen.getByText(/숏폼을 다시 만들었어요\./)).toBeVisible();
+    const callsWhenDone = getShortFormRepickJob.mock.calls.length;
+
+    // 끝난 뒤에도 계속 두드리면 영원히 서버를 부른다 -- 이 화면에서 가장 나쁜 결말이다.
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000 * 20); await flush(12); });
+    expect(getShortFormRepickJob.mock.calls.length).toBe(callsWhenDone);
+  });
+
+  /** Task 5(수량 판단)는 이 조각이 만들지 않는다. 다만 유진이 **"터질 대목이
+   *  없다"**고 답할 수 있게 되어도 이 단추가 깨지지 않아야 한다 -- 만들 것이
+   *  없으면 렌더를 걸지 않고 이유를 말한다. */
+  it("쓸 대목이 없다고 하면 렌더를 걸지 않고 이유를 말한다", async () => {
+    vi.useFakeTimers();
+    stubCanonicalSubtitleApi();
+    vi.spyOn(api, "listOutputVariants").mockResolvedValue({ variants: [shortFormVariant] as never });
+    vi.spyOn(api, "repickShortFormScenes").mockResolvedValue({ job_id: "pick-job-1", status: "processing" });
+    vi.spyOn(api, "getShortFormRepickJob").mockResolvedValue({
+      job_id: "pick-job-1", status: "failed", result: null, error_detail: "short_form_has_no_scene_to_pick",
+    });
+    stubShortFormRenderTail();
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    await flush(12);
+    fireEvent.click(screen.getByRole("button", { name: "숏폼으로 변환" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); await flush(12); });
+
+    expect(screen.getByText("숏폼에 넣을 장면을 찾지 못했어요. 지금 숏폼은 그대로 뒀어요. 장면을 넣거나 자막을 채운 뒤 다시 해 주세요.")).toBeVisible();
+    expect(api.startVariantRenders).not.toHaveBeenCalled();
+  });
+
+  /** 같은 대비의 다른 모양: 판단이 **성공했는데 만들 것을 안 준** 경우. Task 5가
+   *  "터질 대목이 없다"를 이렇게 답하게 되어도 이 단추는 빈 목록으로 렌더를 걸지
+   *  않고 유진의 말만 옮긴다. */
+  it("판단이 만들 것을 안 주면 렌더를 걸지 않고 유진의 말을 옮긴다", async () => {
+    vi.useFakeTimers();
+    stubCanonicalSubtitleApi();
+    vi.spyOn(api, "listOutputVariants").mockResolvedValue({ variants: [shortFormVariant] as never });
+    vi.spyOn(api, "repickShortFormScenes").mockResolvedValue({ job_id: "pick-job-1", status: "processing" });
+    vi.spyOn(api, "getShortFormRepickJob").mockResolvedValue({
+      job_id: "pick-job-1", status: "succeeded", error_detail: null,
+      result: {
+        variant: null,
+        scene_pick: { ...shortFormScenePick, notice: "이 영상에서는 퍼질 대목을 찾지 못했어요.", spread_reason: null },
+      } as never,
+    });
+    stubShortFormRenderTail();
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    await flush(12);
+    fireEvent.click(screen.getByRole("button", { name: "숏폼으로 변환" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); await flush(12); });
+
+    expect(screen.getByText(/이 영상에서는 퍼질 대목을 찾지 못했어요\./)).toBeVisible();
+    expect(api.startVariantRenders).not.toHaveBeenCalled();
+    // 단추가 잠긴 채 남지 않는다 -- 다시 눌러볼 수 있어야 한다.
+    expect(screen.getByRole("button", { name: "숏폼으로 변환" })).toBeEnabled();
+  });
+
+  /** **실물에서 밟은 결함이다**(2026-09-12, 브라우저 + 실제 API): 검토와 합쳐진
+   *  화면(`ReviewAndOutputPage`)에서 `숏폼으로 변환`을 누르면 목록만 한 번 묻고
+   *  조용히 멈췄다. 이유는 위쪽 절반이 내려주는 `shared`가 **읽을 때마다 새
+   *  객체**여서, 그 값이 바뀔 때 도는 정리 effect가 진행 중인 숏폼 만들기를
+   *  취소해 버린 것이다. 숏폼은 몇 분이 걸리므로 그 사이 화면이 스스로 다시
+   *  읽는 것은 확실하다 -- 즉 합쳐진 화면에서는 **늘** 멈춘다.
+   *
+   *  화면 시험만 돌렸을 때는 안 보였다(단독으로 쓰면 `shared`가 없다). */
+  it("화면이 스스로 다시 읽어도 숏폼 만들기가 취소되지 않는다", async () => {
+    vi.useFakeTimers();
+    stubCanonicalSubtitleApi();
+    const timeline = await api.getTimeline("project_a", "timeline-current");
+    const review = await api.getReviewSnapshot("project_a", "timeline-current");
+    const sharedRead = {
+      session: editingSession, jobs: [activeTimelineJob], job: activeTimelineJob,
+      timeline, review, approval: currentApproval,
+    } as unknown as SharedTimelineRead;
+    vi.spyOn(api, "listOutputVariants").mockResolvedValue({ variants: [shortFormVariant] as never });
+    vi.spyOn(api, "repickShortFormScenes").mockResolvedValue({ job_id: "pick-job-1", status: "processing" });
+    vi.spyOn(api, "getShortFormRepickJob").mockResolvedValue({
+      job_id: "pick-job-1", status: "succeeded", error_detail: null,
+      result: { variant: { ...shortFormVariant, variant_revision: 4 }, scene_pick: shortFormScenePick } as never,
+    });
+    stubShortFormRenderTail();
+    const onSharedRefresh = vi.fn(async () => sharedRead);
+
+    const view = render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} shared={sharedRead} onSharedRefresh={onSharedRefresh} />);
+    await flush(12);
+    fireEvent.click(screen.getByRole("button", { name: "숏폼으로 변환" }));
+    await flush(6);
+    // 위쪽 절반이 다시 읽어 같은 내용을 **새 객체로** 내려준다.
+    view.rerender(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} shared={{ ...sharedRead }} onSharedRefresh={onSharedRefresh} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); await flush(12); });
+
+    expect(screen.getByText(/숏폼을 다시 만들었어요\./)).toBeVisible();
+    expect(api.startVariantRenders).toHaveBeenCalledWith("project_a", { session_id: "session-a", variant_ids: ["variant-short-1"] });
+  });
+
+  it("만드는 중에 또 눌러도 한 번만 시작한다", async () => {
+    vi.useFakeTimers();
+    stubCanonicalSubtitleApi();
+    vi.spyOn(api, "listOutputVariants").mockResolvedValue({ variants: [shortFormVariant] as never });
+    const repickShortFormScenes = vi.spyOn(api, "repickShortFormScenes").mockResolvedValue({ job_id: "pick-job-1", status: "processing" });
+    vi.spyOn(api, "getShortFormRepickJob").mockResolvedValue({ job_id: "pick-job-1", status: "processing", result: null, error_detail: null });
+    stubShortFormRenderTail();
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    await flush(12);
+    const convert = screen.getByRole("button", { name: "숏폼으로 변환" });
+    // 잇달아 두 번 누른다. 변형 탐침(task-6-report.md)으로 확인한 것: 여기서 실제로
+    // 막는 것은 회색 처리(`disabled`)이고, 핸들러 안의 ref는 그 뒤를 받치는 겹이다.
+    await act(async () => { fireEvent.click(convert); fireEvent.click(convert); });
+    await flush(12);
+
+    const busy = screen.getByRole("button", { name: "숏폼 만드는 중" });
+    expect(busy).toBeDisabled();
+    fireEvent.click(busy);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); await flush(12); });
+    expect(repickShortFormScenes).toHaveBeenCalledTimes(1);
+  });
 });

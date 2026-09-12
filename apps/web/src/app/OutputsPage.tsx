@@ -8,8 +8,10 @@ import {
   type EditorPlaybackManifest,
   type FinalRenderJob,
   type JobRecord,
+  type OutputVariant,
   type ReviewApproval,
   type ReviewSnapshot,
+  type ShortFormScenePick,
   type SubtitleJob,
   type TimelineJob,
   type VariantRenderItem,
@@ -23,8 +25,14 @@ import { VariantOutputCard } from "../features/outputs/VariantOutputCard";
 // 옮겼다 -- `VariantOutputCard`도 같은 표를 나눠 쓴다. 아래 세 함수는 이
 // 파일 밖(`OutputsPage.test.tsx`)에서 여전히 `from "./OutputsPage"`로
 // 가져오므로 다시 내보낸다(재수출).
-import { capcutDraftFailureMessage, finalRenderFailureMessage, subtitleFailureMessage } from "../features/outputs/outputFailureMessages";
+import { capcutDraftFailureMessage, finalRenderFailureMessage, shortFormFailureMessage, subtitleFailureMessage } from "../features/outputs/outputFailureMessages";
 import { mergeVariantRenderItems, variantLabel, variantRenderSummary } from "../features/outputs/variantOutputState";
+// 숏폼 문구와 걸어 두고 물어보는 뼈대는 **편집기 쪽에 있는 것을 그대로 쓴다.**
+// 새로 짜면 같은 결과가 화면마다 다르게 읽히고, 그중 하나가 **누가 골랐는지**를
+// 빼먹는다(`shortFormNotice.ts` 머리말). 자리를 옮기지 않는 이유는 편집기가
+// 지금도 같은 경로로 부르고 있어서다 -- 옮기면 두 화면이 갈라진다.
+import { shortFormPickNotice } from "../features/editor/variants/shortFormNotice";
+import { repickShortFormWithProgress } from "../features/editor/workbench/shortFormRepickProgress";
 
 export { capcutDraftFailureMessage, finalRenderFailureMessage, subtitleFailureMessage } from "../features/outputs/outputFailureMessages";
 // "지금 편집본의 마스터 완성본"을 고르는 판정은 여기서 새로 짜지 않는다 --
@@ -388,6 +396,15 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   // 가로·세로 카드를 스스로 다시 확인한 횟수. `finalPollTick`과 같은 자리이고
   // 이유도 같다 -- 값 자체는 안 쓰고 "다음 번"을 다시 걸 근거로만 쓴다.
   const [variantPollTick, setVariantPollTick] = useState(0);
+  // 대표님이 `숏폼으로 변환`을 누른 뒤의 한 줄. 프로젝트별로 기억해 다른
+  // 프로젝트로 넘어가면 앞 프로젝트의 안내가 남아 보이지 않게 한다(판단 기록과 같은 규칙).
+  const [isConvertingShortForm, setIsConvertingShortForm] = useState(false);
+  const [shortFormMessage, setShortFormMessage] = useState<string | null>(null);
+  const [shortFormProjectId, setShortFormProjectId] = useState<string | null>(null);
+  // 이번에 만든(또는 다시 고른) 숏폼. 목록 effect는 편집본이 바뀔 때만 다시
+  // 도므로, 방금 만든 숏폼을 여기서 따로 들고 있어야 그 카드를 단추 바로 아래
+  // 붙일 수 있다 -- 만든 자리와 받는 자리가 떨어져 있으면 대표님이 찾아야 한다.
+  const [shortFormVariantId, setShortFormVariantId] = useState<string | null>(null);
   const requestEpoch = useRef(0);
   const subtitleSubmissionEpoch = useRef(0);
   const finalSubmissionEpoch = useRef(0);
@@ -407,6 +424,14 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   const finalPollOperationId = useRef(0);
   // 가로·세로 쪽 재확인도 같은 방어가 필요하다(같은 이유, 다른 흐름이라 값을 나눈다).
   const variantPollOperationId = useRef(0);
+  // `숏폼으로 변환`의 몇 번째 누름인지. 되돌아온 응답이 그새 취소된(프로젝트를
+  // 바꾼) 자리에 값을 쓰지 않게 막는다 -- 위 두 재확인과 같은 규칙이고, 한 번
+  // 누르면 몇 분이 걸리는 일이라 이 방어가 특히 필요하다.
+  const shortFormOperationId = useRef(0);
+  // 상태(`isConvertingShortForm`)는 단추를 회색으로 만드는 데 쓰고, **두 번 눌러
+  // 두 번 시작하는 것**을 막는 것은 이 ref다 -- 상태가 화면에 반영되기 전에 들어온
+  // 두 번째 클릭은 상태로 못 막는다(완성본 쪽 `finalInFlightTimelineKey`와 같은 자리).
+  const shortFormInFlight = useRef(false);
   currentProjectId.current = projectId;
   // 재확인은 "지금 화면에 있는 카드"를 다시 묻는 것이라 최신 목록이 필요한데,
   // 그 목록을 의존성에 두면 카드가 바뀔 때마다 함수가 새로 만들어져 타이머가
@@ -560,6 +585,30 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
     // 합쳐진 화면에서는 검토 쪽 읽기가 끝나 `shared`가 채워질 때 다시 그린다.
     // 그 값 없이 먼저 그리면 아직 아무것도 없는 상태만 보인다.
   }, [refresh, shared]);
+
+  /** 숏폼 상태는 **프로젝트가 바뀔 때와 화면을 떠날 때만** 거둔다.
+   *
+   *  위 effect에 같이 둘 수 없다. 그쪽은 `shared`에 걸려 있고 `shared`는 읽을
+   *  때마다 새 객체라, 화면이 스스로 다시 읽을 때마다 정리가 한 번씩 돈다 --
+   *  숏폼 만들기는 몇 분이 걸리므로 **자기 화면의 재확인에 취소당한다.**
+   *  실물(브라우저 + 실제 API, 2026-09-12)에서 그대로 밟았다: 목록만 한 번 묻고
+   *  조용히 멈췄고, 화면은 아무 말도 하지 않았다. 단독으로 쓸 때는 `shared`가
+   *  없어서 안 보였다 -- 합쳐진 화면에서만 나는 결함이었다.
+   *
+   *  떠날 때 거두는 것은 그대로 필요하다. 걸어 둔 판단 물어보기가 `isStillRelevant`로
+   *  이 값을 보므로, 안 거두면 떠난 화면이 몇 분 동안 서버를 계속 두드린다. */
+  useEffect(() => {
+    shortFormOperationId.current += 1;
+    shortFormInFlight.current = false;
+    setIsConvertingShortForm(false);
+    setShortFormMessage(null);
+    setShortFormProjectId(null);
+    setShortFormVariantId(null);
+    return () => {
+      shortFormOperationId.current += 1;
+      shortFormInFlight.current = false;
+    };
+  }, [projectId]);
 
   useEffect(() => {
     let active = true;
@@ -1062,6 +1111,138 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
       if (submissionEpoch === capcutHandoffSubmissionEpoch.current && currentProjectId.current === submissionProjectId) setIsRegisteringCapcutHandoff(false);
     }
   };
+  /** **대표님 문장의 앞 절반이다**(2026-09-12): *"숏폼으로 변환 버튼을 누르면,
+   *  유진이가 알아서 판단해서 ... 자동으로 만들어내는거야."*
+   *
+   *  판단은 이미 됐다(실물: `judged_by: yujin`, 94장면 전부 읽음). 없던 것은
+   *  **누를 자리**다 -- 지금까지는 편집기의 `가로·세로 비교` 모드에 들어가 모양을
+   *  만들고 렌더를 따로 걸어야 했다. 여기서 그 단계들을 한 번의 누름으로 잇는다:
+   *
+   *  1. **누르는 순간** 서버에 숏폼이 있는지 묻는다. 화면에 남은 목록으로 정하면
+   *     그새 생긴 숏폼을 또 만들려다 409(`short_form_already_exists`)에 부딪힌다.
+   *  2. 없으면 만들고, **있으면 다시 고른다.** 한 편집본에 숏폼은 하나뿐이라
+   *     두 번 만들 수 없다 -- 두 번째 누름이 조용히 죽는 대신 장면을 새로 고른다
+   *     (2026-09-11에 편집기에서 겪은 죽은 단추와 같은 병을 여기서 되풀이하지 않는다).
+   *  3. 판을 나눴으면 화면을 다시 읽는다. 안 읽으면 나누기 전 장면을 보여 주고
+   *     다음 편집이 낡은 판 버전으로 나가 조용히 충돌한다.
+   *  4. 이어서 세로 숏폼을 만든다. **그 뒤는 이미 있는 가로·세로 카드가 맡는다** --
+   *     스스로 상태를 다시 확인하고(폴링 하나를 더 만들지 않는다), 다 되면
+   *     내려받는 문을 낸다.
+   *
+   *  쓸 자리만 쪼개는 일을 따로 부르지 않는 이유: **고르는 쪽이 이미 한다**
+   *  (`short_form_scenes.py`). 화면이 또 나누라고 하면 판이 두 번 바뀐다.
+   *
+   *  **오래 걸린다**(지금 대표님 기계는 모델을 옮기는 중이라 판단이 수십 초가
+   *  아니라 몇 분이다). 그래서 다시 고르기는 걸어 두고 물어보는 길을 쓴다 --
+   *  한 요청으로 기다리면 서버 앞단이 330초에 끊어서 대표님은 우리 문구 대신
+   *  오류 화면을 본다. 문구는 빠를 때나 느릴 때나 같은 말이어야 한다.
+   */
+  const handleConvertToShortForm = async () => {
+    const submissionProjectId = projectId;
+    const session = currentState?.session;
+    if (
+      currentProjectId.current !== submissionProjectId || !session ||
+      !canRenderSubtitle || shortFormInFlight.current
+    ) return;
+    shortFormInFlight.current = true;
+    const operationId = shortFormOperationId.current + 1;
+    shortFormOperationId.current = operationId;
+    const isCurrent = () => shortFormOperationId.current === operationId && currentProjectId.current === submissionProjectId;
+    setIsConvertingShortForm(true);
+    setShortFormProjectId(submissionProjectId);
+    setShortFormMessage(null);
+    try {
+      const listed = await api.listOutputVariants(submissionProjectId, session.session_id);
+      if (!isCurrent()) return;
+      const existing = listed.variants.find((variant) => variant.kind === "vertical_highlight") ?? null;
+      setShortFormMessage(existing ? "숏폼을 다시 만드는 중이에요." : "숏폼을 만드는 중이에요.");
+      let picked: OutputVariant | null = null;
+      let scenePick: ShortFormScenePick | undefined;
+      if (existing) {
+        const outcome = await repickShortFormWithProgress({
+          projectId: submissionProjectId,
+          variantId: existing.variant_id,
+          expectedVariantRevision: existing.variant_revision,
+          isStillRelevant: isCurrent,
+        });
+        if (outcome.kind === "cancelled") return;
+        if (outcome.kind !== "succeeded") {
+          if (isCurrent()) setShortFormMessage(outcome.kind === "timed_out"
+            ? "숏폼을 고르는 데 너무 오래 걸려서 기다리기를 멈췄어요. 잠시 뒤 다시 눌러 주세요."
+            : shortFormFailureMessage(outcome.detail));
+          return;
+        }
+        picked = outcome.result.variant;
+        scenePick = outcome.result.scene_pick;
+      } else {
+        const created = await api.createOutputVariant(submissionProjectId, {
+          source_session_id: session.session_id, kind: "vertical_highlight",
+        });
+        picked = created.variant;
+        scenePick = created.scene_pick;
+      }
+      if (!isCurrent()) return;
+      setShortFormMessage(shortFormPickNotice(scenePick, { remade: Boolean(existing) }));
+      // **만들 것이 없으면 렌더를 걸지 않는다.** 지금 서버는 늘 하나를 주지만,
+      // 유진이 "이 영상엔 터질 대목이 없다"고 답할 수 있게 되면(별도 조각) 빈 답이
+      // 온다 -- 그때 이 단추가 빈 목록으로 렌더를 걸어 실패하는 대신 이유만 말한다.
+      // 목록으로 받는 이유도 같다: 숏폼을 여러 개 추천하게 되어도 이 줄이 안 바뀐다.
+      const shortFormIds = picked ? [picked.variant_id] : [];
+      // 이 줄이 없어도 `handleRenderVariants`가 빈 목록을 거른다 -- 그래서 시험은
+      // 이 줄을 지워도 초록이다(변형 탐침으로 확인, task-6-report.md). 남겨 두는
+      // 이유는 **빈 답이 오는 자리를 여기라고 못박아 두는 것**이다: Task 5가
+      // "터질 대목이 없다"를 실으면 그 답은 이 줄에서 멈춰야 하고, 아래 `refresh`와
+      // 렌더는 아예 밟지 않는다.
+      if (!shortFormIds.length) return;
+      setShortFormVariantId(shortFormIds[0]);
+      if ((scenePick?.board_scenes_cut ?? 0) > 0) {
+        await refresh({ quiet: true });
+        if (!isCurrent()) return;
+      }
+      await handleRenderVariants(shortFormIds);
+    } catch (error) {
+      if (!isCurrent()) return;
+      // 서버가 보내는 사유를 대표님이 할 수 있는 일로 옮긴다. 표는 완성본·자막과
+      // 같은 것을 쓴다 -- 새 표를 만들면 같은 코드가 화면마다 다르게 뜬다.
+      const detail = error instanceof ApiRequestError ? error.detail : null;
+      setShortFormMessage(shortFormFailureMessage(detail));
+    } finally {
+      if (isCurrent()) {
+        shortFormInFlight.current = false;
+        setIsConvertingShortForm(false);
+      }
+    }
+  };
+
+  // 지금 이 편집본의 숏폼. 방금 만든 것이 우선이고, 없으면 목록에서 찾는다 --
+  // 누르기 **전에** 이미 있는지 말해 주려면 목록 쪽도 봐야 한다.
+  const shortFormId = shortFormVariantId
+    ?? variantOptions.find((option) => option.kind === "vertical_highlight")?.variant_id
+    ?? null;
+  // 숏폼 결과 카드는 **단추 바로 아래**에 세우고 아래 목록에서는 뺀다. 한 카드를
+  // 두 자리에 세우면 같은 영상이 두 번 보인다.
+  const shortFormItem = variantItems.find((item) => (
+    (shortFormId != null && item.variant_id === shortFormId) || item.variant_kind === "vertical_highlight"
+  )) ?? null;
+  const shortFormDescription = shortFormProjectId === projectId && shortFormMessage
+    ? shortFormMessage
+    : shortFormId
+      ? "이미 만든 숏폼이 있어요. 다시 누르면 장면을 새로 골라 줘요."
+      : "유진이 퍼질 대목을 골라 세로 숏폼으로 만들어요.";
+  /** 가로·세로 결과 카드. 숏폼 카드와 아래 목록이 **같은 함수**를 쓴다 --
+   *  자리마다 따로 짜면 한쪽에서만 다시 만들기가 되거나 확인 표시가 갈린다. */
+  const renderVariantOutputCard = (item: VariantRenderItem) => <VariantOutputCard
+    key={item.variant_id}
+    projectId={projectId}
+    item={item}
+    confirmed={confirmedVariantIds.includes(item.variant_id)}
+    onConfirm={() => setConfirmedVariantIds((current) => current.includes(item.variant_id) ? current : [...current, item.variant_id])}
+    onRetry={() => {
+      setSelectedVariantIds([item.variant_id]);
+      setConfirmedVariantIds((current) => current.filter((id) => id !== item.variant_id));
+      void handleRenderVariants([item.variant_id]);
+    }}
+  />;
 
   return <section className="vb-outputs" aria-live={pageLiveRegion} data-testid="outputs-page">
     <div><p className="vb-eyebrow">출력</p><HeadingTag>완성본과 CapCut 초안</HeadingTag><p>승인된 편집본 · 자막 · 완성본 · CapCut 초안</p></div>
@@ -1088,6 +1269,32 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
       </ol>
     </section> : null}
     <div className="vb-home-grid vb-outputs-grid">
+      {/* **대표님이 이름 지은 단추가 화면의 첫 자리에 있다**(지시 2026-09-12:
+          "숏폼으로 변환 버튼을 누르면 ... 자동으로 만들어내는거야").
+
+          왜 첫 자리인가: 지금까지 이 일은 편집기의 `가로·세로 비교` 모드 안에
+          숨어 있었고, 대표님은 **거기를 찾아볼 생각을 하지 않는다.** 이 화면의
+          첫 카드는 원래 누를 것이 없는 미리보기 안내였다 -- 눌러서 결과가 나오는
+          일 중 가장 앞에 둬야 할 것을 그 뒤에 묻으면 같은 문제를 작게 되풀이한다.
+          `가로·세로 출력 만들기`는 여러 모양을 골라 만드는 손 작업이고, 이쪽은
+          한 번 눌러 완성된 숏폼을 받는 길이다.
+
+          결과 카드를 **이 카드 바로 아래** 세우는 이유도 같다 -- 대표님 말의
+          다음 절이 "그래서 내가 그걸 받아봤는데"다. 누른 자리에서 받는다. */}
+      <Card>
+        <CardHeader><CardTitle>숏폼</CardTitle><CardDescription>{shortFormDescription}</CardDescription></CardHeader>
+        <CardContent>
+          <p>한 번 누르면 유진이 퍼질 대목을 골라 세로 숏폼으로 만들고, 여기에서 바로 내려받을 수 있어요.</p>
+          {!timelineJob ? <p>편집 화면에서 장면을 채우고 저장하면 여기에서 만들 수 있어요.</p> : null}
+          {timelineJob && !canRenderSubtitle ? <p>검토 승인과 확인할 항목을 모두 마친 뒤 숏폼을 만들 수 있어요.</p> : null}
+          {/* 문구가 **빠를 때나 느릴 때나** 같은 말이어야 한다. 지금은 기계가
+              모델을 옮기는 중이라 판단이 몇 분 걸리는데, 그것을 초 단위로 약속하는
+              문구를 쓰면 빨라진 뒤에는 거짓말이 된다. 완성본 카드가 쓰는 말을 그대로 쓴다. */}
+          {isConvertingShortForm ? <p>완성되면 화면이 저절로 바뀌어요. 이 화면을 열어 둔 채 기다려 주세요.</p> : null}
+          <Button disabled={!canRenderSubtitle || isConvertingShortForm} onClick={() => void handleConvertToShortForm()}>{isConvertingShortForm ? "숏폼 만드는 중" : "숏폼으로 변환"}</Button>
+        </CardContent>
+      </Card>
+      {shortFormItem ? renderVariantOutputCard(shortFormItem) : null}
       <Card>
         <CardHeader><CardTitle>편집본 미리보기</CardTitle><CardDescription>{exactPreviewDescription(currentState?.exactPreviewState)}</CardDescription></CardHeader>
         <CardContent>
@@ -1116,13 +1323,9 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
           </div>
         </CardContent>
       </Card>
-      {variantItems.map((item) => (
-        <VariantOutputCard key={item.variant_id} projectId={projectId} item={item} confirmed={confirmedVariantIds.includes(item.variant_id)} onConfirm={() => setConfirmedVariantIds((current) => current.includes(item.variant_id) ? current : [...current, item.variant_id])} onRetry={() => {
-          setSelectedVariantIds([item.variant_id]);
-          setConfirmedVariantIds((current) => current.filter((id) => id !== item.variant_id));
-          void handleRenderVariants([item.variant_id]);
-        }} />
-      ))}
+      {/* 숏폼 카드는 위 `숏폼` 단추 바로 아래 이미 서 있다 -- 여기서 또 세우면
+          같은 영상이 한 화면에 두 번 보인다. */}
+      {variantItems.filter((item) => item !== shortFormItem).map((item) => renderVariantOutputCard(item))}
       <Card>
         <CardHeader><CardTitle>자막</CardTitle><CardDescription>{currentSubtitle ? "자막이 준비되었어요." : staleSubtitle ? "자막이 최신 편집본과 달라요." : currentState?.subtitle?.status === "failed" || currentState?.subtitleRecord?.status === "failed" ? subtitleFailureMessage(currentState?.subtitleRecord?.error_message) : timelineJob ? "현재 편집본의 자막을 만들 수 있어요." : "아직 자막이 없어요."}</CardDescription></CardHeader>
         <CardContent>
