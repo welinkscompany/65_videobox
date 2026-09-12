@@ -163,6 +163,42 @@ def _segment_content_windows(segment: dict[str, Any]) -> list[dict[str, Any]]:
     }]
 
 
+def materialized_timeline_duration_sec(materialized: dict[str, Any]) -> float:
+    """**타임라인 길이를 재는 자리는 여기 하나다.** 저장된 숫자는 안 믿는다.
+
+    이 양을 읽는 곳이 둘이었고 둘이 서로 다른 답을 냈다(2026-09-12 실측):
+
+    - 눈금자(`editor_playback_manifest`)는 조각에서 쟀다 -- 120초.
+    - 조각을 옮길 때의 상한(`editing_session_and_regeneration` -> `timeline_placements`)은
+      타임라인 문서의 `output.duration_sec`을 먼저 봤다 -- 빈 편집판이 적어 둔 **5.0**.
+      `float(저장값 or 잰 값)`은 저장값이 0이 아니면 뒤를 **영영 안 본다.**
+
+    그래서 빈 편집판에서 시작한 모든 프로젝트에서 B-roll·음악·효과음·오버레이를
+    5초 밖으로 못 옮겼다(`422 timeline_placement_out_of_range`). 한쪽만 고치면
+    같은 어긋남이 또 생기므로 **계산을 하나로 합쳤다.**
+
+    `CompositionPlan.duration_sec`과 같은 규칙이다: 타임라인에 놓인 것 전부
+    (트랙의 조각 + 세션 자막 + 내보내기 오버레이)의 **가장 늦은 끝**. 저장된
+    `output.duration_sec`은 아무 편집 문도 고쳐 주지 않으므로 읽지 않는다.
+
+    비어 있으면 0.0이다. 상한을 5초 같은 값으로 받쳐 주지 않는다 -- 받쳐 주면
+    눈금자에도 없는 길이가 되살아난다. 조각이 하나도 없으면 옮길 조각도 없어서
+    `apply_placement_changes`가 `timeline_placement_output_invalid`로 막는다.
+    """
+    ends: list[float] = []
+    for track in materialized.get("tracks", []) or []:
+        if not isinstance(track, dict):
+            continue
+        for clip in track.get("clips", []) or []:
+            if isinstance(clip, dict):
+                ends.append(_number(clip.get("end_sec")))
+    for group in ("session_captions", "export_overlays"):
+        for item in materialized.get(group, []) or []:
+            if isinstance(item, dict):
+                ends.append(_number(item.get("end_sec")))
+    return max(ends, default=0.0)
+
+
 def materialize_editing_session_timeline(
     *, timeline: dict[str, Any], editing_session: dict[str, Any] | None, project_id: str | None = None,
 ) -> dict[str, Any]:
@@ -1108,4 +1144,5 @@ __all__ = [
     "CompositionItem",
     "CompositionPlan",
     "materialize_editing_session_timeline",
+    "materialized_timeline_duration_sec",
 ]

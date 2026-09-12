@@ -81,7 +81,10 @@ from videobox_core_engine.editing_session import (
     update_segment_table_overlay,
     update_segment_visual_overlay,
 )
-from videobox_core_engine.composition_plan import materialize_editing_session_timeline
+from videobox_core_engine.composition_plan import (
+    materialize_editing_session_timeline,
+    materialized_timeline_duration_sec,
+)
 from videobox_core_engine.timeline_placements import apply_placement_changes, collect_timeline_placements
 from videobox_core_engine.output_operator_copy import (
     OutputOperatorCopyBuilder,
@@ -348,8 +351,10 @@ class EditingSessionRegenerationMixin:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         source_timeline = self.store.get_timeline_run(project_id=project_id, timeline_id=str(session["timeline_id"]))
         materialized = materialize_editing_session_timeline(timeline=source_timeline, editing_session=session, project_id=project_id)
-        output = source_timeline.get("output") if isinstance(source_timeline.get("output"), dict) else {}
-        duration_sec = float(output.get("duration_sec") or max((float(item.get("end_sec") or 0.0) for track in materialized.get("tracks", []) if isinstance(track, dict) for item in track.get("clips", []) if isinstance(item, dict)), default=0.0))
+        # 상한은 **눈금자와 같은 자리에서 잰다**(`materialized_timeline_duration_sec`).
+        # 예전에는 타임라인 문서의 `output.duration_sec`을 먼저 봤고, 빈 편집판이
+        # 적어 둔 5.0 때문에 120초 세션에서도 5초 밖으로 못 옮겼다.
+        duration_sec = materialized_timeline_duration_sec(materialized)
         fps_num, fps_den = int(source_timeline.get("fps_num") or 30), int(source_timeline.get("fps_den") or 1)
         normalized = apply_placement_changes(placements=collect_timeline_placements(timeline=materialized), changes=changes, output_duration_sec=duration_sec, fps_num=fps_num, fps_den=fps_den)
         previous = session.get("timeline_placement_overrides") if isinstance(session.get("timeline_placement_overrides"), dict) else {}

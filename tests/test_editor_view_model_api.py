@@ -527,3 +527,140 @@ def test_manifest_rejects_unsupported_persisted_caption_style_keys(tmp_path) -> 
 
     response = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest")
     assert response.status_code == 422
+
+
+def _blank_board_fixture(client: TestClient, tmp_path) -> tuple[str, str]:
+    """빈 편집판에서 시작해 **120초까지 채운** 세션. 대표님 실제 프로젝트 모양이다.
+
+    타임라인 문서에는 빈 편집판이 적어 둔 5.0이 그대로 남아 있고(아무도 안 고친다),
+    실제 내용은 장면 열 개 × 12초다. B-roll을 얹어 **옮길 수 있는 조각**을 만든다 --
+    조각이 없으면 `timeline_placement_unknown`이 먼저 걸려서 길이 상한을 못 밟는다.
+    """
+    from videobox_core_engine.blank_editing_session import build_blank_timeline_payload
+
+    project_id = client.post("/api/projects", json={"name": "Blank board"}).json()["project_id"]
+    store = LocalProjectStore(tmp_path)
+    timeline = store.save_timeline_run(
+        project_id=project_id,
+        output_mode="review",
+        source_session_revision=1,
+        timeline_payload=build_blank_timeline_payload(),
+    )
+    timeline_id = timeline["timeline_id"]
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id=timeline_id,
+        session_payload={
+            "history": [],
+            "segments": [
+                {
+                    "segment_id": f"{timeline_id}:{index + 1:03d}",
+                    "caption_text": f"{index + 1}번째 장면",
+                    "start_sec": float(index * 12),
+                    "end_sec": float((index + 1) * 12),
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": {
+                        "asset_id": f"asset-broll-{index + 1}",
+                        "asset_uri": f"local://projects/{project_id}/assets/asset-broll-{index + 1}",
+                    },
+                }
+                for index in range(10)
+            ],
+        },
+    )
+    return project_id, session["session_id"]
+
+
+def test_blank_board_placement_can_move_past_the_stored_five_seconds(tmp_path) -> None:
+    """**빈 편집판에서 시작한 프로젝트에서 조각을 5초 밖으로 옮길 수 있어야 한다.**
+
+    2026-09-12 실측: 120초·장면 열 개인 대표님 프로젝트에서 B-roll을 60~72초로
+    옮기면 `422 timeline_placement_out_of_range`가 났다. 눈금자 길이는 이미
+    조각에서 재는데(`eeb864b9b`), 상한을 읽는 자리는 여전히 타임라인 문서에
+    적힌 5.0을 믿고 있었다. `or`는 앞이 0이 아니면 뒤를 **영영 안 본다.**
+
+    같은 양을 두 곳에서 따로 계산하면 반드시 어긋난다 -- 이번 주 네 번째다.
+    """
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, session_id = _blank_board_fixture(client, tmp_path)
+
+    manifest = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest")
+    assert manifest.status_code == 200
+    # 눈금자는 이미 조각에서 잰다. 상한도 같은 숫자를 봐야 한다.
+    assert manifest.json()["output"]["duration_sec"] == 120.0
+    placement = next(
+        clip["placement_id"]
+        for track in manifest.json()["tracks"]
+        if track["track_type"] == "broll"
+        for clip in track["clips"]
+    )
+
+    moved = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/timeline-placements",
+        json={
+            "expected_revision": 1,
+            "changes": [{"placement_id": placement, "kind": "broll", "start_sec": 60.0, "end_sec": 72.0}],
+        },
+    )
+
+    assert moved.status_code == 200, moved.json()
+    stored = LocalProjectStore(tmp_path).get_editing_session(project_id=project_id, session_id=session_id)
+    assert stored["timeline_placement_overrides"][placement] == {
+        "placement_id": placement,
+        "kind": "broll",
+        "start_sec": 60.0,
+        "end_sec": 72.0,
+    }
+
+
+def test_empty_board_has_no_length_and_no_placement_to_move(tmp_path) -> None:
+    """**아무것도 안 놓인 편집판의 길이는 0이다.** 5초로 받쳐 주지 않는다.
+
+    길이를 조각에서 재면 빈 편집판은 0이 나온다. 여기서 상한을 빈 편집판이
+    적어 두던 5.0으로 받쳐 주고 싶어지지만, 받쳐 주면 **눈금자에도 없는 길이가
+    되살아난다** -- 저장된 숫자를 안 믿기로 한 이유가 그것이었다.
+
+    받쳐 주지 않아도 잃는 게 없다: 조각이 하나도 없으면 **옮길 조각도 없다.**
+    그래서 `timeline_placement_out_of_range`(놓을 자리가 없다)가 아니라
+    `timeline_placement_output_invalid`(타임라인에 길이가 없다)로 막힌다.
+    """
+    from videobox_core_engine.blank_editing_session import (
+        build_blank_editing_session,
+        build_blank_timeline_payload,
+    )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id = client.post("/api/projects", json={"name": "Empty board"}).json()["project_id"]
+    store = LocalProjectStore(tmp_path)
+    timeline = store.save_timeline_run(
+        project_id=project_id,
+        output_mode="review",
+        source_session_revision=1,
+        timeline_payload=build_blank_timeline_payload(),
+    )
+    blank = build_blank_editing_session(project_id=project_id, timeline_id=timeline["timeline_id"])
+    # 빈 장면 하나까지 걷어낸 상태 -- 타임라인에 놓인 것이 정말 하나도 없다.
+    blank["segments"][0]["cut_action"] = "remove"
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload=blank,
+    )
+    session_id = session["session_id"]
+
+    manifest = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest")
+    assert manifest.status_code == 200
+    assert manifest.json()["output"]["duration_sec"] == 0.0
+    assert manifest.json()["tracks"] == [] and manifest.json()["captions"] == []
+
+    rejected = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/timeline-placements",
+        json={
+            "expected_revision": 1,
+            "changes": [{"placement_id": "broll:nothing-is-placed", "kind": "broll", "start_sec": 0.0, "end_sec": 1.0}],
+        },
+    )
+
+    assert rejected.status_code == 422
+    assert rejected.json()["detail"] == "timeline_placement_output_invalid"

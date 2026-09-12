@@ -108,3 +108,59 @@ def test_a_scene_whose_recording_exists_still_reaches_the_render() -> None:
     plan = CompositionPlan.from_timeline(timeline=timeline)
 
     assert [item.track_type for item in plan.items] == ["narration"]
+
+
+def test_the_blank_timeline_stores_no_length_for_anyone_to_misread() -> None:
+    """**빈 편집판은 타임라인 문서에 길이를 안 적는다.** 적어 두면 누군가 그걸 믿는다.
+
+    적어 둔 5.0을 고쳐 주는 편집 문이 **하나도 없다** -- 장면을 넣고 쪼개고 경계를
+    옮기는 일은 전부 세션에만 쌓인다. 그런데 그 값을 읽는 자리가 둘이나 생겨서
+    두 번 연달아 같은 결함이 났다(2026-09-12):
+
+    1. 눈금자가 120초 영상에서 5초만 그렸다.
+    2. 조각을 옮길 때의 상한이 5초로 잠겨서 B-roll을 60초로 못 옮겼다.
+
+    기획을 통과한 타임라인은 처음부터 이 칸을 안 적었다(`local_project_store`의
+    `_ORIENTATION_OUTPUT_SIZES`는 가로·세로만 담는다). **빈 편집판만 적고 있었고,
+    그래서 빈 편집판에서 시작한 프로젝트만 망가졌다.** 이제 길이는 한 자리에서
+    조각을 보고 잰다(`materialized_timeline_duration_sec`). 이 칸을 되살리지 마라.
+    """
+    from videobox_core_engine.blank_editing_session import build_blank_timeline_payload
+
+    payload = build_blank_timeline_payload()
+
+    assert "duration_sec" not in payload["output"]
+    assert payload["output"] == {"width": 1920, "height": 1080}
+
+
+def test_a_freshly_opened_blank_board_still_measures_five_seconds() -> None:
+    """길이를 안 적어도 **잃는 것이 없다.** 빈 장면이 그 5초를 들고 있다.
+
+    저장된 숫자를 지우면 갓 연 편집판의 눈금자가 0이 될까 -- 아니다. 빈 편집판은
+    0~5초 장면 하나로 열리고(`BLANK_SCENE_SECONDS`), 길이는 그 장면에서 재진다.
+    다른 점은 하나다: 장면을 12초로 늘리면 이제 길이도 **같이 따라온다.**
+    """
+    from videobox_core_engine.blank_editing_session import (
+        BLANK_SCENE_SECONDS,
+        build_blank_editing_session,
+        build_blank_timeline_payload,
+    )
+    from videobox_core_engine.composition_plan import (
+        materialize_editing_session_timeline,
+        materialized_timeline_duration_sec,
+    )
+
+    session = build_blank_editing_session(project_id="p1", timeline_id="timeline_001")
+    timeline = {**build_blank_timeline_payload(), "project_id": "p1", "timeline_id": "timeline_001"}
+
+    def measured(current_session: dict) -> float:
+        return materialized_timeline_duration_sec(
+            materialize_editing_session_timeline(
+                timeline=timeline, editing_session=current_session, project_id="p1"
+            )
+        )
+
+    assert measured(session) == BLANK_SCENE_SECONDS == 5.0
+
+    session["segments"][0]["end_sec"] = 12.0
+    assert measured(session) == 12.0
