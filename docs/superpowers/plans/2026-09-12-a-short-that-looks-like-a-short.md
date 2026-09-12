@@ -81,6 +81,20 @@ LLM 호출을 하나 더 늘리면 예산(작업+폴링)에 어떤 영향인지 
 
 대표님 상시 지시: **"화면으로 되는 건 전부 유진에게도 되어야 한다."**
 
+> **2026-09-12 밤 갱신: 만들기·다시 만들기·펼치기 셋을 진짜 채팅 경로에
+> 배선했다.** 아래 "조사 결과 정정" 절이 찾아낸 진짜 자리
+> (`yujin_editing_proposals.py`/`YujinEditingProposalService`)에
+> `create_short_form`/`remake_short_form`/`unfold_short_form`을 추가하고
+> `director_proposals.py`의 `apply_yujin_editing_proposal_route`에서 화면
+> 단추와 같은 함수를 부르게 갈랐다. `tests/test_yujin_editing_short_form.py`가
+> **실제 `/yujin-editing-proposals` -> `/apply` 엔드포인트를 경유**해 다섯
+> 경우(만들기, 이미 있을 때 거절, 다시 만들기, 펼치기, 없을 때 거절)를
+> 확인한다 -- 컨텍스트를 손으로 만들어 검증기를 직접 부르는 시험이 아니다.
+> 실제 화면 채팅으로도 두 번 시도했으나 이 컴퓨터에서 다른 프로젝트가 같은
+> 시각 GPU의 qwen을 쓰고 있어 응답이 시간 초과됐다(서버 로그로 올바른
+> 경로까지는 도달을 확인했다). **"내보내줘"(렌더)는 아직 안 됐다** -- 후속
+> 작업으로 큐에 있다.
+
 ### 조사 결과 (코드로 확인함, 짐작 아님) — **2026-09-12 늦게 정정됨**
 
 > **이 표 전체가 틀렸다.** 아래 넷은 전부 `yujin_creator_proposals.py` /
@@ -126,7 +140,13 @@ LLM 호출을 하나 더 늘리면 예산(작업+폴링)에 어떤 영향인지 
 있으면 `POST …/repick` → 작업 폴링 → 판 다시 읽기 → `POST variant-renders` → 내려받기.
 이 단추 경로는 실측으로 확인했다(아래 R3 참고) — 이번에 되돌린 것은 **채팅** 쪽이다.
 
-### 해야 할 것 — **다음 세션은 여기부터, 파일을 다시 확인하고 시작할 것**
+### 해야 할 것 — **2026-09-12 밤: 1~3 완료, 4~6 남음**
+
+1~3(의도 추가, 프롬프트, 적용기 분기)은 같은 날 밤 끝냈다. 아래 목록은 그
+순서 그대로 두되, 다음 세션은 **4(렌더)부터** 시작하면 된다.
+
+<details>
+<summary>완료된 1~3의 원래 지시(참고용, 접어 둠)</summary>
 
 **밑줄 친 파일이 진짜다.** 위 정정에서 확인했듯 실제 채팅은 전부
 `yujin_editing_proposal_service.py`(`_editing_prompt`)를 지나 `yujin_editing_proposals.py`의
@@ -152,15 +172,47 @@ LLM 호출을 하나 더 늘리면 예산(작업+폴링)에 어떤 영향인지 
    `apply_director_variant_create_proposal_transaction` 등 저장소·도메인
    조각은 재사용 가능하다** -- 잘못은 그 자리가 아니라 그 자리로 가는
    **입구**(어느 프로필/컨텍스트가 그걸 부르는가)였다.
-4. 렌더("내보내줘")까지 잇는다. **화면이 쓰는 같은 자리(`POST variant-renders`)를
-   쓴다. 새 렌더 경로를 만들지 마라.** 이 apply 경로는 동기 응답 하나를
-   돌려주는 구조라, 렌더 잡을 **시작만 시키고** ("만들고 있어요, 출력
-   화면에서 확인해 주세요") 폴링은 기존 출력 화면 폴링에 맡기는 안을 먼저
-   검토한다 -- 채팅 안에서 진행률을 보여주는 **세 번째 방식을 만들지 않는다.**
-5. 유진이 만든 숏폼도 되돌리기 한 번으로 돌아가야 한다(`2be2ffb42`의 규칙을 따른다).
-6. 다 되면 **실제 화면 채팅창에서 직접 타이핑해서** 확인한다(R3). API로
-   `YujinCreatorContext`를 손으로 만들어 통과시키는 시험은 이 항목의 증거가
-   되지 못한다 -- 이번 세션이 그 함정에 걸렸다.
+
+</details>
+
+**완료 방식 메모(2026-09-12 밤).** 1~3은 위 지시와 거의 같은 모양으로 됐다 --
+다만 적용기는 `apply_yujin_editing_proposal`(세션 문서 자체를 바꾸는 함수)을
+안 거치고 `director_proposals.py`의 `_apply_short_form_editing_intent`가
+숏폼 셋을 먼저 가로채 `short_form_scenes.py`/`orchestrator`를 직접 부른다 --
+숏폼은 세션이 아니라 `output_variant`(별개 자원)를 바꾸는 일이라
+`update_editing_session`으로 보내면 안 되기 때문이다. `unfold_short_form`도
+같은 자리에서 `orchestrator.unfold_short_form_editing_session` +
+`apply_director_variant_proposal_transaction`으로 처리한다(화면 단추 경로와
+동일). `has_short_form_variant` 판정은 새 공용 함수
+`short_form_scenes.current_short_form_variant`로 통일했다 -- 예전에 이
+판정이 `hermes_run_service.py`에 이미 두 벌 있던 것까지 여기로 합쳤다.
+
+### 4. 렌더("내보내줘") — **아직 안 함, 다음 세션 시작점**
+
+**화면이 쓰는 같은 자리(`services/api/src/videobox_api/routers/outputs.py`의
+`POST /api/projects/{project_id}/variant-renders`)를 쓴다. 새 렌더 경로를
+만들지 마라.** 이 apply 경로는 동기 응답 하나를 돌려주는 구조라, 렌더 잡을
+**시작만 시키고**("만들고 있어요, 출력 화면에서 확인해 주세요") 폴링은 기존
+출력 화면 폴링에 맡기는 안을 먼저 검토한다 -- 채팅 안에서 진행률을 보여주는
+**세 번째 방식을 만들지 않는다.** 상세 설계는 대기열의 task(`숏폼 유진 배선
+-- 렌더`)에 옮겨 뒀다.
+
+### 5. 되돌리기
+
+만들기·다시 만들기·펼치기 전부 화면 단추가 쓰는 **같은 저장소 함수**를
+그대로 부르므로(`created_short_form_variant`/`remade_short_form_variant`/
+`unfold_short_form_editing_session`), 되돌리기(`2be2ffb42`의 규칙)는 이미
+같은 메커니즘을 공유해 별도 구현이 필요 없다고 **판단**했다 -- 다만 채팅
+경로로 만든 숏폼을 화면에서 실제로 되돌려 보는 실측은 아직 안 했다.
+
+### 6. 실물 채팅 확인 — **시도함, 환경 문제로 미완주**
+
+`tests/test_yujin_editing_short_form.py`(실제 `/yujin-editing-proposals`
+엔드포인트 경유, 5건)로 코드 경로는 확인했다. **실제 화면 채팅창에 직접
+타이핑해서**도 두 번 시도했으나, 이 컴퓨터에서 다른 프로젝트가 같은 시각
+(밤 10시부터) GPU의 qwen을 쓰고 있어 로컬 LLM 응답이 매번 시간 초과됐다 --
+서버 로그로 올바른 요청까지 도달하는 것은 확인했다. **다음에 열 때 `lms ps`로
+qwen이 유휴인지 먼저 보고 실물 확인을 마저 할 것.**
 
 ## 닫을 때 할 검증 — 아직 **안 한 것**만
 
@@ -203,17 +255,32 @@ LLM 호출을 하나 더 늘리면 예산(작업+폴링)에 어떤 영향인지 
 > 밀린 것이다. CapCut 앱이 이 환경에 없어 실물 초안을 열어 실측하지는
 > 못했다 -- 여전히 남은 항목이다.
 
-### R3. 유진에게 실제로 말해서 숏폼이 나오는가 (Task 3) — **2026-09-12: 시도해서 반증했다**
+### R3. 유진에게 실제로 말해서 숏폼이 나오는가 (Task 3) — **2026-09-12 밤: 배선함, 실물은 환경 때문에 미확인**
 
 시험이 아니라 **새 편집판에서 직접 말해서** 확인하려고 화면의 실제 채팅창(`이야기`
 탭·홈의 `유진에게 물어보기`, `EditorWorkbenchRoute`의 대화창)을 전부 찾아 프론트
-코드로 역추적했다. 결과: **어느 채팅창도 `숏폼 만들기`/`다시 만들기`가 쓰는
-경로(`yujin_creator_proposals.py`/`hermes_run_service.py`)를 부르지 않는다.**
+코드로 역추적했다. **처음 발견:** 어느 채팅창도 `숏폼 만들기`/`다시 만들기`가 쓰던
+경로(`yujin_creator_proposals.py`/`hermes_run_service.py`)를 부르지 않았다.
 전부 `sendDirectorMessage`→`createYujinEditingProposal`(`yujin_editing_proposal_service.py`)로
-가고, 그 도메인 모델에는 숏폼 관련 의도가 하나도 없다. 그래서 R3는
-**"안 된다"로 닫는다** — 위 "조사 결과 정정"과 "해야 할 것"에 원인과 다음
-할 일을 적었다. 유진이 "없다"고 답하면 그것도 정직한 답이다(안내문에 그
-의도가 없으니까) — 로그를 볼 필요도 없이 프로필에 없는 의도다.
+갔고, 그 도메인 모델에는 숏폼 관련 의도가 하나도 없었다.
+
+**같은 날 밤 배선함.** 진짜 자리(`yujin_editing_proposals.py`)에
+`create_short_form`/`remake_short_form`/`unfold_short_form`을 추가하고
+`apply_yujin_editing_proposal_route`에서 화면 단추와 같은 함수로 갈랐다.
+`tests/test_yujin_editing_short_form.py`가 **실제 `/yujin-editing-proposals`
+엔드포인트를 경유**해 다섯 경우를 확인한다 -- 이건 화면이 실제로 지나는
+자리다(컨텍스트를 손으로 만들어 검증기만 부르는 시험이 아니다).
+
+**실물(브라우저)로는 두 번 직접 타이핑해서 시도했으나 완주하지 못했다** --
+이 컴퓨터에서 다른 프로젝트가 같은 시각(밤 10시부터) GPU의 qwen을 쓰고
+있어 로컬 LLM 응답이 매번 시간 초과됐다. 서버 로그로 `POST
+.../yujin-editing-proposals`가 정확한 요청까지 도달했다가 그 시간 초과로
+실패하는 것은 확인했다 -- 코드 경로 자체는 맞게 탄다. **다음에 열 때
+`lms ps`로 qwen 인스턴스가 하나뿐이고 유휴인지 먼저 보고 재시도할 것.**
+
+부수 발견: LLM이 시간 초과되면 `local_only_blocked: <raw 예외>`가 화면
+채팅에 그대로 나간다(별도 task로 큐에 있음) -- 이번 배선과 무관한 기존
+결함이다.
 
 ### R4. 제목 띠가 참고 숏폼 비율과 맞는가 (Task 1) — **2026-09-12 실측으로 닫음**
 

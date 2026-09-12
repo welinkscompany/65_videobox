@@ -1,5 +1,8 @@
 # 제목 띠를 닫고, 유진 채팅이 두 백엔드로 갈라져 있다는 것을 찾았다 (2026-09-12)
 
+**대체됨:** 같은 날 밤 `2026-09-12-yujin-chat-wiring-done-render-still-open.ko.md`가
+이 문서가 찾은 문제(진짜 채팅 경로에 안 닿음)를 실제로 고쳤다. 최신 상태는 그 문서를 봐라.
+
 앞 인계(`2026-09-12-rebuilt-and-measured-on-the-real-video.ko.md`)를 잇는다.
 계획서는 `docs/superpowers/plans/2026-09-12-a-short-that-looks-like-a-short.md` —
 이번 세션에 Task 3 절과 R1·R2·R4를 정정·기록해 뒀다. **다음 세션은 그 문서의
