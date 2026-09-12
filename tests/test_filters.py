@@ -82,6 +82,9 @@ def test_the_look_reaches_the_picture_and_survives_a_transition() -> None:
 
     renderer = FfmpegFinalRenderer.__new__(FfmpegFinalRenderer)
     renderer.video_width, renderer.video_height = 1920, 1080
+    # `__new__`는 dataclass 기본값을 안 채운다 -- `_frame_fit_chain`이 이제
+    # `_shorts_geometry`를 거치며 이 필드를 읽는다(`shorts_layout.py`, 2026-09-12).
+    renderer.shorts_title = None
 
     plain = renderer._broll_fit_transform({"fit": "crop"})
     tinted = renderer._broll_fit_transform({"fit": "crop", "filter": {"type": "mono", "chosen_by": "owner"}})
