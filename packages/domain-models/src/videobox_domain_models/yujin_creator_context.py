@@ -147,6 +147,19 @@ class YujinCreatorContext(_StrictReadModel):
     variant_id: str | None = Field(default=None, min_length=1, max_length=256)
     variant_kind: Literal["horizontal", "vertical_full", "vertical_highlight"] | None = None
     variant_revision: int | None = Field(default=None, ge=1)
+    #: 숏폼에 **지금 걸린 첫 화면 제목**(`shorts_layout.py`). 목록과 지금 값은 한
+    #: 쌍이다(owner 지시 2026-09-06) -- 지금 값을 안 주면 유진이 "제목 지워 줘"나
+    #: "제목 띠 꺼 줘"를 받았을 때 무엇을 지우는지 모르고, 되돌리기도 막힌다.
+    #: 제목이 없으면 비어 있다.
+    variant_shorts_title: tuple[str, ...] = Field(default=(), max_length=3)
+    #: 문구는 있는데 띠만 껐는지. `variant_shorts_title`이 비어 있으면 뜻이 없다.
+    variant_shorts_title_hidden: bool = False
+    #: 지금 마스터 판에 세로 하이라이트(숏폼)가 **이미 있는가**. "숏폼 만들어줘"와
+    #: "다시 만들어줘"를 유진이 구분하는 근거다 -- 목록과 지금 값은 한 쌍이다
+    #: (owner 지시 2026-09-06). `variant_id`만으로는 구분이 안 된다: 화면이
+    #: 다른 변형본(가로·세로 전체)을 보고 있을 때도 `variant_id`는 그 변형본을
+    #: 가리켜 채워지지만 숏폼은 없을 수 있다.
+    has_short_form_variant: bool = False
 
     @model_validator(mode="after")
     def identity_fields_are_coherent(self):

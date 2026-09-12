@@ -303,6 +303,42 @@ def _carry_the_owners_approval_to_the_new_board(
         return
 
 
+def created_short_form_variant(
+    *,
+    store: Any,
+    project_id: str,
+    proposal_id: str,
+    session_id: str,
+    expected_session_revision: int,
+    runtime: Any | None,
+    budget_seconds: float = SYNCHRONOUS_BUDGET_SECONDS,
+) -> tuple[dict[str, Any], ShortFormScenePick]:
+    """유진이 "숏폼 만들어줘"를 시켰을 때, **화면 단추와 같은 판단**으로 짓는다.
+
+    화면 단추(`POST /output-variants`)와 이 경로가 갈리면 안 되는 이유는 이
+    파일 머리말과 같다 -- 장면을 고르는 자리가 이미 셋이었고 여기가 넷째다.
+    다른 점은 저장이다: 단추는 변형본만 쓰고, 유진 경로는 **제안 소진과 한
+    트랜잭션**으로 묶어야 한다(제안이 `ready`로 남는 창을 안 만들려고 -- 그
+    창에서 재시도가 오면 유일 제약에 걸려도 제안 lifecycle이 결과와 어긋난다).
+    """
+    pick = short_form_scene_pick(
+        store=store,
+        project_id=project_id,
+        session_id=session_id,
+        runtime=runtime,
+        budget_seconds=budget_seconds,
+    )
+    variant = store.apply_director_variant_create_proposal_transaction(
+        project_id=project_id,
+        proposal_id=proposal_id,
+        source_session_id=session_id,
+        expected_session_revision=expected_session_revision,
+        selected_segment_ids=pick.segment_ids,
+        layout=short_form_layout_override(pick),
+    )
+    return variant, pick
+
+
 def remade_short_form_variant(
     *,
     store: Any,
@@ -344,7 +380,10 @@ def remade_short_form_variant(
         raise VariantInvariantError("short_form_has_no_scene_to_pick")
     updated = apply_variant_patch(
         variant,
-        {"selected_segment_ids": list(pick.segment_ids)},
+        {
+            "selected_segment_ids": list(pick.segment_ids),
+            **short_form_layout_patch(pick, current_layout=variant.overrides.layout),
+        },
         expected_variant_revision=expected_variant_revision,
     )
     if updated.variant_revision == variant.variant_revision:
@@ -377,6 +416,43 @@ def remade_short_form_variant(
     return updated, pick
 
 
+def short_form_layout_patch(
+    pick: ShortFormScenePick, *, current_layout: Mapping[str, object] | None = None
+) -> dict[str, object]:
+    """유진이 지은 제목을 변형본 patch로. **못 지었으면 아무것도 안 건드린다.**
+
+    빈 제목을 실어 `overrides.layout`을 덮어쓰지 않는 이유: 다시 만들기를 눌렀는데
+    이번에 제목을 못 받으면, **지난번에 받아 둔 제목이 말없이 지워진다.** 대표님
+    입장에서는 장면만 다시 고르려다 제목을 잃는 일이다. 덮어쓰는 것은 새 제목을
+    실제로 받았을 때뿐이다.
+
+    `hidden`을 그대로 물려주는 이유: `apply_variant_patch`는 덮어쓰기를 **필드
+    통째로** 갈아 끼운다(`_merged_overrides`). 안 물려주면 제목 띠를 끈 사람이
+    장면을 다시 고를 때마다 띠가 말없이 다시 켜진다.
+    """
+    layout = short_form_layout_override(pick)
+    if layout is None:
+        return {}
+    if isinstance(current_layout, Mapping) and bool(current_layout.get("hidden")):
+        layout["hidden"] = True
+    return {"overrides": {"layout": layout}}
+
+
+def short_form_layout_override(pick: ShortFormScenePick) -> dict[str, object] | None:
+    """유진이 지은 제목을 `overrides.layout` 한 칸으로. 못 지었으면 `None`.
+
+    만들기(`create_variant`)와 다시 만들기(`remade_short_form_variant`)가 **같은
+    모양**을 써야 한다 -- 이 저장소는 같은 로직이 두 자리에 갈라져 한쪽만 고쳐지는
+    함정에 반복해서 걸렸다(이 파일 머리말).
+    """
+    if not pick.title_lines:
+        return None
+    return {
+        "title_lines": list(pick.title_lines),
+        "highlight": pick.title_highlight,
+    }
+
+
 def scene_pick_payload(pick: ShortFormScenePick) -> dict[str, object]:
     """화면이 문구를 고르는 데 쓰는 값. **누가 골랐는지**가 핵심이다.
 
@@ -391,6 +467,12 @@ def scene_pick_payload(pick: ShortFormScenePick) -> dict[str, object]:
         # **왜 퍼질지**. 유진이 짜 준 한 줄이고 화면 문구에 그대로 붙는다
         # (`shortFormNotice.ts`). 여기서 빼면 판단이 보이지 않는다.
         "spread_reason": pick.spread_reason,
+        # **첫 화면 제목 띠에 그려질 글자.** `spread_reason`과 다른 칸인 이유는
+        # 쓰임이 다르기 때문이다 -- 이쪽은 화면이 "지금 걸린 제목"으로 보여 주고
+        # 끄기·켜기의 되돌릴 자리가 된다(목록과 지금 값은 한 쌍이다).
+        # 비어 있으면 제목 띠 없이 나갔다는 뜻이고 `notice`가 그 말을 한다.
+        "title_lines": list(pick.title_lines),
+        "title_highlight": pick.title_highlight,
         # **판을 몇 군데 나눴는지.** 0보다 크면 화면이 판을 다시 읽어야 한다 --
         # 안 읽으면 대표님은 나누기 전 판을 보고, 다음 편집이 조용히 충돌한다
         # (`EditorWorkbenchRoute.makeShortForm`).

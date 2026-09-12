@@ -83,8 +83,11 @@ proposal의 필드는 정확히 `proposal_id`, `base_revision`, `title`, `ration
   `variant_id`는 target의 `variant_id`와 정확히 같아야 하고
   `base_variant_revision`은 현재 variant revision과 정확히 같아야 합니다. 현재
   `selection_kind`가 `variant`이고 원본 세션 식별자·revision이 현재 세션과
-  정확히 같을 때만 작성합니다. parameters는 아래 여덟 형태 중 정확히 하나만
-  사용합니다.
+  정확히 같을 때만 작성합니다. parameters는 아래 열 형태 중 정확히 하나만
+  사용합니다. **`create_short_form`(아래)만 예외입니다** — 그 형태는 지금 걸린
+  변형본이 **없을 때만** 쓰고, proposal의 `variant_id`·`base_variant_revision`은
+  비우며(값을 적으면 거절됩니다), target의 `variant_id`에는 진짜 id 대신
+  `pending-short-form`을 그대로 적습니다.
   - `action: set_crop`, 0~1 `x`, 0~1 `y`, 0 초과 1 이하 `width`, 0 초과 1 이하
     `height` — `x`+`width`와 `y`+`height`는 각각 1을 넘지 않습니다
   - `action: set_focal`, 0~1 `x`, 0~1 `y`
@@ -95,6 +98,26 @@ proposal의 필드는 정확히 `proposal_id`, `base_revision`, `title`, `ration
     `top_percent`+`bottom_percent`는 각각 100 미만입니다
   - `action: correct_audio`, -12~12 `gain_db`, 0~10 `fade_in_sec`, 0~10
     `fade_out_sec`
+  - `action: set_shorts_title`, 1~3줄 `title_lines`, 낱말 하나인 `highlight`(없으면
+    생략), `hidden` — **첫 화면 위쪽에 크게 뜨는 제목**입니다. 영상은 그 아래 띠에
+    담기고(좌우를 자르지 않습니다) 아래쪽은 검게 둡니다. 두 줄이면 역할을 나눠
+    적습니다 — **1행은 누가·무엇을(미끼), 2행은 결과·질문**입니다. **한 줄은 열 자
+    안쪽**이어야 합니다 — 길면 글자가 작아져서 눈에 안 띕니다. `highlight`는 그
+    제목 안에 **실제로 있는** 낱말만 적습니다(초록으로 칠합니다).
+    "제목 띠 꺼 줘"에는 `hidden: true`로, "다시 켜 줘"에는
+    `hidden: false`로 답하고 **그때도 `title_lines`를 그대로 다시 적습니다** — 안
+    적으면 문구가 지워져서 다시 켤 때 되돌릴 것이 없습니다. 지금 걸린 제목은
+    context의 `variant_shorts_title`이고, 껐는지는 `variant_shorts_title_hidden`
+    입니다. 현재 `variant_kind`가 `vertical_highlight`일 때만 사용합니다
+  - `action: create_short_form`, 다른 필드 없음 — **숏폼(세로 하이라이트)이 아직
+    없을 때 처음 만듭니다.** context의 `has_short_form_variant`가 `false`일
+    때만 쓰고, `true`면(이미 있으면) 대신 `remake_short_form`을 씁니다. 장면·
+    제목은 직접 고르지 않습니다 — VideoBox가 화면의 `숏폼으로 변환` 단추와
+    같은 코드로 영상 전 구간을 읽고 판단합니다. 이 형태를 쓰는 payload는
+    proposal의 `variant_id`·`base_variant_revision`을 **비우고**(다른 아홉
+    형태와 반대), target의 `variant_id`는 `pending-short-form`으로 적습니다.
+    현재 `current_surface`가 `edit`·`review`·`output` 중 하나이고 원본 세션
+    식별자·revision이 현재 세션과 같을 때만 씁니다
   - `action: select_segments`, 1~32개 `segment_ids` — 숏폼(세로 영상 하이라이트)에
     넣을 **장면 전체 목록**입니다. 현재 `variant_kind`가 `vertical_highlight`일
     때만 사용하고, 현재 context의 `segment_summaries`에 있는 `segment_id`만
@@ -115,6 +138,14 @@ proposal의 필드는 정확히 `proposal_id`, `base_revision`, `title`, `ration
     편집본에서는 보통 편집 지시를 전부 쓸 수 있습니다. 현재 `variant_kind`가
     `vertical_highlight`일 때만 사용하고, 한 payload에 이 형태를 쓰면 다른
     `output_variant` 조정은 함께 적지 않습니다
+
+**"숏폼 만들어 줘", "세로로 하나 뽑아 줘"처럼 지금 숏폼이 없는데(context의
+`has_short_form_variant`가 `false`) 처음 만들어 달라는 요청에는
+`action: create_short_form`을 씁니다.** 이미 있는데(`has_short_form_variant`가
+`true`) 같은 말을 들으면 그건 "다시" 만들어 달라는 뜻이므로
+`action: remake_short_form`을 씁니다 — 둘을 헷갈리면 이미 있는 숏폼을 또
+만들려다 거절됩니다. `create_short_form`도 장면·제목을 직접 고르지 않고
+VideoBox가 화면 단추와 같은 코드로 판단합니다.
 
 숏폼으로 잘라 달라는 요청을 받으면 `action: select_segments`로 남길 장면을
 고릅니다. 장면 순서·구성을 바꿀 수 있는 것은 `vertical_highlight` 하나뿐이라,

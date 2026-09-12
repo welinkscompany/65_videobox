@@ -11,13 +11,19 @@ from math import ceil
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from videobox_core_engine.ass_subtitles import caption_band_px
+from videobox_core_engine.ass_subtitles import caption_band_px, render_shorts_title_ass
 from videobox_core_engine.canonical_track import canonical_track_type
 from videobox_core_engine.composition_plan import CompositionItem, CompositionPlan
 from videobox_core_engine.filters import filter_chain
 from videobox_core_engine.media_controls import normalize_media_controls, PHOTO_MOTIONS, PHOTO_MOTION_STILL
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_sources
 from videobox_core_engine.output_warning_provenance import output_warning_notes
+from videobox_core_engine.shorts_layout import (
+    ShortsGeometry,
+    ShortsTitle,
+    shorts_geometry,
+    shorts_title_from_override,
+)
 from videobox_core_engine.overlay_shapes import (
     BUNDLED_ICON_FONT_DIRECTORY,
     CONTAINER_ICON_FONT_DIRECTORY,
@@ -799,6 +805,11 @@ class FfmpegFinalRenderer:
     # which is the same trap the misspelled name set.
     overlay_font_file: str = field(default_factory=_default_overlay_font)
     ffprobe_binary: str = "ffprobe"
+    #: 숏폼 제목 띠(`shorts_layout.py`). 있으면 **화면 배치가 달라진다** -- 원본을
+    #: 화면 전체가 아니라 제목 띠 아래의 영상 띠에 담고 나머지는 검게 둔다.
+    #: 캔버스마다 다시 계산하므로(`_shorts_geometry`) 미리보기 프록시와 완성본이
+    #: 같은 비율로 나온다. `None`이면 과제 B의 동작 그대로다.
+    shorts_title: ShortsTitle | None = None
     # (경로, selector, mtime) → 스트림 존재 여부. 렌더 하나가 같은 원본을
     # 클립 수만큼 다시 재지 않게 한다. `_replace_sharing_caches`를 거치지 않고
     # `dataclasses.replace()`를 직접 부르면 렌더마다 빈 채로 되돌아간다 --
@@ -1001,12 +1012,26 @@ class FfmpegFinalRenderer:
         `-vf`도 `filter_complex`도 이름 붙은 갈래를 받으므로 두 경로 모두에서
         문자열 하나로 끼워 넣을 수 있다. 그래서 `tag`가 필요하다: 한 편집본에
         클립이 둘이면 같은 이름이 두 번 나와 ffmpeg가 통째로 거절한다.
+
+        **숏폼 제목 띠(`shorts_layout.py`)가 걸리면 앉히는 자리가 화면 전체가
+        아니라 영상 띠다.** 세 방법은 그 띠 안에서 그대로 뜻을 지키고(`crop`은
+        띠를 채우려 좌우를 자르고, `fit`은 띠 안에 검은 여백을 두고, `blur`는
+        띠 안을 흐린 배경으로 채운다), 마지막에 화면 크기로 한 번 더 `pad`해서
+        띠를 제 자리에 놓는다. 같은 함수를 쓰는 이유는 위와 같다 -- 두 벌로
+        나누면 미리보기와 완성본이 다른 자리에 그린다.
         """
         width, height = self.video_width, self.video_height
+        geometry = self._shorts_geometry()
+        box_x, box_y, box_width, box_height = (
+            geometry.video_box if geometry is not None else (0, 0, width, height)
+        )
+        placement = (
+            "" if geometry is None else f",pad={width}:{height}:{box_x}:{box_y}:black"
+        )
         if fit == "crop":
             return (
-                f"scale={width}:{height}:force_original_aspect_ratio=increase,"
-                f"crop={width}:{height}"
+                f"scale={box_width}:{box_height}:force_original_aspect_ratio=increase,"
+                f"crop={box_width}:{box_height}{placement}"
             )
         if fit == "blur":
             # 배경은 잘라 채운 다음 흐리게 한다. 흐리게 한 뒤에 자르면 가장자리에
@@ -1015,17 +1040,32 @@ class FfmpegFinalRenderer:
             # `gblur`를 쓰는 이유: `boxblur`는 반지름이 크면 네모난 무늬가 보인다.
             # sigma는 출력 폭에 비례해 잡는다 -- 고정값을 쓰면 세로 숏폼에서는
             # 뿌옇고 가로 출력에서는 티가 안 난다.
-            sigma = max(8, round(min(width, height) / 45))
+            sigma = max(8, round(min(box_width, box_height) / 45))
             return (
                 f"split[{tag}_bg][{tag}_fg];"
-                f"[{tag}_bg]scale={width}:{height}:force_original_aspect_ratio=increase,"
-                f"crop={width}:{height},gblur=sigma={sigma}[{tag}_b];"
-                f"[{tag}_fg]scale={width}:{height}:force_original_aspect_ratio=decrease[{tag}_f];"
-                f"[{tag}_b][{tag}_f]overlay=(W-w)/2:(H-h)/2"
+                f"[{tag}_bg]scale={box_width}:{box_height}:force_original_aspect_ratio=increase,"
+                f"crop={box_width}:{box_height},gblur=sigma={sigma}[{tag}_b];"
+                f"[{tag}_fg]scale={box_width}:{box_height}:force_original_aspect_ratio=decrease[{tag}_f];"
+                f"[{tag}_b][{tag}_f]overlay=(W-w)/2:(H-h)/2{placement}"
             )
         return (
-            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
+            f"scale={box_width}:{box_height}:force_original_aspect_ratio=decrease,"
+            f"pad={box_width}:{box_height}:(ow-iw)/2:(oh-ih)/2{placement}"
+        )
+
+    def _shorts_geometry(self) -> ShortsGeometry | None:
+        """이 캔버스에서의 숏폼 띠. 제목이 없으면 `None`(= 지금까지의 동작).
+
+        캔버스가 아니라 **제목만** 들고 다니다가 여기서 계산하는 이유: 미리보기
+        프록시는 완성본보다 작은 캔버스로 나가는데, 계산된 픽셀을 들고 다니면
+        같은 편집본이 두 크기에서 다른 모양이 된다.
+        """
+        if self.shorts_title is None:
+            return None
+        return shorts_geometry(
+            width=self.video_width,
+            height=self.video_height,
+            lines=self.shorts_title.lines,
         )
 
     def _broll_fit_transform(self, controls: dict[str, Any], *, tag: str = "framefit") -> str:
@@ -1756,6 +1796,29 @@ class FfmpegFinalRenderer:
             escaped = subtitle_ass_path.resolve().as_posix().replace(":", r"\:").replace("'", r"\'")
             graph += f";[vout]subtitles=filename='{escaped}'[vburned]"
             video_label = "vburned"
+        # 숏폼 제목 띠는 **자막 위에** 얹는다. 자리가 겹치지는 않지만(제목은 위 띠,
+        # 자막은 아래) 순서를 정해 두지 않으면 나중에 자막을 위로 올린 편집본에서
+        # 제목이 가려진다 -- 제목은 첫 화면에 붙잡는 글자라 가려지면 뜻이 없다.
+        generated_title_ass: Path | None = None
+        shorts_geometry_px = self._shorts_geometry()
+        if shorts_geometry_px is not None and self.shorts_title is not None:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            generated_title_ass = output_path.parent / f"shorts_title_{uuid.uuid4().hex}.ass"
+            generated_title_ass.write_text(
+                render_shorts_title_ass(
+                    self.shorts_title,
+                    geometry=shorts_geometry_px,
+                    video_width=self.video_width,
+                    video_height=self.video_height,
+                    duration_sec=composition_plan.duration_sec,
+                ),
+                encoding="utf-8",
+            )
+            escaped_title = (
+                generated_title_ass.resolve().as_posix().replace(":", r"\:").replace("'", r"\'")
+            )
+            graph += f";[{video_label}]subtitles=filename='{escaped_title}'[vtitled]"
+            video_label = "vtitled"
         sar = composition_plan.sample_aspect_ratio.replace(":", "/")
         graph += f";[{video_label}]setsar={sar},setpts=PTS-STARTPTS[vfinal]"
         video_label = "vfinal"
@@ -1799,6 +1862,8 @@ class FfmpegFinalRenderer:
         finally:
             if generated_ass is not None:
                 generated_ass.unlink(missing_ok=True)
+            if generated_title_ass is not None:
+                generated_title_ass.unlink(missing_ok=True)
         if result.returncode != 0:
             raise FinalRenderError(f"ffmpeg failed rendering canonical composition: {result.stderr[-800:]}")
         # 오디오가 타임라인보다 짧게 나온 출력은 조용히 내보내지 않는다. 스레드
@@ -2272,11 +2337,21 @@ class FfmpegFinalRenderer:
         proxy_profile: bool = False,
     ) -> Path:
         if composition_plan is not None:
-            plan_renderer = self if proxy_profile else self._replace_sharing_caches(
-                video_width=composition_plan.width,
-                video_height=composition_plan.height,
-                video_fps=f"{composition_plan.fps_num}/{composition_plan.fps_den}",
-                video_sar=composition_plan.sample_aspect_ratio,
+            # 숏폼 제목 띠는 **계획에서** 받는다. 프록시(정확 미리보기)도 같은 계획을
+            # 쓰므로 이 한 줄로 둘이 같은 모양이 된다 -- 자리는 캔버스마다 다시
+            # 계산한다(`_shorts_geometry`).
+            plan_renderer = self._replace_sharing_caches(
+                shorts_title=shorts_title_from_override(composition_plan.shorts_layout),
+                **(
+                    {}
+                    if proxy_profile
+                    else {
+                        "video_width": composition_plan.width,
+                        "video_height": composition_plan.height,
+                        "video_fps": f"{composition_plan.fps_num}/{composition_plan.fps_den}",
+                        "video_sar": composition_plan.sample_aspect_ratio,
+                    }
+                ),
             )
             return plan_renderer._render_composition_plan_to_mp4(
                 project_id=project_id, composition_plan=composition_plan, timeline_context=timeline,
@@ -2300,6 +2375,15 @@ class FfmpegFinalRenderer:
         ):
             raise FinalRenderError(
                 "Scene transitions render only from the composition plan. "
+                "Pass composition_plan to render this timeline."
+            )
+        # 숏폼 제목 띠도 같은 이유다(2026-09-12). 영상 띠는 `_frame_fit_chain`을
+        # 같이 쓰므로 이 경로에서도 제 자리에 앉지만, **제목 글자는 그래프 쪽에만
+        # 있다**(`subtitles` 필터 한 겹). 막지 않으면 제목 없는 숏폼이 성공으로
+        # 나가고, 그건 위 문단이 말하는 바로 그 사고다.
+        if self.shorts_title is not None:
+            raise FinalRenderError(
+                "The short-form title band renders only from the composition plan. "
                 "Pass composition_plan to render this timeline."
             )
         # 색감·손떨림 보정과 눈·음소거도 **같은 이유로** 여기서 멈춘다. 이 경로의

@@ -76,6 +76,7 @@ def build_yujin_creator_context(
     selected_segment_id: str | None = None,
     current_surface: str = "edit",
     selected_variant_id: str | None = None,
+    has_short_form_variant: bool = False,
     playback_builder: Callable[..., dict[str, Any]] = build_editor_playback_manifest,
 ) -> YujinCreatorContext:
     """Read a project-scoped snapshot and return only allowlisted scalar data."""
@@ -238,11 +239,28 @@ def build_yujin_creator_context(
         media_candidates=candidates,
         approved_tts_candidates=approved_tts_before,
         timeline_summary=timeline_summary,
-        supported_controls=(
-            _BASE_CONTROLS
-            + (SupportedControl(kind="output_variant", mode="recommendation_only"),)
-            if variant is not None
-            else _BASE_CONTROLS
+        # **"숏폼 만들어줘"도 output_variant 제어다.** 지금 걸린 변형본이 없어도
+        # (`variant is None`) 이 화면이 output 계열이고(`current_surface`) 아직
+        # 숏폼 자체가 없다면(`not has_short_form_variant`) 만들기 하나는 열어
+        # 둔다 -- 안 열면 `validate_yujin_creator_response`가
+        # `proposal_operation_unsupported`로 만들기 자체를 못 보낸다. 이미 있는데
+        # (예: 다른 변형본을 보는 중) 여기서 열면 유진이 두 번째를 만들려다
+        # `has_short_form_variant` 검사에서 막힌다 -- 그래서 그 경우는 닫는다.
+        # **정렬해서 담는다** -- `_BASE_CONTROLS`는 손으로 알파벳순으로 적어
+        # 뒀는데, `output_variant`를 그냥 끝에 붙이면 그 순서가 깨진다
+        # (`o`로 시작해 `overlay`보다 앞이어야 한다). 화면·검증기 모두 이 순서에
+        # 기대는 곳은 없지만, 결정적 출력이라는 이 모듈의 계약을 지킨다.
+        supported_controls=tuple(
+            sorted(
+                (
+                    _BASE_CONTROLS
+                    + (SupportedControl(kind="output_variant", mode="recommendation_only"),)
+                    if variant is not None
+                    or (not has_short_form_variant and current_surface in {"edit", "review", "output"})
+                    else _BASE_CONTROLS
+                ),
+                key=lambda control: control.kind,
+            )
         ),
         current_surface=current_surface,  # type: ignore[arg-type]
         selection_kind="variant" if variant is not None else ("segment" if normalized_selection is not None else "none"),
@@ -251,8 +269,42 @@ def build_yujin_creator_context(
         variant_id=str(variant["variant_id"]) if variant is not None else None,
         variant_kind=str(variant["kind"]) if variant is not None else None,  # type: ignore[arg-type]
         variant_revision=int(variant["variant_revision"]) if variant is not None else None,
+        # **지금 걸린 첫 화면 제목.** 목록만 주고 지금 값을 빼면 유진이 "제목 띠
+        # 꺼 줘"를 받았을 때 무엇을 끄는지 모른다 -- 그러면 `hidden`만 실어 보내고
+        # 문구가 지워진다(덮어쓰기는 필드 통째로 갈아 끼운다).
+        variant_shorts_title=_shorts_title_lines(variant),
+        variant_shorts_title_hidden=_shorts_title_is_hidden(variant),
+        # **"만들기"와 "다시 만들기"를 가르는 값.** 지금 걸린 변형본(`variant_id`)과
+        # 다르다 -- 화면이 가로·세로 전체본을 보는 중이어도 숏폼은 이미 있을 수
+        # 있다. 목록과 지금 값은 한 쌍이다(owner 지시 2026-09-06).
+        has_short_form_variant=has_short_form_variant,
     )
     return _fit_context(context)
+
+
+def _shorts_title_override(variant: dict[str, Any] | None) -> dict[str, Any]:
+    """변형본 행에서 `overrides.layout`을 꺼낸다. 없으면 빈 dict.
+
+    **한 자리에 둔다** -- 아래 둘이 같은 길을 두 번 파면 한쪽만 고쳐진다.
+    뜻(무엇이 제목인가)은 엔진의 `shorts_layout.shorts_title_from_override`가
+    정하고, 여기서는 유진 컨텍스트에 실을 값만 읽는다.
+    """
+    if not isinstance(variant, dict):
+        return {}
+    overrides = variant.get("overrides")
+    layout = overrides.get("layout") if isinstance(overrides, dict) else None
+    return layout if isinstance(layout, dict) else {}
+
+
+def _shorts_title_lines(variant: dict[str, Any] | None) -> tuple[str, ...]:
+    raw = _shorts_title_override(variant).get("title_lines")
+    if not isinstance(raw, (list, tuple)):
+        return ()
+    return tuple(str(line).strip() for line in raw if str(line).strip())[:3]
+
+
+def _shorts_title_is_hidden(variant: dict[str, Any] | None) -> bool:
+    return bool(_shorts_title_override(variant).get("hidden"))
 
 
 def _fit_context(context: YujinCreatorContext) -> YujinCreatorContext:

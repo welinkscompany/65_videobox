@@ -331,6 +331,111 @@ def test_variant_proposal_binds_master_and_variant_revisions() -> None:
     assert response.proposal.operations[0].parameters.action == "set_crop"
 
 
+def _create_context(**changes: object) -> YujinCreatorContext:
+    """지금 걸린 변형본이 없는 창작 context -- "숏폼 만들어줘"가 서는 자리다."""
+    controls = tuple(_context().supported_controls) + (
+        {"kind": "output_variant", "mode": "recommendation_only"},
+    )
+    defaults: dict[str, object] = {
+        "current_surface": "output",
+        "selection_kind": "none",
+        "master_session_id": "session-1",
+        "master_session_revision": 7,
+        "supported_controls": controls,
+        "has_short_form_variant": False,
+    }
+    defaults.update(changes)
+    return _context(**defaults)
+
+
+def _create_operation(**target_changes: object) -> dict[str, object]:
+    from videobox_domain_models.yujin_creator_proposals import (
+        PENDING_SHORT_FORM_TARGET_ID,
+    )
+
+    target = {"variant_id": PENDING_SHORT_FORM_TARGET_ID, "track_id": "output-variant"}
+    target.update(target_changes)
+    return {
+        "operation_id": "variant-create-short-form",
+        "kind": "output_variant",
+        "target": target,
+        "parameters": {"action": "create_short_form"},
+        "requires_materialization": False,
+        "preview_summary": "숏폼 만들기",
+    }
+
+
+def test_short_form_create_succeeds_when_none_exists_yet() -> None:
+    """숏폼이 없으면(`has_short_form_variant`가 false) "만들어줘"가 선다.
+
+    나머지 output_variant 형태와 달리 proposal의 `variant_id`·
+    `base_variant_revision`을 **비운다** -- 가리킬 변형본이 아직 없다.
+    """
+    payload = _envelope()
+    payload["proposal"]["operations"] = [_create_operation()]
+
+    response = _validate(payload, _create_context())
+
+    assert response.proposal is not None
+    assert response.proposal.variant_id is None
+    assert response.proposal.base_variant_revision is None
+    assert response.proposal.operations[0].parameters.action == "create_short_form"
+
+
+def test_short_form_create_is_rejected_when_one_already_exists() -> None:
+    """숏폼이 이미 있으면(`has_short_form_variant`가 true) 만들기는 거절된다.
+
+    화면이 세션당 숏폼 하나로 막는 규칙을, 유진이 채팅으로 두 번째를 만들어
+    깨지 못하게 한다.
+    """
+    payload = _envelope()
+    payload["proposal"]["operations"] = [_create_operation()]
+
+    with pytest.raises((ValidationError, ValueError)):
+        _validate(payload, _create_context(has_short_form_variant=True))
+
+
+def test_short_form_create_rejects_a_real_variant_id_on_the_proposal() -> None:
+    """만들기 proposal에 `variant_id`가 실리면 거절된다 -- 가리킬 것이 없다."""
+    payload = _envelope()
+    payload["proposal"].update(
+        {"variant_id": "variant-vertical", "base_variant_revision": 1}
+    )
+    payload["proposal"]["operations"] = [_create_operation()]
+
+    with pytest.raises((ValidationError, ValueError)):
+        _validate(payload, _create_context())
+
+
+def test_short_form_create_rejects_a_target_that_is_not_the_pending_sentinel() -> None:
+    """target에 진짜 변형본 id를 적어도 거절된다 -- 그 id는 아직 없는 것이다."""
+    payload = _envelope()
+    payload["proposal"]["operations"] = [
+        _create_operation(variant_id="variant-vertical")
+    ]
+
+    with pytest.raises((ValidationError, ValueError)):
+        _validate(payload, _create_context())
+
+
+def test_short_form_create_must_be_the_only_operation() -> None:
+    """만들기와 다른 모양 조정을 한 payload에 같이 실으면 거절된다.
+
+    만들어지지도 않은 변형본에 무엇을 적용할지 정할 근거가 없다.
+    """
+    payload = _envelope()
+    payload["proposal"]["operations"] = [
+        _create_operation(),
+        _create_operation(),
+    ]
+    # operation_id가 겹치면 다른 사유(duplicate_operation_id)로 먼저 걸리므로
+    # 하나는 이름을 바꿔 이 시험이 실제로 재려는 사유(개수)로 걸리게 한다.
+    payload["proposal"]["operations"][1]["operation_id"] = "variant-create-short-form-2"
+
+    with pytest.raises((ValidationError, ValueError)):
+        _validate(payload, _create_context())
+
+
 @pytest.mark.parametrize(
     "action",
     (

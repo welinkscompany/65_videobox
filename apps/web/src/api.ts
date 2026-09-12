@@ -497,6 +497,10 @@ export type OutputVariant = {
     caption: Record<string, unknown> | null;
     safe_area: Record<string, unknown> | null;
     audio: Record<string, unknown> | null;
+    /** 숏폼 제목 띠 -- `{ title_lines, highlight, hidden }`. 있으면 첫 화면 위쪽에
+     *  제목이 뜨고 영상은 그 아래 띠에 담긴다(좌우를 안 자른다). `hidden`이면
+     *  문구는 남기고 띠만 끈다 -- 지우면 다시 켤 때 되돌릴 것이 없다. */
+    layout: Record<string, unknown> | null;
   };
   locks: Array<{ field: string; base_master_revision: number }>;
   conflicts: Array<{ field: string; reason: string; base_master_revision: number; current_master_revision: number }>;
@@ -519,6 +523,12 @@ export type ShortFormScenePick = {
    *  판이 바뀌었으니 화면이 다시 읽어야 한다 -- 안 읽으면 나누기 전 장면을
    *  보여 주고 다음 편집이 낡은 판 버전으로 나가 조용히 충돌한다. */
   board_scenes_cut?: number;
+  /** 유진이 지은 **첫 화면 제목**(2026-09-12). `spread_reason`과 다르다 -- 그쪽은
+   *  대표님이 읽는 판단 근거이고 이쪽은 시청자가 보는 훅이다. 못 지었으면 비어
+   *  있고, 그때는 제목 띠 없이 나간다(문구가 그 사실을 말한다). */
+  title_lines?: string[];
+  /** 제목에서 초록으로 칠할 낱말 하나. 못 골랐으면 `null`이고 전부 흰색이다. */
+  title_highlight?: string | null;
 };
 
 /** 숏폼 장면을 **다시 고르라고 걸어 둔** 결과. 진행은 `ShortFormRepickStatus`로 본다.

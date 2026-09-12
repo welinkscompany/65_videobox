@@ -182,6 +182,14 @@ class GatewayCreatorContext(_StrictModel):
     variant_id: str | None = Field(default=None, min_length=1, max_length=256)
     variant_kind: Literal["horizontal", "vertical_full", "vertical_highlight"] | None = None
     variant_revision: int | None = Field(default=None, ge=1, strict=True)
+    #: 숏폼에 지금 걸린 첫 화면 제목(`shorts_layout.py`). 위 `segment_total`과 같은
+    #: 이유로 여기에도 있어야 한다 -- 도메인 모델에만 더하면 `extra="forbid"`가
+    #: 창작 context를 통째로 422로 막는다.
+    variant_shorts_title: tuple[str, ...] = Field(default=(), max_length=3)
+    variant_shorts_title_hidden: bool = False
+    #: 숏폼이 지금 마스터 판에 이미 있는가. "만들기"와 "다시 만들기"를 가르는
+    #: 값이라 위 둘과 같은 이유로 여기도 있어야 한다.
+    has_short_form_variant: bool = False
 
     @field_validator("memories")
     @classmethod
@@ -393,6 +401,9 @@ def canonical_context_json(context: GatewayCreatorContext) -> str:
         ("variant_id", None),
         ("variant_kind", None),
         ("variant_revision", None),
+        ("variant_shorts_title", []),
+        ("variant_shorts_title_hidden", False),
+        ("has_short_form_variant", False),
     ):
         if payload.get(field) == default:
             payload.pop(field, None)

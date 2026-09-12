@@ -11,6 +11,7 @@ from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 
+from videobox_core_engine.shorts_layout import shorts_title_from_override
 from videobox_domain_models.output_variants import (
     OutputVariant,
     VariantConflict,
@@ -23,7 +24,7 @@ class VariantInvariantError(ValueError):
     """Raised when a variant operation would break its linked invariants."""
 
 
-_OVERRIDE_FIELDS = frozenset({"crop", "focal", "caption", "safe_area", "audio"})
+_OVERRIDE_FIELDS = frozenset({"crop", "focal", "caption", "safe_area", "audio", "layout"})
 _STRUCTURAL_FIELDS = frozenset({"story", "segment_order"})
 _PATCH_FIELDS = frozenset(
     {"overrides", "lock_fields", "unlock_fields", "selected_segment_ids", "resolve_conflicts"}
@@ -385,15 +386,32 @@ _VERTICAL_VARIANT_KINDS = frozenset({"vertical_full", "vertical_highlight"})
 #: 그림의 흐린 확대본으로 채운다 -- 잘리는 것도, 검은 띠도 없다.
 _VERTICAL_FILL_FIT = "blur"
 
+#: **제목 띠가 걸린 숏폼에서는 흐린 배경을 쓰지 않는다**(2026-09-12 실물 비교).
+#:
+#: 위 `blur`가 필요했던 이유는 화면 전체를 채우려다 위아래 68%가 검은 띠가 되기
+#: 때문이었다. 숏폼 레이아웃(`shorts_layout.py`)에서는 그 이유가 사라진다 --
+#: 영상 띠를 1.3:1로 잡아 1920×1080 원본을 폭 그대로 담으므로 띠 안에서 남는
+#: 자리가 위아래 111픽셀씩뿐이다.
+#:
+#: 대표님 실제 영상으로 둘 다 구워서 봤다. `blur`는 영상 위아래에 **흐린 띠
+#: 두 줄**이 생겨 결함처럼 보이고, `fit`은 검정이라 제목 띠·아래 검정과 이어져
+#: 참고 숏폼 넷과 같은 모양이 된다. 참고 넷도 전부 검정이었다.
+_SHORTS_LAYOUT_FILL_FIT = "fit"
 
-def _filled_broll_controls(raw_controls: object) -> dict[str, object]:
+
+def _vertical_fill_fit(*, has_title_band: bool) -> str:
+    """세로 변형본의 화면 맞춤 기본값. **판단은 여기 한 곳이다.**"""
+    return _SHORTS_LAYOUT_FILL_FIT if has_title_band else _VERTICAL_FILL_FIT
+
+
+def _filled_broll_controls(raw_controls: object, *, has_title_band: bool = False) -> dict[str, object]:
     """세로 변형본용으로 화면 맞춤만 고친 `media_controls` 사본.
 
-    채우기 판단은 **여기 한 곳**이다. 값은 `_VERTICAL_FILL_FIT`이고, 왜 그 값인지는
-    그 상수의 주석에 있다.
+    채우기 판단은 **여기 한 곳**이다. 값은 `_vertical_fill_fit`이 정하고, 왜 그
+    값인지는 그 위 두 상수의 주석에 있다.
     """
     controls = dict(raw_controls) if isinstance(raw_controls, dict) else {}
-    controls["fit"] = _VERTICAL_FILL_FIT
+    controls["fit"] = _vertical_fill_fit(has_title_band=has_title_band)
     return controls
 
 
@@ -414,7 +432,9 @@ def _is_vertical_output(timeline: Mapping[str, object]) -> bool:
         return False
 
 
-def _fill_frame_for_vertical_session(session: dict[str, object]) -> dict[str, object]:
+def _fill_frame_for_vertical_session(
+    session: dict[str, object], *, has_title_band: bool = False
+) -> dict[str, object]:
     """세로 변형본의 **세션 선택 b-roll**도 화면을 채우게 한다.
 
     2026-09-12 대표님 실제 영상 실측에서 `_fill_frame_for_vertical_variant`(아래)를
@@ -440,7 +460,7 @@ def _fill_frame_for_vertical_session(session: dict[str, object]) -> dict[str, ob
         updated = dict(segment)
         override = updated.get("broll_override")
         if isinstance(override, dict):
-            updated["broll_override"] = {**override, "media_controls": _filled_broll_controls(override.get("media_controls"))}
+            updated["broll_override"] = {**override, "media_controls": _filled_broll_controls(override.get("media_controls"), has_title_band=has_title_band)}
         for key in ("media_windows", "media_window_basis"):
             windows = updated.get(key)
             if not isinstance(windows, list):
@@ -448,7 +468,7 @@ def _fill_frame_for_vertical_session(session: dict[str, object]) -> dict[str, ob
             updated[key] = [
                 {**window, "broll_override": {
                     **window["broll_override"],
-                    "media_controls": _filled_broll_controls(window["broll_override"].get("media_controls")),
+                    "media_controls": _filled_broll_controls(window["broll_override"].get("media_controls"), has_title_band=has_title_band),
                 }}
                 if isinstance(window, dict) and isinstance(window.get("broll_override"), dict)
                 else window
@@ -459,7 +479,7 @@ def _fill_frame_for_vertical_session(session: dict[str, object]) -> dict[str, ob
 
 
 def _fill_frame_for_vertical_variant(
-    raw_tracks: object, *, variant_kind: str
+    raw_tracks: object, *, variant_kind: str, has_title_band: bool = False
 ) -> list[dict[str, object]]:
     """세로 변형본의 화면 클립은 **기본이 화면을 채워야 한다.**
 
@@ -518,7 +538,7 @@ def _fill_frame_for_vertical_variant(
         for clip in clips:
             if not isinstance(clip, dict):
                 continue
-            clip["media_controls"] = _filled_broll_controls(clip.get("media_controls"))
+            clip["media_controls"] = _filled_broll_controls(clip.get("media_controls"), has_title_band=has_title_band)
     return tracks
 
 
@@ -527,6 +547,7 @@ def build_variant_timeline_payload(
     master_timeline: Mapping[str, object],
     variant_kind: str,
     derived: MaterializedVariant,
+    overrides: VariantOverride | None = None,
 ) -> dict[str, object]:
     """변형본 타임라인의 payload를 만든다. **이 함수가 유일한 자리다.**
 
@@ -540,6 +561,18 @@ def build_variant_timeline_payload(
     이 저장소는 같은 함정에 전에도 걸렸다 -- 렌더 경로가 둘이라 필터를 한 곳만
     고쳤던 일이 있다. 그래서 두 입구가 이 함수를 부르게 묶는다.
     """
+    # **제목 띠 여부를 먼저 정한다.** 아래 두 곳이 같은 답을 써야 한다 -- 화면
+    # 클립의 맞춤 기본값(`_fill_frame_for_vertical_variant`)과 타임라인에 싣는
+    # `shorts_layout`이 갈리면, 흐린 배경으로 깐 화면에 검정을 전제한 띠가 얹힌다.
+    layout = overrides.layout if overrides is not None else None
+    # **렌더와 똑같은 잣대로 묻는다.** "칸이 있는가"가 아니라 "제목 띠가 그려지는가"다
+    # (`shorts_title_from_override`). 껐을 때(`hidden`) 이 둘이 갈리면, 렌더는 화면
+    # 전체에 담는데 맞춤은 검정 여백을 전제해 **위아래 68%가 검은 띠**가 된다 --
+    # 과제 B가 없앤 바로 그 결함이 되돌아온다.
+    draws_title_band = (
+        variant_kind == "vertical_highlight"
+        and shorts_title_from_override(layout) is not None
+    )
     payload: dict[str, object] = {
         key: value
         for key, value in master_timeline.items()
@@ -554,10 +587,22 @@ def build_variant_timeline_payload(
             "source_session_revision": derived.source_session_revision,
             "segments": list(derived.segments),
             "tracks": _fill_frame_for_vertical_variant(
-                master_timeline.get("tracks", []), variant_kind=variant_kind
+                master_timeline.get("tracks", []), variant_kind=variant_kind,
+                has_title_band=draws_title_band,
             ),
         }
     )
+    # 숏폼 제목 띠(`shorts_layout.py`). **숏폼에만 얹는다** -- 가로·세로 전체본은
+    # 원본과 같은 이야기를 다른 화면비로 내보내는 것이라 제목을 붙일 자리가 없다.
+    #
+    # 이 칸이 payload에 실려야 하는 이유가 둘이다. 렌더가 타임라인에서 읽고
+    # (`CompositionPlan.from_timeline`), `variant_timeline_needs_rebuild`가
+    # payload 전체를 대조하므로 **제목을 고치면 캐시가 저절로 무효**가 된다 --
+    # 제목만 바꿨을 때 옛 타임라인이 그대로 나오는 사고를 막는다.
+    # 저장된 값은 **껐을 때도 그대로 싣는다** -- 문구를 지우면 다시 켤 때 되돌릴
+    # 것이 없다. 그릴지 말지는 렌더가 같은 함수로 다시 판단한다.
+    if variant_kind == "vertical_highlight" and layout:
+        payload["shorts_layout"] = dict(layout)
     return payload
 
 
@@ -578,7 +623,15 @@ def variant_render_session(
     )
     if projected is None or not _is_vertical_output(variant_timeline):
         return projected
-    return _fill_frame_for_vertical_session(projected)
+    # 제목 띠가 걸렸는지는 **타임라인에서** 읽는다. 렌더는 변형본을 안 들고 오고
+    # (`_is_vertical_output` 머리말), `build_variant_timeline_payload`가 그 값을
+    # 여기 실어 보낸다. 안 읽으면 화면 클립만 흐린 배경으로 남아 같은 숏폼 안에서
+    # 두 경로가 다른 모양이 된다.
+    return _fill_frame_for_vertical_session(
+        projected,
+        has_title_band=shorts_title_from_override(variant_timeline.get("shorts_layout"))
+        is not None,
+    )
 
 
 def _projected_variant_session(

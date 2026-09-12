@@ -8,6 +8,7 @@ from typing import Any
 
 from videobox_domain_models.caption_fonts import (
     CAPTION_FONT_DIRECTORIES,
+    default_caption_font_family,
     is_installed_caption_font,
 )
 from videobox_domain_models.caption_style import CaptionStyle
@@ -82,10 +83,10 @@ def _caption_letter_spacing_px(value: CaptionStyle, video_height: int) -> int:
     return round(value.letter_spacing_px * video_height / 1080)
 
 
-def _wrapped_line_count(text: str, *, size: int, usable_width: int) -> int:
-    """libass가 이 문장을 몇 줄로 접을지 어림한다.
+def text_width_px(text: str, *, size: int) -> float:
+    """이 글자열이 먹을 가로 폭을 어림한다(px).
 
-    **왜 어림인가:** 실제 줄바꿈 폭은 글꼴 metric을 읽어야 정확한데, 자막 글꼴은
+    **왜 어림인가:** 실제 폭은 글꼴 metric을 읽어야 정확한데, 자막 글꼴은
     owner가 고르고 컨테이너에 설치된 것을 libass가 찾아 쓴다. 렌더 그래프를 짓는
     시점에 그 파일을 열어 재는 것은 hot path에 디스크 I/O를 얹는 일이라 하지 않는다.
 
@@ -95,9 +96,10 @@ def _wrapped_line_count(text: str, *, size: int, usable_width: int) -> int:
 
     틀리는 방향도 적어 둔다: 폭을 낮게 잡으면 띠가 실제보다 짧아지고, 그 위에
     놓는 카드가 자막 윗줄을 물 수 있다. 그래서 애매하면 올려 잡는다.
+
+    **숏폼 제목 띠(`shorts_layout.py`)도 이 함수를 쓴다** -- 제목 글자 크기를 줄에
+    맞춰 줄일 때 같은 폭 모형이어야 한다. 두 벌로 적으면 한쪽만 고쳐진다.
     """
-    if usable_width <= 0:
-        return 1
     width = 0.0
     for character in text:
         if character.isspace():
@@ -106,7 +108,14 @@ def _wrapped_line_count(text: str, *, size: int, usable_width: int) -> int:
             width += size
         else:
             width += size * 0.55
-    return max(1, ceil(width / usable_width))
+    return width
+
+
+def _wrapped_line_count(text: str, *, size: int, usable_width: int) -> int:
+    """libass가 이 문장을 몇 줄로 접을지 어림한다. 폭 모형은 `text_width_px`."""
+    if usable_width <= 0:
+        return 1
+    return max(1, ceil(text_width_px(text, size=size) / usable_width))
 
 
 def caption_band_px(
@@ -208,6 +217,99 @@ def _warn_about_fonts_this_machine_does_not_have(styles: Iterable[CaptionStyle])
         "font, so the finished video will not use them. Looked in: %s.",
         ", ".join(missing),
         ", ".join(CAPTION_FONT_DIRECTORIES),
+    )
+
+
+#: 제목의 핵심어에 칠하는 초록. 참고 숏폼 넷은 노랑·초록·분홍을 썼고 그중 하나를
+#: 고정으로 쓴다 -- 색을 고르는 칸을 주면 그것이 곧 글자 스타일 편집기의 첫 칸이
+#: 되고, 그건 승인 범위 밖이다(`implementation-plan` §4의 고급 모션그래픽 경계).
+_TITLE_HIGHLIGHT_ASS_COLOUR = "&H0066FF33"
+_TITLE_TEXT_ASS_COLOUR = "&H00FFFFFF"
+_TITLE_OUTLINE_ASS_COLOUR = "&H00000000"
+#: 제목은 **화면 위에서 잰 자리**에 놓는다. ASS Alignment 7·8·9가 위쪽 줄이고
+#: 그때 MarginV는 위에서 잰 거리다(아래쪽 1·2·3과 반대 -- `_ALIGNMENT_BY_HORIZONTAL`
+#: 위의 주석 참고).
+_TITLE_ALIGNMENT_TOP_CENTER = 8
+#: 글자 외곽선 두께(px). 제목 띠는 검정이라 외곽선이 없어도 읽히지만, 영상 띠가
+#: 위로 번지는 경우(흐린 배경)에 대비해 얇게 둔다.
+_TITLE_OUTLINE_PX = 3
+
+
+def render_shorts_title_ass(
+    title: Any,
+    *,
+    geometry: Any,
+    video_width: int,
+    video_height: int,
+    duration_sec: float,
+    font_family: str | None = None,
+) -> str:
+    """숏폼 제목 띠를 ASS로 굽는다. **drawtext를 쓰지 않는 이유가 있다.**
+
+    핵심어 하나만 초록으로 칠해야 하는데(참고 숏폼 넷이 전부 그렇게 한다),
+    `drawtext`는 한 줄 안에서 색을 바꿀 수 없다 -- 줄을 조각내서 x를 직접 셈해야
+    하고 그러려면 한글 글자 폭을 우리가 추정해야 한다. libass는 줄 안에
+    `{\\c&H...&}`로 색을 바꾸고 줄 나누기·자리 잡기를 스스로 한다.
+
+    **자막 경로를 새로 만드는 것이 아니다.** 자막은 그대로
+    `render_editing_session_ass`가 굽고, 이 함수는 같은 파일의 같은 도구
+    (`_ass_color`·`_ass_time`·`_escape_ass_text`)로 제목 한 벌을 더 굽는다. ASS를
+    아는 자리를 둘로 늘리지 않으려고 여기 둔다.
+
+    배경 상자를 안 그린다: 제목 띠 자리는 캔버스의 검정이 그대로 남는 자리다
+    (`shorts_layout.shorts_geometry`가 영상을 그 아래에 앉힌다).
+    """
+    family = font_family or default_caption_font_family()
+    lines = tuple(title.lines)
+    # `Fontsize`는 줄 자리 하나에 맞춘다. 줄 간격은 우리가 정하므로 여러 줄을
+    # 한 Dialogue에 담지 않고 **줄마다 MarginV를 달리 준다** -- ASS의 줄 간격은
+    # 글꼴이 정해서 우리가 잰 16px을 못 지킨다.
+    step = geometry.font_size_px + geometry.line_gap_px
+    dialogue_lines: list[str] = []
+    timing = f"{_ass_time(0.0)},{_ass_time(max(duration_sec, 0.1))}"
+    for index, line in enumerate(lines):
+        # 줄 자리는 **Dialogue의 MarginV**로 준다. Style의 MarginV는 기본값일 뿐이고
+        # 줄마다 다른 값이 필요하므로, 스타일을 줄 수만큼 만들지 않고 여기서 덮는다.
+        margin_v = max(0, geometry.first_line_top_px + index * step)
+        dialogue_lines.append(
+            f"Dialogue: 0,{timing},Title,,0,0,{margin_v},,"
+            f"{_highlighted_title_text(line, title.highlight)}"
+        )
+    style_lines = [
+        f"Style: Title,{family},{geometry.font_size_px},"
+        f"{_TITLE_TEXT_ASS_COLOUR},{_TITLE_TEXT_ASS_COLOUR},"
+        f"{_TITLE_OUTLINE_ASS_COLOUR},{_UNUSED_SHADOW_COLOUR},-1,0,0,0,100,100,0,0,"
+        f"{_BORDER_STYLE_OUTLINE},{_TITLE_OUTLINE_PX},0,{_TITLE_ALIGNMENT_TOP_CENTER},"
+        f"{geometry.side_margin_px},{geometry.side_margin_px},"
+        f"{geometry.first_line_top_px},1"
+    ]
+    return "\n".join([
+        "[Script Info]", "ScriptType: v4.00+",
+        f"PlayResX: {video_width}", f"PlayResY: {video_height}", "",
+        "[V4+ Styles]",
+        "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding",
+        *style_lines, "",
+        "[Events]", "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text",
+        *dialogue_lines, "",
+    ])
+
+
+def _highlighted_title_text(line: str, highlight: str | None) -> str:
+    """핵심어 하나만 초록으로. 못 고르면(또는 그 줄에 없으면) 전부 흰색이다.
+
+    **지어내지 않는다** -- 비슷한 낱말을 찾아 칠하지 않고, 정확히 들어 있을 때만
+    칠한다. 여러 번 나오면 **첫 번째**만 칠한다(두 번째까지 칠하면 강조가 아니다).
+    """
+    escaped = _escape_ass_text(line)
+    if not highlight:
+        return escaped
+    needle = _escape_ass_text(highlight)
+    head, found, tail = escaped.partition(needle)
+    if not found:
+        return escaped
+    return (
+        f"{head}{{\\c{_TITLE_HIGHLIGHT_ASS_COLOUR}}}{needle}"
+        f"{{\\c{_TITLE_TEXT_ASS_COLOUR}}}{tail}"
     )
 
 

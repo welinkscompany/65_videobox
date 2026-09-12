@@ -906,6 +906,268 @@ def test_yujin_can_remake_the_short_when_the_owner_tells_her_to(tmp_path: Path) 
     assert provider.sweeps == 2
 
 
+def _basic_context_kwargs(*, project_id: str, session: dict, asset_index_revision: int) -> dict:
+    session_revision = int(session["session_revision"])
+    return {
+        "schema_version": "videobox.yujin-context.v1",
+        "project_id": project_id,
+        "session_id": session["session_id"],
+        "session_revision": session_revision,
+        "asset_index_revision": asset_index_revision,
+        "timeline_id": "timeline-source",
+        "timeline_version": "v001",
+        "segment_summaries": tuple(
+            {
+                "segment_id": str(item["segment_id"]),
+                "start_sec": float(item["start_sec"]),
+                "end_sec": float(item["end_sec"]),
+                "text": str(item["caption_text"]),
+            }
+            for item in session["segments"]
+        ),
+        "media_candidates": (),
+        "timeline_summary": {
+            "duration_sec": 24.0,
+            "track_count": 1,
+            "clip_count": 3,
+            "gap_count": 0,
+        },
+        "supported_controls": ({"kind": "output_variant", "mode": "recommendation_only"},),
+        "current_surface": "output",
+        "selection_kind": "none",
+        "master_session_id": session["session_id"],
+        "master_session_revision": session_revision,
+    }
+
+
+def _create_short_form_payload() -> dict:
+    from videobox_domain_models.yujin_creator_proposals import PENDING_SHORT_FORM_TARGET_ID
+
+    return {
+        "schema_version": "videobox.yujin-response.v1",
+        "reply_text": "숏폼을 만들었어요.",
+        "proposal": {
+            "proposal_id": "proposal-short-form-create",
+            "title": "숏폼 만들기",
+            "rationale": "아직 숏폼이 없어 새로 만듭니다.",
+            "operations": [
+                {
+                    "operation_id": "short-form-create",
+                    "kind": "output_variant",
+                    "target": {
+                        "variant_id": PENDING_SHORT_FORM_TARGET_ID,
+                        "track_id": "output-variant",
+                    },
+                    "parameters": {"action": "create_short_form"},
+                    "requires_materialization": False,
+                    "preview_summary": "숏폼 만들기",
+                }
+            ],
+        },
+    }
+
+
+def _save_short_form_create_proposal(
+    app, project_id: str, session: dict, *, has_short_form_variant: bool = False
+) -> str:
+    """유진이 "숏폼 만들어줘"(처음 만들기)를 시켰을 때와 같은 모양을 저장한다.
+
+    `_save_short_form_proposal`과 context 모양이 다르다 -- 만들기는 가리킬
+    변형본이 없으므로 `variant_id`·`variant_kind`가 없고 대신
+    `has_short_form_variant`로 지금 있는지를 말한다.
+    """
+    import json as _json
+
+    from videobox_core_engine.yujin_creator_proposal_adapter import (
+        activate_yujin_media_projection,
+        parse_and_project_yujin_creator_output,
+    )
+    from videobox_domain_models.yujin_creator_context import YujinCreatorContext
+
+    store = app.state.store
+    asset_index_revision = int(store.get_asset_index_revision(project_id))
+    session_revision = int(session["session_revision"])
+    context = YujinCreatorContext.model_validate(
+        {
+            **_basic_context_kwargs(
+                project_id=project_id, session=session, asset_index_revision=asset_index_revision
+            ),
+            "has_short_form_variant": has_short_form_variant,
+        }
+    )
+    payload = dict(_create_short_form_payload())
+    payload["proposal"] = {
+        **payload["proposal"],
+        "base_revision": f"session:{session['session_id']}:revision:{session_revision}:assets:{asset_index_revision}",
+    }
+    raw = (
+        "숏폼을 만들었어요.\n"
+        "```videobox-yujin-response\n"
+        f"{_json.dumps(payload, ensure_ascii=False)}\n"
+        "```"
+    )
+    projection = parse_and_project_yujin_creator_output(
+        raw,
+        context,
+        revision=1,
+        trusted_project_id=project_id,
+        trusted_run_id="run-short-form-create",
+    )
+    assert projection.proposal is not None, projection.validation_outcome
+    projection = activate_yujin_media_projection(
+        store=store,
+        project_id=project_id,
+        context=context,
+        projection=projection,
+    )
+    proposal = projection.proposal
+    assert proposal is not None
+    assert proposal.status == "ready", proposal.diff.get("proposal_mode")
+    store.save_director_proposal(project_id, proposal)
+    return proposal.proposal_id
+
+
+def _new_session_project(tmp_path: Path):
+    app = _offline_app(tmp_path)
+    client = TestClient(app)
+    project = client.post("/api/projects", json={"name": "숏폼 만들기"}).json()
+    project_id = project["project_id"]
+    session = app.state.store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline-source",
+        session_payload={
+            "segments": [
+                {"segment_id": "seg-hook", "caption_text": "이것만 보세요", "start_sec": 0.0, "end_sec": 3.0},
+                {"segment_id": "seg-middle", "caption_text": "중간 설명", "start_sec": 3.0, "end_sec": 20.0},
+                {"segment_id": "seg-close", "caption_text": "결론입니다", "start_sec": 20.0, "end_sec": 24.0},
+            ],
+            "history": [],
+        },
+    )
+    return app, client, project_id, session
+
+
+def test_yujin_can_create_the_first_short_form(tmp_path: Path) -> None:
+    """대표님이 유진에게 "숏폼 만들어줘"라고 말하면 화면 단추 없이도 만들어진다.
+
+    2026-09-12까지는 `is_yujin_variant_proposal`이 `variant_id is not None`을
+    요구해 이 의도가 아예 통과하지 못했다 -- 스키마와 적용기가 있어도 화면
+    단추 뒤에서만 만들 수 있었다.
+    """
+    app, client, project_id, session = _new_session_project(tmp_path)
+    proposal_id = _save_short_form_create_proposal(app, project_id, session)
+    candidate_id = app.state.store.get_director_proposal(
+        project_id=project_id, proposal_id=proposal_id
+    ).candidates[0].candidate_id
+
+    response = client.post(
+        f"/api/projects/{project_id}/director/proposals/{proposal_id}/batch-apply",
+        json={
+            "candidate_ids": [candidate_id],
+            "expected_revision": int(session["session_revision"]),
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["variant"]["kind"] == "vertical_highlight"
+    assert body["variant"]["selected_segment_ids"]
+    assert body["scene_pick"]["judged_by"] in {"caption_density", "yujin"}
+    variants = client.get(
+        f"/api/projects/{project_id}/output-variants",
+        params={"session_id": session["session_id"]},
+    ).json()["variants"]
+    assert any(item["kind"] == "vertical_highlight" for item in variants)
+    proposal = app.state.store.get_director_proposal(project_id=project_id, proposal_id=proposal_id)
+    assert proposal.status == "applied"
+
+
+def test_yujin_cannot_create_a_second_short_form(tmp_path: Path) -> None:
+    """숏폼이 이미 있으면 만들기 제안 자체가 검증에서 거절된다.
+
+    context의 `has_short_form_variant`가 `true`인데 `create_short_form`을 쓰면
+    `validate_yujin_creator_response`가 `proposal_variant_identity_not_current`로
+    막는다 -- 화면이 두는 "세션당 하나" 규칙을 유진이 깨지 못하게 한다.
+    """
+    app, client, project_id, session, variant = _short_form_project(tmp_path)
+
+    from videobox_core_engine.yujin_creator_proposal_adapter import (
+        parse_and_project_yujin_creator_output,
+    )
+    from videobox_domain_models.yujin_creator_context import YujinCreatorContext
+
+    store = app.state.store
+    asset_index_revision = int(store.get_asset_index_revision(project_id))
+    session_revision = int(session["session_revision"])
+    context = YujinCreatorContext.model_validate(
+        {
+            **_basic_context_kwargs(
+                project_id=project_id, session=session, asset_index_revision=asset_index_revision
+            ),
+            "has_short_form_variant": True,
+        }
+    )
+    payload = dict(_create_short_form_payload())
+    payload["proposal"] = {
+        **payload["proposal"],
+        "base_revision": f"session:{session['session_id']}:revision:{session_revision}:assets:{asset_index_revision}",
+    }
+    import json as _json
+    raw = (
+        "숏폼을 만들었어요.\n"
+        "```videobox-yujin-response\n"
+        f"{_json.dumps(payload, ensure_ascii=False)}\n"
+        "```"
+    )
+
+    projection = parse_and_project_yujin_creator_output(
+        raw,
+        context,
+        revision=1,
+        trusted_project_id=project_id,
+        trusted_run_id="run-short-form-create-blocked",
+    )
+
+    assert projection.proposal is None
+    assert projection.validation_outcome != "valid"
+
+
+def test_creating_a_short_form_yujin_did_not_see_arrive_is_a_conflict_not_a_500(
+    tmp_path: Path,
+) -> None:
+    """제안을 만든 **뒤에** 다른 경로로 숏폼이 먼저 생기는 경합.
+
+    `has_short_form_variant`는 제안을 지을 때 잰 스냅샷이라, 그 뒤 화면 단추로
+    누가 먼저 만들면 저장소의 `UNIQUE(project_id, source_session_id, kind)`에
+    걸린다. 단추 경로(`test_a_second_short_tells_the_owner_what_to_do_instead_of_a_bare_500`)와
+    같은 이유로 여기서도 맨 `Internal Server Error`가 아니라 409를 낸다.
+    """
+    app, client, project_id, session = _new_session_project(tmp_path)
+    proposal_id = _save_short_form_create_proposal(app, project_id, session)
+    # 제안은 준비됐지만 아직 적용 전이다 -- 그 사이 단추로 먼저 만든다.
+    client.post(
+        f"/api/projects/{project_id}/output-variants",
+        json={"source_session_id": session["session_id"], "kind": "vertical_highlight"},
+    )
+    candidate_id = app.state.store.get_director_proposal(
+        project_id=project_id, proposal_id=proposal_id
+    ).candidates[0].candidate_id
+
+    response = client.post(
+        f"/api/projects/{project_id}/director/proposals/{proposal_id}/batch-apply",
+        json={
+            "candidate_ids": [candidate_id],
+            "expected_revision": int(session["session_revision"]),
+        },
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "short_form_already_exists"
+    # 제안은 "적용됨"으로 잘못 남지 않는다 -- 실제로는 안 만들어졌다.
+    proposal = app.state.store.get_director_proposal(project_id=project_id, proposal_id=proposal_id)
+    assert proposal.status == "ready"
+
+
 # --- 2026-09-12: 퍼질까로 고르고, 그 이유를 화면까지 보낸다 -------------------
 #
 # owner 지시: "단순히 자르는것보다 자극적으로 숏폼이 확산할수 있을정도로 llm 이

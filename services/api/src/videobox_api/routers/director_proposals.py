@@ -5,6 +5,7 @@ import asyncio
 import logging
 import os
 import json
+import sqlite3
 from collections.abc import Mapping
 from threading import Event, Thread
 from pydantic import BaseModel, Field, field_validator
@@ -39,6 +40,7 @@ from videobox_core_engine.output_variants import (
     output_variant_from_row,
 )
 from videobox_api.short_form_scenes import (
+    created_short_form_variant,
     remade_short_form_variant,
     scene_pick_payload,
 )
@@ -1028,6 +1030,40 @@ def build_director_proposals_router(
             if is_yujin_variant_proposal(proposal):
                 if len(selected) < 1:
                     raise ValueError("variant_candidate_required")
+                # **"숏폼 만들어줘"는 가리킬 변형본이 없다.** 아래(다시 만들기·
+                # 펼치기·모양 조정)는 전부 "지금 걸린 변형본을 읽어서" 시작하는데,
+                # 만들기는 그 변형본이 아직 없어 `store.get_output_variant`가
+                # 404를 낸다 -- 그래서 그 줄에 닿기 전에 여기서 먼저 가른다.
+                if _is_short_form_create(selected):
+                    if len(selected) != 1:
+                        # 만들기는 장면·제목을 서버가 스스로 정한다. 같은
+                        # 메시지에 다른 모양 조정이 섞이면 만들어지지도 않은
+                        # 변형본에 무엇을 적용할지 정할 근거가 없다.
+                        raise ValueError("variant_short_form_create_must_be_alone")
+                    try:
+                        variant, pick = created_short_form_variant(
+                            store=store,
+                            project_id=project_id,
+                            proposal_id=proposal_id,
+                            session_id=proposal.source_session_id,
+                            expected_session_revision=proposal.base_session_revision,
+                            runtime=request.app.state.local_only_runtime_service_factory(store),
+                        )
+                    except sqlite3.IntegrityError as error:
+                        # 한 편집본에 숏폼은 하나뿐이다(`output_variants`의
+                        # `UNIQUE(project_id, source_session_id, kind)`). 단추
+                        # 경로(`routers/output_variants.py`)와 같은 이유로 여기서도
+                        # 잡는다 -- 안 잡으면 대표님에게 맨 `Internal Server Error`가
+                        # 간다(2026-09-11 그 경로에서 실제로 그랬다).
+                        raise HTTPException(status_code=409, detail="short_form_already_exists") from error
+                    return {
+                        "proposal_id": proposal_id,
+                        "status": "applied",
+                        "variant": variant,
+                        # 누가 골랐는지를 화면에 그대로 넘긴다 -- 자막 밀도로 내려간
+                        # 결과를 "유진이 골랐어요"라고 말하지 않게 하는 유일한 근거다.
+                        "scene_pick": scene_pick_payload(pick),
+                    }
                 variant_id = str(proposal.diff.get("variant_id") or "")
                 expected_variant_revision = int(proposal.diff.get("base_variant_revision") or 0)
                 current = output_variant_from_row(
@@ -1198,8 +1234,18 @@ def reject_yujin_direct_apply(proposal) -> None:
 def is_yujin_variant_proposal(proposal) -> bool:
     return (
         proposal.diff.get("proposal_mode") in {"yujin_actionable_v1", "yujin_actionable_media_v1"}
-        and proposal.diff.get("variant_id") is not None
         and any(candidate.media_type == "output_variant" for candidate in proposal.candidates)
+        and (
+            proposal.diff.get("variant_id") is not None
+            # **"숏폼 만들어줘"는 가리킬 변형본이 없다.** 나머지 output_variant
+            # 제안은 `variant_id`가 있어야 하지만(위 조건), 만들기는 그 반대다 --
+            # `unique_operation_ids`가 이 action에 한해 `variant_id`를 `None`으로
+            # 요구한다(`yujin_creator_proposals.py`). 이 줄이 없으면 만들기
+            # 제안은 여기서 "변형본 제안이 아니다"로 읽혀, 아래 `batch_apply`가
+            # 미디어 후보 경로(`materializer.stage_batch`)로 잘못 새어
+            # `candidate_unavailable` 422가 난다 -- 이 파일이 원래 걸렸던 함정이다.
+            or _has_variant_action(proposal.candidates, "create_short_form")
+        )
     )
 
 
@@ -1219,6 +1265,16 @@ def _has_variant_action(candidates, action: str) -> bool:
         if isinstance(parameters, Mapping) and parameters.get("action") == action:
             return True
     return False
+
+
+def _is_short_form_create(candidates) -> bool:
+    """유진이 "숏폼 만들어줘"(처음 만들기)를 시킨 후보인가.
+
+    `_is_short_form_remake`와 다른 자리에서 갈라져야 한다 -- 이 후보에는 가리킬
+    변형본이 없어(`proposal.diff.get("variant_id")`가 `None`) 아래에서 기존
+    변형본을 읽는 `store.get_output_variant`를 부르면 404로 죽는다.
+    """
+    return _has_variant_action(candidates, "create_short_form")
 
 
 def _is_short_form_unfold(candidates) -> bool:

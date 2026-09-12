@@ -14,7 +14,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from videobox_core_engine.highlight_scoring import select_highlight_segment_ids
-from videobox_domain_models.output_variants import OutputVariant
+from videobox_domain_models.output_variants import OutputVariant, VariantOverride
 
 
 class OutputVariantMixin:
@@ -110,18 +110,21 @@ class OutputVariantMixin:
         finally:
             connection.close()
 
-    def create_output_variant(
+    def _new_short_form_variant(
         self,
         *,
-        project_id: str,
+        session: Mapping[str, Any],
         source_session_id: str,
-        kind: str,
-        variant_id: str | None = None,
-        selected_segment_ids: Sequence[str] | None = None,
-    ) -> dict[str, Any]:
-        if kind != "vertical_highlight":
-            raise ValueError("only_vertical_highlight_can_be_created_explicitly")
-        session = self.get_editing_session(project_id=project_id, session_id=source_session_id)
+        variant_id: str | None,
+        selected_segment_ids: Sequence[str] | None,
+        layout: Mapping[str, Any] | None,
+    ) -> OutputVariant:
+        """숏폼 변형본 하나를 **아직 저장하지 않고** 짓는다.
+
+        `create_output_variant`(단추 경로)와 새 트랜잭션 메서드(유진의 "만들기")가
+        **같은 모양**을 지어야 한다 -- 이 저장소는 같은 로직이 두 자리에 갈라져
+        한쪽만 고쳐지는 함정에 반복해서 걸렸다(이 파일 머리말).
+        """
         master_segments = [
             segment
             for segment in session.get("segments", [])
@@ -153,10 +156,10 @@ class OutputVariantMixin:
             for segment in master_segments
             if str(segment.get("cut_action") or "keep") != "remove"
         ]
-        selected_segment_ids = (
+        selected = (
             picked or select_highlight_segment_ids(playable_master_segments) or None
         )
-        variant = OutputVariant(
+        return OutputVariant(
             variant_id=variant_id or f"variant-{uuid.uuid4().hex}",
             kind="vertical_highlight",
             source_session_id=source_session_id,
@@ -165,7 +168,33 @@ class OutputVariantMixin:
             master_segment_ids=tuple(
                 str(segment["segment_id"]) for segment in master_segments
             ) or None,
+            selected_segment_ids=selected,
+            # 숏폼 제목 띠(`shorts_layout.py`). 만들 때 같이 들어오는 이유: 제목은
+            # 장면을 고른 그 판단에서 같이 나온다(`short_form_scene_pick`의 짜기
+            # 호출 하나). 나중에 따로 저장하게 두면 만들기와 제목 사이에 제목
+            # 없는 판이 한 번 렌더될 수 있다.
+            overrides=VariantOverride(layout=dict(layout)) if layout else VariantOverride(),
+        )
+
+    def create_output_variant(
+        self,
+        *,
+        project_id: str,
+        source_session_id: str,
+        kind: str,
+        variant_id: str | None = None,
+        selected_segment_ids: Sequence[str] | None = None,
+        layout: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if kind != "vertical_highlight":
+            raise ValueError("only_vertical_highlight_can_be_created_explicitly")
+        session = self.get_editing_session(project_id=project_id, session_id=source_session_id)
+        variant = self._new_short_form_variant(
+            session=session,
+            source_session_id=source_session_id,
+            variant_id=variant_id,
             selected_segment_ids=selected_segment_ids,
+            layout=layout,
         )
         connection = self._connection(project_id)
         try:
@@ -323,6 +352,77 @@ class OutputVariantMixin:
             )
             connection.commit()
             return self.get_output_variant(project_id=project_id, variant_id=variant_id)
+        except Exception:
+            if getattr(connection, "in_transaction", False):
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def apply_director_variant_create_proposal_transaction(
+        self,
+        *,
+        project_id: str,
+        proposal_id: str,
+        source_session_id: str,
+        expected_session_revision: int,
+        variant_id: str | None = None,
+        selected_segment_ids: Sequence[str] | None = None,
+        layout: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """유진의 "숏폼 만들어줘"를 **한 트랜잭션**으로 만들고 그 제안을 소진한다.
+
+        `create_output_variant`(단추 경로)를 그대로 못 쓰는 이유: 그 함수는 제안을
+        모른다. 둘을 따로 부르면 변형본은 생겼는데 제안이 "ready"로 남는 창이
+        생기고, 그 사이 재시도가 오면 두 번째 변형본을 또 지으려다
+        `output_variants`의 `UNIQUE(project_id, source_session_id, kind)`에
+        걸린다(그 자체는 안전하지만 제안 lifecycle이 결과와 어긋난다). 변형본
+        갱신 경로(`apply_director_variant_proposal_transaction`)가 이미 같은
+        이유로 한 트랜잭션을 쓴다 -- 이건 그 만들기(INSERT) 짝이다.
+        """
+        from videobox_storage.local_project_store import EditingSessionRevisionConflict
+
+        session = self.get_editing_session(project_id=project_id, session_id=source_session_id)
+        if int(session.get("session_revision") or 1) != expected_session_revision:
+            raise EditingSessionRevisionConflict("session_revision_mismatch")
+        variant = self._new_short_form_variant(
+            session=session,
+            source_session_id=source_session_id,
+            variant_id=variant_id,
+            selected_segment_ids=selected_segment_ids,
+            layout=layout,
+        )
+        connection = self._connection(project_id)
+        try:
+            self._begin_output_variant_write(connection)
+            proposal = connection.execute(
+                "SELECT status FROM director_proposals WHERE project_id = ? AND proposal_id = ?",
+                (project_id, proposal_id),
+            ).fetchone()
+            if proposal is None:
+                raise KeyError("director_proposal_missing")
+            if str(proposal["status"]) != "ready":
+                raise EditingSessionRevisionConflict("director_proposal_not_ready")
+            now = self._now_iso()
+            connection.execute(
+                "INSERT INTO output_variants (variant_id, project_id, kind, source_session_id, "
+                "source_session_revision, variant_revision, overrides_json, locks_json, conflicts_json, "
+                "selected_segment_ids_json, master_segment_ids_json, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                self._output_variant_values(project_id, variant, now, now),
+            )
+            changed = connection.execute(
+                "UPDATE director_proposals SET status = ?, updated_at = ? WHERE project_id = ? AND proposal_id = ? AND status = 'ready'",
+                ("applied", now, project_id, proposal_id),
+            ).rowcount
+            if changed != 1:
+                raise EditingSessionRevisionConflict("director_proposal_already_applied")
+            connection.execute(
+                "INSERT INTO director_proposal_lifecycle_events (proposal_id, status, reason, changed_at) VALUES (?, ?, ?, ?)",
+                (proposal_id, "applied", "variant_transaction_create", now),
+            )
+            connection.commit()
+            return self.get_output_variant(project_id=project_id, variant_id=variant.variant_id)
         except Exception:
             if getattr(connection, "in_transaction", False):
                 connection.rollback()

@@ -592,3 +592,120 @@ def test_only_exact_machine_frame_is_parsed_and_invalid_payload_keeps_reply() ->
     assert "수동" in mismatch.reply_text
     assert mismatch.validation_outcome == "invalid"
     assert mismatch.manual_fallback is True
+
+
+def _shorts_title_raw(parameters: dict) -> str:
+    payload = {
+        "schema_version": "videobox.yujin-response.v1",
+        "reply_text": "첫 화면 제목을 걸었어요.",
+        "proposal": {
+            "proposal_id": "proposal-yujin-title",
+            "base_revision": "session:session-1:revision:7:assets:3",
+            "title": "숏폼 첫 화면 제목",
+            "rationale": "1행이 미끼, 2행이 결과입니다.",
+            "variant_id": "variant-short",
+            "base_variant_revision": 4,
+            "operations": [
+                {
+                    "operation_id": "shorts-title",
+                    "kind": "output_variant",
+                    "target": {"variant_id": "variant-short", "track_id": "output-variant"},
+                    "parameters": {"action": "set_shorts_title", **parameters},
+                    "requires_materialization": False,
+                    "preview_summary": "첫 화면 제목 띠",
+                }
+            ],
+        },
+    }
+    return (
+        "첫 화면 제목을 걸었어요.\n"
+        "```videobox-yujin-response\n"
+        f"{json.dumps(payload, ensure_ascii=False)}\n"
+        "```"
+    )
+
+
+def _shorts_title_projection(parameters: dict, *, context: YujinCreatorContext | None = None):
+    from videobox_core_engine.yujin_creator_proposal_adapter import (
+        parse_and_project_yujin_creator_output,
+    )
+
+    return parse_and_project_yujin_creator_output(
+        _shorts_title_raw(parameters),
+        context or _short_form_context(),
+        revision=1,
+        trusted_project_id="project-1",
+        trusted_run_id="run-title",
+    )
+
+
+def test_yujin_can_write_the_first_screen_title_by_voice() -> None:
+    """**화면에서 되는 것은 유진에게도 되어야 한다**(owner 상시 지시).
+
+    제목 띠는 모양 조정이므로 `overrides.layout` 한 칸으로 간다 -- 장면 목록도
+    순서도 안 바꾼다.
+    """
+    from videobox_core_engine.yujin_creator_proposal_adapter import (
+        variant_patch_from_yujin_candidate,
+    )
+
+    projection = _shorts_title_projection({
+        "title_lines": ["10년 팔아 본 사람이 말하는", "재고가 안 남는 이유"],
+        "highlight": "재고",
+    })
+    assert projection.proposal is not None, projection.validation_outcome
+
+    patch = variant_patch_from_yujin_candidate(projection.proposal.candidates[0])
+
+    assert patch == {
+        "overrides": {
+            "layout": {
+                "title_lines": ["10년 팔아 본 사람이 말하는", "재고가 안 남는 이유"],
+                "highlight": "재고",
+                "hidden": False,
+            }
+        }
+    }
+
+
+def test_turning_the_title_band_off_still_carries_the_words() -> None:
+    """끄기가 문구를 지우면 다시 켤 때 되돌릴 것이 없다.
+
+    덮어쓰기는 필드를 **통째로** 갈아 끼운다(`_merged_overrides`) -- `hidden`만
+    실어 보내면 제목이 사라진다. 안내문이 그래서 `title_lines`를 같이 적으라고 한다.
+    """
+    from videobox_core_engine.yujin_creator_proposal_adapter import (
+        variant_patch_from_yujin_candidate,
+    )
+
+    projection = _shorts_title_projection({
+        "title_lines": ["훅", "결과"], "highlight": "결과", "hidden": True,
+    })
+    assert projection.proposal is not None, projection.validation_outcome
+
+    patch = variant_patch_from_yujin_candidate(projection.proposal.candidates[0])
+
+    assert patch["overrides"]["layout"]["hidden"] is True
+    assert patch["overrides"]["layout"]["title_lines"] == ["훅", "결과"]
+
+
+def test_a_highlight_that_is_not_in_the_title_is_refused() -> None:
+    """**지어내지 않는다.** 제목에 없는 낱말을 강조로 받으면 렌더러가 조용히
+    무시하고, 그러면 "골랐다"는 기록과 결과가 어긋난다."""
+    projection = _shorts_title_projection({
+        "title_lines": ["훅", "결과"], "highlight": "없는말",
+    })
+
+    assert projection.proposal is None
+    assert projection.validation_outcome != "valid"
+
+
+def test_only_the_short_form_can_carry_a_first_screen_title() -> None:
+    """가로·세로 전체본은 원본과 같은 이야기를 다른 화면비로 내보내는 것이라
+    제목을 붙일 자리가 없다 -- `build_variant_timeline_payload`도 안 싣는다."""
+    context = _short_form_context().model_copy(update={"variant_kind": "vertical_full"})
+
+    projection = _shorts_title_projection({"title_lines": ["훅"]}, context=context)
+
+    assert projection.proposal is None
+    assert projection.validation_outcome != "valid"

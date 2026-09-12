@@ -97,6 +97,7 @@ import logging
 import time
 from typing import Any, Literal
 
+from videobox_core_engine.shorts_layout import MAX_TITLE_LINES
 from videobox_core_engine.highlight_scoring import (
     select_highlight_segment_ids,
     target_duration_sec,
@@ -200,6 +201,13 @@ class ShortFormScenePick:
     scenes_total: int
     scenes_read_by_yujin: int
     fallback_reason: str | None = None
+    #: 첫 화면 제목 띠에 띄울 글줄(`shorts_layout.py`). **`spread_reason`과 다르다** --
+    #: 그쪽은 대표님이 읽는 판단 근거이고 이쪽은 시청자가 보는 훅이다.
+    #: 유진이 못 줬으면 비어 있고, 그때는 **제목 띠 없이 나가고 문구가 그 사실을
+    #: 말한다**(지어내지 않는다).
+    title_lines: tuple[str, ...] = ()
+    #: 제목에서 초록으로 칠할 낱말 하나. 유진이 못 고르면 `None`이고 전부 흰색이다.
+    title_highlight: str | None = None
     #: 유진이 댄 "이 숏폼이 왜 퍼질지" 한 줄. **화면까지 간다**
     #: (`scene_pick_payload` -> `api.ts` -> `shortFormNotice.ts`).
     #: 유진이 짜기를 못 했으면 `None`이고, 그때 문구가 그 사실을 말한다.
@@ -548,8 +556,27 @@ def _compose_schema() -> dict[str, Any]:
                         "lines": {"type": "array", "maxItems": 12, "items": {"type": "integer"}},
                         # 화면 문구에 그대로 붙는 한 줄이다. 길면 대표님이 못 읽는다.
                         "reason": {"type": "string", "maxLength": 300},
+                        # **첫 화면 제목 띠에 그려질 글자**(`shorts_layout.py`).
+                        # `reason`과 다르다 -- 그쪽은 대표님이 읽는 판단 근거이고
+                        # 이쪽은 시청자가 보는 훅이다. 한 칸에 담으면 300자짜리
+                        # 설명이 제목 띠에 들어간다.
+                        #
+                        # **호출을 하나 더 늘리지 않고 여기에 얹는 이유**: 짜기는
+                        # 실측 266.8~295.0초짜리이고 프록시 벽이 330초다
+                        # (`COMPOSE_MAX_WAIT_SECONDS` 머리말). 제목을 따로 물으면
+                        # 같은 모델에 한 판을 더 돌려야 하고, 그러면 화면 경로가
+                        # 무조건 벽을 넘는다. 여기 두면 늘어나는 것은 출력 토큰
+                        # 30자 남짓이다.
+                        "title": {
+                            "type": "array",
+                            "maxItems": MAX_TITLE_LINES,
+                            "items": {"type": "string", "maxLength": 30},
+                        },
+                        # 제목에서 **초록으로 칠할 낱말 하나.** 제목 안에 실제로
+                        # 있는 낱말이어야 한다 -- 없으면 안 칠한다(지어내지 않는다).
+                        "highlight": {"type": "string", "maxLength": 20},
                     },
-                    "required": ["lines", "reason"],
+                    "required": ["lines", "reason", "title", "highlight"],
                 },
             },
             "chosen": {"type": "integer"},
@@ -603,7 +630,12 @@ def _compose_prompt(
     )
     example = {
         "thinking": "무엇이 손을 멈추게 하는지 먼저 적는다",
-        "candidates": [{"lines": [1, 3], "reason": "첫마디가 통념을 뒤집고 끝이 결과로 닫힌다"}],
+        "candidates": [{
+            "lines": [1, 3],
+            "reason": "첫마디가 통념을 뒤집고 끝이 결과로 닫힌다",
+            "title": ["10년 팔아 본 사람이 말하는", "재고가 안 남는 이유"],
+            "highlight": "재고",
+        }],
         "chosen": 1,
         "schema_version": _COMPOSE_SCHEMA_VERSION,
     }
@@ -620,6 +652,16 @@ def _compose_prompt(
         "`lines`는 재생 순서대로 적는다. "
         "`reason`은 **이 숏폼이 왜 퍼질지** 한 줄로, 대표님이 읽을 한국말로 적어라 -- "
         "이 문장은 화면에 그대로 나간다.\n"
+        # 제목 규칙은 **참고 숏폼 넷에서 읽어 왔다**(2026-09-12, 대표님이 준
+        # 영상들을 픽셀로 재면서 문구도 같이 옮겼다). 두 행의 역할이 다르다는
+        # 것이 핵심이다 -- 이 규칙 없이 "제목을 지어라"만 하면 대목 요약이 온다.
+        f"`title`은 **첫 화면 위쪽에 크게 뜨는 제목**이고 {MAX_TITLE_LINES}줄까지다. "
+        "영상 위에 큰 글씨로 그려지므로 **한 줄은 열 자 안쪽**이어야 한다 -- 길면 글자가 작아져서 눈에 안 띈다(참고 숏폼 넷도 한 줄이 열 자 안팎이었다). "
+        "두 줄이면 역할을 나눠라 -- **1행은 누가·무엇을(미끼), 2행은 결과·질문이다.** "
+        "예: `내과전문의가 말하는` / `노안이 되는 이유`, `목주름 조차 없는` / `김희선 피부비결`. "
+        "대목 요약이 아니라 **손을 멈추게 하는 한마디**다.\n"
+        "`highlight`는 그 제목에서 **초록으로 칠할 낱말 하나**다. `title`에 실제로 있는 "
+        "낱말을 그대로 적어라 -- 고를 것이 없으면 빈 문자열을 줘라. 지어내지 마라.\n"
         "`chosen`은 후보 중 **가장 퍼질 것 하나**의 번호(1부터)다.\n"
         f"출력 예시: {json.dumps(example, ensure_ascii=False)}\n\n"
         f"{_COMPOSE_MARKER}\n{numbered}"
@@ -650,17 +692,51 @@ def _valid_picks(output: object, *, batch_size: int) -> list[tuple[int, int]] | 
     return result
 
 
+@dataclass(slots=True, frozen=True)
+class _Candidate:
+    """유진이 짠 숏폼 후보 하나. **제목과 이유를 따로 들고 다닌다.**
+
+    이유(`reason`)는 대표님이 읽는 판단 근거이고 제목(`title_lines`)은 시청자가
+    보는 훅이다. 한 칸에 담으면 300자짜리 설명이 제목 띠로 들어간다.
+    """
+
+    lines: tuple[int, ...]
+    reason: str
+    title_lines: tuple[str, ...] = ()
+    title_highlight: str | None = None
+
+
+def _valid_title(item: Mapping[str, object]) -> tuple[tuple[str, ...], str | None]:
+    """후보 하나에서 제목을 읽는다. 모양이 아니면 **빈 제목**이다 -- 짓지 않는다.
+
+    제목을 못 읽었다고 후보 전체를 버리지 않는다. 장면 고르기가 이 기능의 본체이고
+    제목은 그 위에 얹는 것이라, 제목이 없으면 제목 띠 없이 나가면 된다(그리고
+    화면 문구가 그 사실을 말한다).
+    """
+    raw = item.get("title")
+    if not isinstance(raw, (list, tuple)):
+        return (), None
+    lines = tuple(str(line).strip() for line in raw if str(line).strip())[:MAX_TITLE_LINES]
+    if not lines:
+        return (), None
+    raw_highlight = str(item.get("highlight") or "").strip()
+    # **제목 안에 실제로 있는 낱말만** 강조로 받는다. 없는 낱말을 실어 보내면
+    # 렌더러가 조용히 무시하는데, 그러면 "골랐다"는 기록과 결과가 어긋난다.
+    highlight = raw_highlight if any(raw_highlight in line for line in lines) else ""
+    return lines, highlight or None
+
+
 def _valid_candidates(
     output: object, *, shortlist_size: int
-) -> tuple[list[tuple[tuple[int, ...], str]], int] | None:
-    """`([(줄 번호들, 이유)], 고른 후보 번호)`. 모양이 아니면 `None`."""
+) -> tuple[list[_Candidate], int] | None:
+    """`([후보들], 고른 후보 번호)`. 모양이 아니면 `None` -- 반쯤 믿지 않는다."""
 
     if not isinstance(output, Mapping):
         return None
     raw = output.get("candidates")
     if not isinstance(raw, (list, tuple)):
         return None
-    candidates: list[tuple[tuple[int, ...], str]] = []
+    candidates: list[_Candidate] = []
     for item in raw:
         if not isinstance(item, Mapping):
             continue
@@ -677,7 +753,13 @@ def _valid_candidates(
                 numbers.append(number)
         if not numbers:
             continue
-        candidates.append((tuple(numbers), str(item.get("reason") or "").strip()))
+        title_lines, highlight = _valid_title(item)
+        candidates.append(_Candidate(
+            lines=tuple(numbers),
+            reason=str(item.get("reason") or "").strip(),
+            title_lines=title_lines,
+            title_highlight=highlight,
+        ))
     if not candidates:
         return None
     try:
@@ -960,6 +1042,8 @@ def pick_short_form_scenes(
     shortlist = [passages[index] for index in shortlist_indexes]
 
     spread_reason: str | None = None
+    title_lines: tuple[str, ...] = ()
+    title_highlight: str | None = None
     composed: tuple[int, ...] | None = None
     compose_failed = False
     # **대목이 하나여도 짜기를 부른다.** 짤 것이 없어 보이지만, 이 호출이
@@ -1008,13 +1092,15 @@ def pick_short_form_scenes(
                 )
             else:
                 candidates, chosen = parsed
-                lines, reason = candidates[chosen - 1]
-                composed = tuple(shortlist_indexes[number - 1] for number in lines)
-                spread_reason = reason or None
+                candidate = candidates[chosen - 1]
+                composed = tuple(shortlist_indexes[number - 1] for number in candidate.lines)
+                spread_reason = candidate.reason or None
+                title_lines = candidate.title_lines
+                title_highlight = candidate.title_highlight
                 _LOGGER.info(
-                    "숏폼 짜기: 후보 %d개 중 %d번, 대목 %d개, %.1f초, 퍼질 이유 %s",
+                    "숏폼 짜기: 후보 %d개 중 %d번, 대목 %d개, %.1f초, 퍼질 이유 %s, 제목 %d줄",
                     len(candidates), chosen, len(composed), clock() - compose_started,
-                    "있음" if spread_reason else "없음",
+                    "있음" if spread_reason else "없음", len(title_lines),
                 )
 
     if composed:
@@ -1060,6 +1146,10 @@ def pick_short_form_scenes(
             if compose_failed
             else ""
         )
+    if not title_lines:
+        # **제목을 지어내지 않는다.** 못 받았으면 제목 띠 없이 나가고 그 사실을
+        # 말한다 -- 말없이 빈 띠를 얹으면 대표님은 제목이 안 그려진 결함으로 본다.
+        notice += " 첫 화면에 띄울 제목은 못 만들어서 제목 띠 없이 뒀어요."
     _LOGGER.info(
         "숏폼 판단 끝: 장면 %d개 중 %d개 읽음, 고른 장면 %d개, 퍼질 이유 %s, %.1f초 / 예산 %.0f초",
         len(ordered), read_count, len(segment_ids),
@@ -1072,6 +1162,8 @@ def pick_short_form_scenes(
         scenes_total=len(ordered),
         scenes_read_by_yujin=read_count,
         spread_reason=spread_reason,
+        title_lines=title_lines,
+        title_highlight=title_highlight,
         # **자를 자리.** 부르는 쪽(`short_form_scenes.py`)이 이 구간의 양 끝에서만
         # 판을 나눈다 -- 안 쓰는 자리는 나누지 않는다(owner 지시 2026-09-12).
         chosen_source_ranges=tuple(

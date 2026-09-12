@@ -15,6 +15,7 @@ from videobox_domain_models.director_proposals import (
 )
 from videobox_domain_models.yujin_creator_context import YujinCreatorContext
 from videobox_domain_models.yujin_creator_proposals import (
+    PENDING_SHORT_FORM_TARGET_ID,
     UNSAFE_CREDENTIAL_LABEL_PATTERN,
     UNSAFE_CREDENTIAL_LABELS,
     YujinCreatorResponse,
@@ -100,11 +101,24 @@ def variant_patch_from_yujin_candidate(candidate: DirectorCandidate) -> dict[str
         "set_caption_layout": "caption",
         "set_safe_area": "safe_area",
         "correct_audio": "audio",
+        # 숏폼 첫 화면 제목 띠(`shorts_layout.py`). 파라미터 이름(`title_lines`·
+        # `highlight`·`hidden`)이 엔진이 읽는 칸 이름과 **같아서** 여기서 옮겨
+        # 적는 것이 없다 -- 이름을 갈아 끼우면 그 표가 곧 두 벌이 된다.
+        "set_shorts_title": "layout",
     }
     field = field_by_action.get(action)
     if field is None:
         raise ValueError("variant_action_forbidden")
-    values = {key: value for key, value in parameters.items() if key != "action"}
+    # **여러 값을 담은 칸은 list로 눕힌다.** 검증된 파라미터 모델은 tuple을 주는데
+    # (`title_lines`), 화면에서 오는 같은 patch는 list다. 저장은 JSON이라 결국
+    # 같아지지만, 그 전에 `apply_variant_patch`를 지난 값을 비교하는 자리
+    # (`variant_timeline_needs_rebuild`)가 tuple과 list를 다르다고 본다 -- 유진이
+    # 건 제목과 화면에서 건 제목이 같은 값인데 캐시가 매번 다시 만들어진다.
+    values = {
+        key: list(value) if isinstance(value, tuple) else value
+        for key, value in parameters.items()
+        if key != "action"
+    }
     return {"overrides": {field: values}}
 
 
@@ -527,7 +541,22 @@ def _is_actionable_variant_operation(
     if not isinstance(operation, Mapping) or operation.get("kind") != "output_variant":
         return False
     target = operation.get("target")
-    if not isinstance(target, Mapping) or target.get("variant_id") != context.variant_id:
+    if not isinstance(target, Mapping):
+        return False
+    parameters = operation.get("parameters")
+    action = parameters.get("action") if isinstance(parameters, Mapping) else None
+    if action == "create_short_form":
+        # **만들기는 거꾸로다.** 나머지 여덟은 "지금 걸린 변형본과 같은가"를
+        # 묻지만, 만들기는 가리킬 변형본이 **아직 없어야** 옳다 -- 있으면 두
+        # 번째를 만들려는 것이라 여기서 actionable로 올리면 안 된다
+        # (`validate_yujin_creator_response`가 애초에 그런 제안 자체를 거절하지만,
+        # 이 attest 단계는 그 검증을 통과한 뒤에도 다시 확인한다).
+        return (
+            target.get("variant_id") == PENDING_SHORT_FORM_TARGET_ID
+            and context.variant_id is None
+            and not context.has_short_form_variant
+        )
+    if target.get("variant_id") != context.variant_id:
         return False
     if context.variant_id is None or context.variant_revision is None:
         return False

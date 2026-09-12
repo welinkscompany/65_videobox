@@ -19,10 +19,11 @@ VariantField = Literal[
     "caption",
     "safe_area",
     "audio",
+    "layout",
     "story",
     "segment_order",
 ]
-OverrideField = Literal["crop", "focal", "caption", "safe_area", "audio"]
+OverrideField = Literal["crop", "focal", "caption", "safe_area", "audio", "layout"]
 
 
 def _as_tuple(value: object) -> tuple[object, ...]:
@@ -58,6 +59,14 @@ class VariantOverride(_StrictFrozenModel):
     caption: dict[str, object] | None = None
     safe_area: dict[str, object] | None = None
     audio: dict[str, object] | None = None
+    #: 숏폼을 **숏폼처럼** 앉히는 값 -- 제목 띠에 띄울 글줄과 강조 낱말.
+    #: `{"title_lines": [...], "highlight": "낱말", "hidden": false}`.
+    #: 뜻은 `videobox_core_engine.shorts_layout.shorts_title_from_override`가 정한다.
+    #:
+    #: 여기(모양 조정 다섯 옆)에 두는 이유: 제목 띠는 **이야기가 아니라 화면**이다.
+    #: 장면 목록도 순서도 안 바꾼다. 그래서 `selected_segment_ids`가 아니라
+    #: 덮어쓰기이고, `apply_variant_patch`의 문·잠금·충돌 기계를 그대로 쓴다.
+    layout: dict[str, object] | None = None
 
     @model_validator(mode="after")
     def values_are_finite(self) -> VariantOverride:

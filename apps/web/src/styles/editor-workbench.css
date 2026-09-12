@@ -465,6 +465,8 @@
 /* 펼치기 규칙 한 줄. 경고(빨강)가 아니라 미리 알리는 안내다. */
 .vb-editor-variants__server-note { margin: 0; color: var(--muted-foreground); font-size: var(--vb-text-sm); }
 .vb-editor-variants__server-actions { display: flex; flex-wrap: wrap; gap: var(--vb-space-2); }
+/* 첫 화면 제목 띠: 지금 걸린 문구와 끄기·켜기를 한 묶음으로 둔다. */
+.vb-editor-variants__title-band { display: grid; gap: var(--vb-space-2); justify-items: start; }
 @media (max-width: 760px) {
   .vb-editor-variants__compare { grid-template-columns: 1fr; }
 }

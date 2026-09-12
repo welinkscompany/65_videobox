@@ -2226,6 +2226,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         # 그쪽이 먼저 돌면 틀린 타임라인이 캐시되어 여기 고침이 건너뛰어졌다.
         timeline_payload = build_variant_timeline_payload(
             master_timeline=master_timeline, variant_kind=variant.kind, derived=derived,
+            overrides=variant.overrides,
         )
         # 캐시(`variant_materializations`)가 있어도 무조건 재사용하지 않는다.
         # 2026-09-11 실물 측정: 컨테이너에 Task 1·2 고침을 올린 뒤에도 owner가
@@ -2920,7 +2921,8 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         except KeyError:
             master_timeline = {}
         timeline_payload = build_variant_timeline_payload(
-            master_timeline=master_timeline, variant_kind=variant.kind, derived=derived
+            master_timeline=master_timeline, variant_kind=variant.kind, derived=derived,
+            overrides=variant.overrides,
         )
         # **파생 표시를 떼어 낸다.** 남기면 이 판이 독립이 아니다 -- 렌더가
         # 마스터 세션을 다시 읽어 투영하므로, 펼친 판의 편집이 완성본에 안 닿고

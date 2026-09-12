@@ -17,6 +17,7 @@ from videobox_core_engine.output_variants import UNFOLD_INDEPENDENCE_RULE
 from videobox_api.short_form_scenes import (
     remade_short_form_variant,
     scene_pick_payload,
+    short_form_layout_override,
     short_form_scene_pick,
 )
 from videobox_core_engine.output_variants import (
@@ -130,6 +131,11 @@ def build_output_variants_router(
                     kind=request.kind,
                     variant_id=request.variant_id,
                     selected_segment_ids=pick.segment_ids,
+                    # **첫 화면 제목 띠도 같은 판단에서 나온다**(`shorts_layout.py`).
+                    # 유진이 짜기 한 호출에서 장면과 제목을 같이 주므로 여기서
+                    # 같이 저장한다 -- 나중에 따로 저장하면 제목 없는 판이 한 번
+                    # 렌더될 수 있다. 못 받았으면 `None`이고 제목 띠 없이 나간다.
+                    layout=short_form_layout_override(pick),
                 ),
                 "scene_pick": scene_pick_payload(pick),
             }
@@ -346,6 +352,7 @@ def build_output_variants_router(
             # 건너뛰어졌다(`save_variant_materialization`을 나중 호출자가 재사용한다).
             timeline_payload = build_variant_timeline_payload(
                 master_timeline=master_timeline, variant_kind=variant.kind, derived=derived,
+                overrides=variant.overrides,
             )
             # 이 라우터만 챙기던 것들. 공용 조립은 마스터에 있는 값을 그대로
             # 물려주므로, 마스터에 없을 때 빈 목록으로 세워 두는 몫만 남는다.

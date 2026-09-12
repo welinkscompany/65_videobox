@@ -13,6 +13,11 @@ from videobox_domain_models.yujin_creator_context import YujinCreatorContext
 
 _ID_BYTES = 256
 _TEXT_BYTES = 1024
+#: "숏폼 만들어줘"의 target `variant_id`. **아직 없는 변형본**을 가리키는 자리라
+#: 진짜 id를 넣을 수 없다 -- 그래서 값 하나로 고정한다. `validate_yujin_creator_response`가
+#: 정확히 이 값일 때만 만들기로 받는다(다른 값이면 존재하지 않는 진짜 변형본을
+#: 가리키려는 것으로 보고 거절한다).
+PENDING_SHORT_FORM_TARGET_ID = "pending-short-form"
 UNSAFE_CREDENTIAL_LABELS = (
     "api_key",
     "access_token",
@@ -386,6 +391,54 @@ class VariantAudioCorrectionParameters(_Parameters):
     fade_out_sec: float = Field(ge=0, le=10)
 
 
+class VariantShortsTitleParameters(_Parameters):
+    """숏폼 **첫 화면 제목 띠**(`videobox_core_engine.shorts_layout`).
+
+    왜 모양 조정 다섯 옆에 있는가. 제목 띠는 이야기가 아니라 화면이다 -- 장면
+    목록도 순서도 안 바꾸고, 픽셀만 달라진다. 그래서 `select_segments`가 아니라
+    덮어쓰기이고 `overrides.layout` 한 칸에 들어간다.
+
+    **문구를 지우는 길을 따로 두지 않는다.** 끄기는 `hidden: true`이고 문구는 그대로
+    남는다 -- 지우면 다시 켤 때 되돌릴 것이 없다(유진 편집은 확인 클릭 없이 바로
+    적용되고 안전장치가 되돌리기 하나다, 2026-09-01 결정). 그래서 켜고 끌 때도
+    `title_lines`를 **같이 적어야 한다**: 덮어쓰기는 필드를 통째로 갈아 끼운다.
+    """
+
+    action: Literal["set_shorts_title"]
+    #: 위에서 아래로 읽는 순서. 참고 숏폼 넷은 2~3줄이었고(2026-09-12 실측)
+    #: 1행이 대상·미끼, 2행이 결과·질문이었다.
+    title_lines: tuple[str, ...] = Field(min_length=1, max_length=3)
+    #: 초록으로 칠할 낱말 하나. 제목 안에 실제로 있어야 한다 -- 없으면 거절한다.
+    #: 안 고르면 `None`이고 전부 흰색이다.
+    highlight: str | None = Field(default=None, max_length=20)
+    #: 문구는 남기고 띠만 끈다.
+    hidden: bool = False
+
+    @field_validator("title_lines")
+    @classmethod
+    def lines_are_bounded_and_present(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        for item in value:
+            if not item.strip():
+                raise ValueError("shorts_title_line_required")
+            _bounded_utf8(item, limit=_TITLE_LINE_BYTES, label="shorts_title_line")
+        return value
+
+    @model_validator(mode="after")
+    def highlight_is_in_the_title(self):
+        # **지어내지 않는다.** 제목에 없는 낱말을 강조로 받으면 렌더러가 조용히
+        # 무시하는데, 그러면 "골랐다"는 기록과 결과가 어긋난다.
+        if self.highlight is not None and not self.highlight.strip():
+            raise ValueError("shorts_title_highlight_empty")
+        if self.highlight and not any(self.highlight in line for line in self.title_lines):
+            raise ValueError("shorts_title_highlight_not_in_title")
+        return self
+
+
+#: 제목 한 줄의 상한(UTF-8 바이트). 한글 열다섯 자가 45바이트라 넉넉한 쪽으로
+#: 잡는다 -- 화면에 큰 글씨로 그려지므로 이보다 길면 줄이 넘친다.
+_TITLE_LINE_BYTES = 120
+
+
 class VariantSegmentSelectionParameters(_Parameters):
     """숏폼에 넣을 장면을 **통째 목록으로** 받는다.
 
@@ -439,6 +492,24 @@ class VariantShortFormRemakeParameters(_Parameters):
     action: Literal["remake_short_form"]
 
 
+class VariantShortFormCreateParameters(_Parameters):
+    """숏폼을 **처음** 만든다. 지금 걸린 변형본이 없을 때만 쓴다.
+
+    `remake_short_form`과 왜 따로 있는가. 그쪽은 이미 있는 숏폼의 장면을 다시
+    고르는 일이라 `proposal.variant_id`·`base_variant_revision`이 지금 걸린
+    변형본을 가리켜야 한다(`unique_operation_ids`). 만들기는 그 반대다 --
+    가리킬 변형본이 아직 없다. 그래서 이 action이 실린 proposal은 둘 다
+    `None`이어야 하고, target에는 진짜 id 대신 `PENDING_SHORT_FORM_TARGET_ID`를
+    쓴다.
+
+    파라미터가 없는 이유는 `remake_short_form`과 같다 -- 장면 고르기는 서버가
+    화면 단추와 같은 코드로 하고(`short_form_scenes.short_form_scene_pick`),
+    유진은 "만들어 줘"라고만 말한다.
+    """
+
+    action: Literal["create_short_form"]
+
+
 class VariantShortFormUnfoldParameters(_Parameters):
     """숏폼을 **따로 편집할 수 있는 판으로 펼친다.**
 
@@ -467,7 +538,9 @@ VariantParameters = Annotated[
     | VariantCaptionLayoutParameters
     | VariantSafeAreaParameters
     | VariantAudioCorrectionParameters
+    | VariantShortsTitleParameters
     | VariantSegmentSelectionParameters
+    | VariantShortFormCreateParameters
     | VariantShortFormRemakeParameters
     | VariantShortFormUnfoldParameters,
     Field(discriminator="action"),
@@ -608,11 +681,25 @@ class YujinProposal(_StrictFrozenModel):
         has_variant_operation = any(
             operation.kind == "output_variant" for operation in self.operations
         )
-        if has_variant_operation and (
+        # **만들기는 정체성이 거꾸로다.** 나머지 여덟 action은 "지금 걸린 것과
+        # 정확히 같은가"를 요구하는데(그래서 `variant_id`·`base_variant_revision`이
+        # 있어야 한다), 만들기는 가리킬 변형본이 아직 없다 -- 있으면 그건 이미
+        # 만들어졌다는 뜻이라 오히려 잘못이다.
+        is_create_variant_operation = any(
+            operation.kind == "output_variant"
+            and operation.parameters.action == "create_short_form"
+            for operation in self.operations
+        )
+        if is_create_variant_operation:
+            if len(self.operations) != 1:
+                raise ValueError("variant_short_form_create_must_be_alone")
+            if self.variant_id is not None or self.base_variant_revision is not None:
+                raise ValueError("variant_short_form_create_has_no_identity_yet")
+        elif has_variant_operation and (
             self.variant_id is None or self.base_variant_revision is None
         ):
             raise ValueError("variant_identity_required")
-        if not has_variant_operation and (
+        elif not has_variant_operation and (
             self.variant_id is not None or self.base_variant_revision is not None
         ):
             raise ValueError("variant_identity_without_variant_operation")
@@ -695,6 +782,24 @@ def validate_yujin_creator_response(
             raise ValueError("proposal_operation_unsupported")
         target = operation.target
         if operation.kind == "output_variant":
+            if operation.parameters.action == "create_short_form":
+                # **만들기는 지금 걸린 변형본이 없어야 한다.** 위(아래) 얼개는
+                # "지금 걸린 것과 똑같은가"를 묻는데 이건 그 반대다 -- 이미 있으면
+                # (`context.has_short_form_variant`) 유진은 화면이 세션당
+                # 하나만 만들게 막는 규칙을 두 번째로 어기려는 것이다(그 경우도
+                # 서버가 `sqlite3.IntegrityError`로 다시 막지만, 여기서 먼저
+                # 거절해 헛되이 판을 읽지 않는다).
+                if (
+                    context.current_surface not in {"edit", "review", "output"}
+                    or context.master_session_id != context.session_id
+                    or context.master_session_revision != context.session_revision
+                    or context.has_short_form_variant
+                    or proposal.variant_id is not None
+                    or proposal.base_variant_revision is not None
+                    or target.variant_id != PENDING_SHORT_FORM_TARGET_ID
+                ):
+                    raise ValueError("proposal_variant_identity_not_current")
+                continue
             if (
                 context.current_surface not in {"edit", "review", "output"}
                 or context.selection_kind != "variant"
@@ -710,6 +815,11 @@ def validate_yujin_creator_response(
                 raise ValueError("proposal_variant_identity_not_current")
             if operation.parameters.action in {
                 "select_segments",
+                # 첫 화면 제목 띠도 숏폼에만 있다. 가로·세로 전체본은 원본과 같은
+                # 이야기를 다른 화면비로 내보내는 것이라 제목을 붙일 자리가 없고,
+                # `build_variant_timeline_payload`가 그쪽에는 안 싣는다 -- 유진이
+                # 그 자리까지 가지 않게 여기서 먼저 막는다.
+                "set_shorts_title",
                 "remake_short_form",
                 # 펼치기도 같은 경계다 -- 장면 목록이 마스터와 다른 모양은
                 # 숏폼뿐이고, 전체본을 펼치면 원본을 한 벌 더 만드는 일이 된다.

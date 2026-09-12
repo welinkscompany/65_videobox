@@ -593,6 +593,34 @@ class HermesRunService:
         variant_id = str(matches[0].get("variant_id") or "")
         return variant_id or None
 
+    def _has_short_form_variant(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        session_revision: int,
+    ) -> bool:
+        """지금 마스터 판에 세로 하이라이트(숏폼)가 **이미 있는가**.
+
+        위 `_current_short_form_variant_id`와 다르다 -- 그쪽은 "정확히 하나일
+        때만" 값을 주고(둘 이상이면 `None`), 이건 "하나라도 있는가"를 묻는다.
+        "숏폼 만들어줘"는 하나도 없을 때만 옳다 -- 둘 이상 어긋난 상태에서도
+        만들기를 열어 두면 화면이 막는 "세션당 하나" 규칙을 유진이 깨게 된다.
+        """
+        try:
+            variants = self.store.list_output_variants(  # type: ignore[attr-defined]
+                project_id=project_id,
+                session_id=session_id,
+            )
+        except Exception:  # 조회 실패가 대화를 막지 않는다.
+            return False
+        return any(
+            str(item.get("kind") or "") == "vertical_highlight"
+            and str(item.get("source_session_id") or "") == session_id
+            and int(item.get("source_session_revision") or 0) == session_revision
+            for item in variants or ()
+        )
+
     async def _admit(
         self,
         *,
@@ -617,6 +645,12 @@ class HermesRunService:
                 selected_segment_id=selected_segment_id,
                 selected_variant_id=await asyncio.to_thread(
                     self._current_short_form_variant_id,
+                    project_id=project_id,
+                    session_id=session_id,
+                    session_revision=expected_session_revision,
+                ),
+                has_short_form_variant=await asyncio.to_thread(
+                    self._has_short_form_variant,
                     project_id=project_id,
                     session_id=session_id,
                     session_revision=expected_session_revision,
@@ -1505,6 +1539,12 @@ class HermesRunService:
                 selected_segment_id=run.selected_segment_id,
                 selected_variant_id=await asyncio.to_thread(
                     self._current_short_form_variant_id,
+                    project_id=run.project_id,
+                    session_id=run.session_id,
+                    session_revision=run.expected_session_revision,
+                ),
+                has_short_form_variant=await asyncio.to_thread(
+                    self._has_short_form_variant,
                     project_id=run.project_id,
                     session_id=run.session_id,
                     session_revision=run.expected_session_revision,

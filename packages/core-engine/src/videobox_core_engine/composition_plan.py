@@ -952,6 +952,14 @@ class CompositionPlan:
     # 소리를 끈 레인(`track_states.py`). 렌더러가 이 레인의 소리를 안 섞는다 --
     # 트랙마다 음량 제어가 달라서 값 하나를 덮어쓰는 방식으로는 못 끈다.
     muted_tracks: frozenset[str] = frozenset()
+    #: 숏폼 제목 띠(`shorts_layout.py`). 변형본의 `overrides.layout`이 그대로 실려
+    #: 온다 -- **픽셀이 아니라 뜻**이다(제목 줄과 강조 낱말). 자리는 캔버스마다
+    #: 렌더러가 다시 계산한다(미리보기 프록시는 완성본보다 작다).
+    #:
+    #: 이 값이 계획에 실려야 하는 이유: 제목 띠는 **픽셀을 바꾸는 편집**이다.
+    #: 계획에서 빼면 같은 지문(`fingerprint_exact_preview`)이 제목 있는 판과 없는
+    #: 판을 같다고 말하고, 캐시된 미리보기가 제목 없이 영원히 남는다.
+    shorts_layout: dict[str, Any] | None = None
     version: str = COMPOSITION_VERSION
 
     @property
@@ -1101,6 +1109,11 @@ class CompositionPlan:
             captions=tuple(sorted(cues, key=lambda cue: (cue.start_sec, cue.end_sec, cue.segment_id or ""))),
             export_overlays=overlays,
             muted_tracks=muted,
+            shorts_layout=(
+                dict(timeline["shorts_layout"])
+                if isinstance(timeline.get("shorts_layout"), dict) and timeline["shorts_layout"]
+                else None
+            ),
         )
 
     def for_range(self, *, start_sec: float, end_sec: float) -> "CompositionPlan":
@@ -1113,13 +1126,29 @@ class CompositionPlan:
                 shifted = dict(overlay)
                 shifted["start_sec"], shifted["end_sec"] = left - start_sec, right - start_sec
                 overlays.append(shifted)
-        return CompositionPlan(self.width, self.height, self.fps_num, self.fps_den, self.sample_aspect_ratio, self.rotation,
-            tuple(item for source in self.items if (item := source.clipped(start_sec=start_sec, end_sec=end_sec)) is not None),
-            tuple(cue for source in self.captions if (cue := source.clipped(start_sec=start_sec, end_sec=end_sec)) is not None),
-            tuple(overlays), self.version)
+        # **칸 이름을 적어서 넘긴다.** 자리로 넘기던 때, 열째 자리에 `self.version`이
+        # 들어가면서 그것이 `muted_tracks`로 앉았다(그 뒤로 `version`은 기본값). 구간
+        # 미리보기에서 음소거가 조용히 무시되고 있었다는 뜻이다 -- 칸을 늘릴 때마다
+        # 자리 셈이 어긋나는 자리라 이름으로 바꾼다.
+        return CompositionPlan(
+            width=self.width, height=self.height, fps_num=self.fps_num, fps_den=self.fps_den,
+            sample_aspect_ratio=self.sample_aspect_ratio, rotation=self.rotation,
+            items=tuple(item for source in self.items if (item := source.clipped(start_sec=start_sec, end_sec=end_sec)) is not None),
+            captions=tuple(cue for source in self.captions if (cue := source.clipped(start_sec=start_sec, end_sec=end_sec)) is not None),
+            export_overlays=tuple(overlays),
+            muted_tracks=self.muted_tracks,
+            shorts_layout=dict(self.shorts_layout) if self.shorts_layout else None,
+            version=self.version,
+        )
 
     def canonical_dict(self) -> dict[str, Any]:
-        return {"version": self.version, "canvas": {"width": self.width, "height": self.height, "fps_num": self.fps_num, "fps_den": self.fps_den, "sample_aspect_ratio": self.sample_aspect_ratio, "rotation": self.rotation}, "items": [_canonical_item(item) for item in self.items], "captions": [asdict(cue) for cue in self.captions], "export_overlays": list(self.export_overlays)}
+        payload = {"version": self.version, "canvas": {"width": self.width, "height": self.height, "fps_num": self.fps_num, "fps_den": self.fps_den, "sample_aspect_ratio": self.sample_aspect_ratio, "rotation": self.rotation}, "items": [_canonical_item(item) for item in self.items], "captions": [asdict(cue) for cue in self.captions], "export_overlays": list(self.export_overlays)}
+        # **없을 때는 칸 자체를 안 싣는다.** 지금 있는 편집본은 전부 제목 띠가
+        # 없는데, 빈 값을 실으면 그 전부의 지문이 바뀌어 캐시된 미리보기가 통째로
+        # 무효가 된다(`_canonical_item`이 같은 이유로 기본값을 뺀다).
+        if self.shorts_layout:
+            payload["shorts_layout"] = dict(self.shorts_layout)
+        return payload
 
 
 def _canonical_item(item: "CompositionItem") -> dict[str, Any]:

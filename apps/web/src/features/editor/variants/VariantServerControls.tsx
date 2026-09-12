@@ -1,5 +1,6 @@
 import type { OutputVariant, OutputVariantPatch } from "../../../api";
 import { Button } from "../../../components/ui/button";
+import { shortsTitleBand, shortsTitleBandPatch } from "./shortsTitleBand";
 
 function variantLabel(kind: OutputVariant["kind"]): string {
   return kind === "horizontal" ? "가로" : kind === "vertical_highlight" ? "세로 하이라이트" : "세로";
@@ -32,6 +33,9 @@ export function VariantServerControls({
 }>) {
   const label = variantLabel(variant.kind);
   const hasConflicts = variant.conflicts.length > 0;
+  // 숏폼 **첫 화면 제목 띠**. 유진이 숏폼을 고를 때 같이 짜므로 화면이 하는 일은
+  // 지금 걸린 것을 보여 주고 끄고 켜는 것이다 -- 목록과 지금 값은 한 쌍이다.
+  const titleBand = variant.kind === "vertical_highlight" ? shortsTitleBand(variant) : null;
   return <section className="vb-editor-variants__server-controls" aria-label={`${label} 서버 변형 제어`}>
     <div className="vb-editor-variants__server-line">
       <strong>서버 변형 버전 {variant.variant_revision}</strong>
@@ -71,6 +75,29 @@ export function VariantServerControls({
         같은 말이어야 한다. */}
     {variant.kind === "vertical_highlight" && onUnfoldShortForm
       ? <p className="vb-editor-variants__server-note">펼치면 독립된 편집본이 되고, 그 뒤 원본을 고쳐도 따라오지 않아요.</p>
+      : null}
+    {/* **제목 띠는 끌 수 있어야 한다.** 제목을 원하지 않는 날이 있고, 껐을 때
+        나오는 결과는 제목 띠가 생기기 전과 똑같다(화면 전체에 원본을 담는다).
+        문구를 지우지 않고 끄기 때문에 다시 켜면 그대로 돌아온다. */}
+    {variant.kind === "vertical_highlight"
+      ? <div className="vb-editor-variants__title-band">
+        {titleBand
+          ? <>
+            <p className="vb-editor-variants__server-note">
+              {titleBand.hidden ? "지금은 제목 띠를 껐어요" : "첫 화면 제목"}: {titleBand.lines.join(" / ")}
+              {titleBand.highlight ? ` (강조: ${titleBand.highlight})` : ""}
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={() => void onPatch(variant, shortsTitleBandPatch(titleBand, { hidden: !titleBand.hidden }))}
+            >{titleBand.hidden ? "제목 띠 켜기" : "제목 띠 끄기"}</Button>
+          </>
+          : <p className="vb-editor-variants__server-note">
+            첫 화면에 띄울 제목은 아직 없어요. 숏폼을 다시 만들면 유진이 같이 지어 줘요.
+          </p>}
+      </div>
       : null}
   </section>;
 }
