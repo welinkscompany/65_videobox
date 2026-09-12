@@ -11,6 +11,7 @@ export function VariantServerControls({
   onPatch,
   onCreateHighlight,
   onRemakeShortForm,
+  onUnfoldShortForm,
   masterSegmentIds = [],
   busy = false,
 }: Readonly<{
@@ -22,6 +23,10 @@ export function VariantServerControls({
    *  하나뿐이라(유일 제약) 두 번 만들 수 없고, 지우는 문도 없다 -- 그래서
    *  `만들기` 단추는 한 번 쓰면 조용히 죽어 있었다. */
   onRemakeShortForm?: (variant: OutputVariant) => void | Promise<void>;
+  /** 숏폼을 **따로 편집할 수 있는 편집본으로 펼친다.** 숏폼에는 장면별 편집을
+   *  담을 자리가 없어서, 펼치지 않고 숏폼의 한 장면을 고치면 원본 영상의 그
+   *  장면도 같이 바뀐다. */
+  onUnfoldShortForm?: (variant: OutputVariant) => void | Promise<void>;
   masterSegmentIds?: readonly string[];
   busy?: boolean;
 }>) {
@@ -52,8 +57,20 @@ export function VariantServerControls({
               골라 갈아 끼운다. 지우는 문을 내지 않은 이유는 되돌릴 길이 없어지기
               때문이고, 되돌리기는 바로 위 단추(통째 목록 PATCH)가 지킨다. */}
           {onRemakeShortForm ? <Button type="button" variant="outline" disabled={busy} onClick={() => void onRemakeShortForm(variant)}>숏폼 다시 만들기</Button> : null}
+          {/* **받아 보고 손보는 문.** 숏폼은 장면 목록과 화면 전체 설정만
+              들 수 있어서, 펼치지 않고 숏폼의 한 장면을 고치면 원본 영상의
+              그 장면도 같이 바뀐다. 펼치면 자막·확대·전환·효과음·되돌리기가
+              전부 그 판에서 그대로 된다. 규칙은 아래 한 줄로 미리 말한다 --
+              되돌릴 수 없는 일이라 누른 뒤에 알리면 늦다. */}
+          {onUnfoldShortForm ? <Button type="button" variant="outline" disabled={busy} onClick={() => void onUnfoldShortForm(variant)}>숏폼을 편집본으로 펼치기</Button> : null}
         </>
         : onCreateHighlight ? <Button type="button" variant="outline" disabled={busy} onClick={() => void onCreateHighlight()}>하이라이트 변형 만들기</Button> : null}
     </div>
+    {/* **규칙을 누르기 전에 말한다.** 펼치면 원본과의 줄이 끊기고 그건 되돌릴 수
+        없다 -- 누른 뒤에 알리면 늦다. 문장은 서버(`UNFOLD_INDEPENDENCE_RULE`)와
+        같은 말이어야 한다. */}
+    {variant.kind === "vertical_highlight" && onUnfoldShortForm
+      ? <p className="vb-editor-variants__server-note">펼치면 독립된 편집본이 되고, 그 뒤 원본을 고쳐도 따라오지 않아요.</p>
+      : null}
   </section>;
 }

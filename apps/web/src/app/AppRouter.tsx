@@ -837,7 +837,18 @@ function WorkspacePage() {
   }
   if (stage === "edit") {
     return <RoutedProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings}>
-      <EditorWorkbenchRoute projectId={projectId} sessionId={requestedEditingSessionId} requestedSegmentId={requestedSegmentId} />
+      <EditorWorkbenchRoute
+        projectId={projectId}
+        sessionId={requestedEditingSessionId}
+        requestedSegmentId={requestedSegmentId}
+        /* 숏폼을 펼치면 한 프로젝트에 편집본이 둘이 된다. 옮겨 갈 문이 없으면
+           펼친 판을 만들어 놓고 대표님이 거기로 갈 길이 없다. */
+        onOpenEditingSession={(nextSessionId) => void navigate({
+          to: "/projects/$projectId/$section",
+          params: { projectId, section: "editor" },
+          search: { session_id: nextSessionId } as never,
+        })}
+      />
     </RoutedProductShell>;
   }
   // 다섯 단계를 위에서 다 다뤘으므로 여기까지 오지 않는다. 단계가 늘었는데

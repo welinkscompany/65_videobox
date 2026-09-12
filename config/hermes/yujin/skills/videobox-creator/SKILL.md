@@ -78,7 +78,7 @@ proposal의 필드는 정확히 `proposal_id`, `base_revision`, `title`, `ration
   `variant_id`는 target의 `variant_id`와 정확히 같아야 하고
   `base_variant_revision`은 현재 variant revision과 정확히 같아야 합니다. 현재
   `selection_kind`가 `variant`이고 원본 세션 식별자·revision이 현재 세션과
-  정확히 같을 때만 작성합니다. parameters는 아래 일곱 형태 중 정확히 하나만
+  정확히 같을 때만 작성합니다. parameters는 아래 여덟 형태 중 정확히 하나만
   사용합니다.
   - `action: set_crop`, 0~1 `x`, 0~1 `y`, 0 초과 1 이하 `width`, 0 초과 1 이하
     `height` — `x`+`width`와 `y`+`height`는 각각 1을 넘지 않습니다
@@ -103,6 +103,13 @@ proposal의 필드는 정확히 `proposal_id`, `base_revision`, `title`, `ration
     오니, 그 문장을 사람이 읽는 답변에 그대로 옮겨 적습니다. 현재 `variant_kind`가
     `vertical_highlight`일 때만 사용하고, 한 payload에 이 형태를 쓰면 다른
     `output_variant` 조정은 함께 적지 않습니다
+  - `action: unfold_to_editing_board`, 다른 필드 없음 — 숏폼을 **따로 편집할 수
+    있는 편집본으로 펼칩니다.** 지금 숏폼에 담을 수 있는 것은 장면 목록과 화면
+    전체 설정뿐이라, 숏폼의 **한 장면만** 자막·확대·전환·효과음을 고치려 하면 그
+    편집이 원본 영상에도 걸립니다. 펼치면 그 장면들이 새 편집본이 되고, 그
+    편집본에서는 보통 편집 지시를 전부 쓸 수 있습니다. 현재 `variant_kind`가
+    `vertical_highlight`일 때만 사용하고, 한 payload에 이 형태를 쓰면 다른
+    `output_variant` 조정은 함께 적지 않습니다
 
 숏폼으로 잘라 달라는 요청을 받으면 `action: select_segments`로 남길 장면을
 고릅니다. 장면 순서·구성을 바꿀 수 있는 것은 `vertical_highlight` 하나뿐이라,
@@ -116,6 +123,16 @@ proposal의 필드는 정확히 `proposal_id`, `base_revision`, `title`, `ration
 있는 숏폼을 지우거나 새로 만들어 달라는 요청에도 같은 형태로 답합니다. 숏폼을
 지우는 방법은 없고 필요하지도 않습니다 — 다시 만들면 장면 목록이 새로 정해지고,
 마음에 안 들면 편집기에서 전체 장면으로 되돌릴 수 있습니다.
+
+**"이 숏폼만 따로 편집하고 싶어", "숏폼 펼쳐 줘", "숏폼 자막만 고치고 원본은 그대로
+두고 싶어"처럼 숏폼 자체를 손보겠다는 요청에는 `action: unfold_to_editing_board`를
+씁니다.** 숏폼의 한 장면을 고치는 지시를 그 자리에서 받아 적지 않습니다 — 지금
+그렇게 하면 원본 영상의 같은 장면도 함께 바뀝니다. 펼친 뒤의 편집은 새 편집본에서
+보통 편집 지시로 받습니다.
+
+**펼칠 때는 이 문장을 반드시 함께 말합니다:**
+"펼치면 독립된 편집본이 되고, 그 뒤 원본을 고쳐도 따라오지 않아요."
+원본과의 연결이 끊기는 것은 되돌릴 수 없으니, 말없이 진행하지 않습니다.
 
 **본 장면이 판의 일부일 때는 반드시 그 사실을 말합니다.** context의
 `segment_total`이 `segment_summaries`의 개수보다 크면, 이 대화에서 읽은 장면은

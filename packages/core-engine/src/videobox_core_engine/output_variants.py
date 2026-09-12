@@ -632,6 +632,91 @@ def _projected_variant_session(
     return projected
 
 
+#: 펼치면 원본과의 줄이 끊긴다는 **규칙 한 문장.** 화면과 유진 안내문이 같은
+#: 문장을 쓰게 여기 한 곳에 둔다 -- 두 곳에 적으면 한쪽만 고쳐진다.
+UNFOLD_INDEPENDENCE_RULE = "펼치면 독립된 편집본이 되고, 그 뒤 원본을 고쳐도 따라오지 않아요."
+
+#: 펼친 편집본이 원본에서 **그대로 가져오는** 칸. 여기 없는 것은 새로 시작한다.
+#:
+#: `history`·`undo_stack`·`redo_stack`이 빠져 있는 것이 이 목록의 요점이다 --
+#: 되돌리기는 세션 안에만 있으므로(`editing_transactions.apply_user_transaction`),
+#: 비워서 시작하면 펼친 판의 되돌리기가 원본 이력과 섞이지 않는다. 원본에서
+#: `Ctrl+Z`를 눌러도 펼친 판은 움직이지 않고, 그 반대도 같다.
+#:
+#: `timeline_placement_overrides`도 빠져 있다 -- `_projected_variant_session`이
+#: 이미 걷어 낸다(마스터 절대 시각이라 짧아진 판에서는 그 자리가 없다).
+_UNFOLD_CARRIED_SESSION_KEYS = (
+    "caption_style",
+    "caption_language",
+    # 자유 멀티트랙의 트랙 목록과 눈·음소거 상태. **지금 숏폼 렌더가 쓰는 값을
+    # 그대로 가져온다**(`variant_render_session`은 마스터의 이 둘을 손대지 않는다).
+    # 펼치기는 그릇을 옮기는 일이라 결과가 바뀌면 안 되므로, 값 판단을 여기서
+    # 새로 하지 않는다.
+    "tracks",
+    "track_states",
+)
+
+
+def unfolded_short_form_session(
+    *,
+    master_session: Mapping[str, object] | None,
+    variant_timeline: Mapping[str, object],
+    project_id: str,
+    timeline_id: str,
+) -> dict[str, object]:
+    """숏폼을 **독립된 편집본**으로 펼친다. 원본 세션은 손대지 않는다.
+
+    왜 장면별 덮어쓰기(`VariantOverride`에 장면 자리를 더하는 길)를 고르지
+    않았는가. 덮어쓰기를 더하면 **편집 표면이 두 벌**이 된다 -- 자막·확대·전환·
+    효과음·오버레이의 문을 숏폼용으로 한 번 더 만들어야 하고, 유진의 편집 의도
+    16개(`yujin_editing_proposal_service`)도 두 경로가 된다. 펼치면 그 전부가
+    이미 있는 세션 도구로 그대로 돈다 -- 되돌리기까지.
+
+    **대신 원본과의 줄이 끊긴다**(`UNFOLD_INDEPENDENCE_RULE`). 끊는 것이 맞는
+    이유: 파생 기계(`rebase_variant`·`VariantConflict`·`materialize_variant`의
+    낡음 검사)는 "마스터가 유일한 진실"을 지키는 장치다. 펼친 판에는 마스터에
+    없는 편집이 들어가므로 그 전제가 깨진다. 줄을 남기면 원본을 고칠 때마다
+    풀 수 없는 충돌이 쌓이고, 대표님은 숏폼을 고칠 때마다 그 충돌을 봐야 한다.
+
+    투영은 **새로 짜지 않고** `variant_render_session`을 그대로 쓴다 -- 지금
+    숏폼을 렌더할 때 쓰는 바로 그 세션이다. 그래서 펼치기 전후의 완성본이 같다.
+    """
+    projected = variant_render_session(
+        master_session=master_session, variant_timeline=variant_timeline
+    )
+    if projected is None:
+        raise VariantInvariantError("unfold_requires_master_session")
+    # 버린 장면은 `cut_action="remove"` 표시만 달고 남아 있다(투영이 하는 일).
+    # 펼친 판에서는 **아예 뺀다.** 남기면 마스터 절대 시각을 들고 있어서 당겨
+    # 놓은 장면과 구간이 겹치고, 다음 편집이 `Segment bounds overlap`으로
+    # 죽는다. 합성 계획은 `remove` 클립을 버리므로 결과는 같다.
+    segments = [
+        segment
+        for segment in projected.get("segments", [])  # type: ignore[union-attr]
+        if isinstance(segment, Mapping)
+        and str(segment.get("cut_action") or "keep") != "remove"
+    ]
+    if not segments:
+        raise VariantInvariantError("unfold_has_no_playable_segment")
+    session: dict[str, object] = {
+        key: deepcopy(projected[key])
+        for key in _UNFOLD_CARRIED_SESSION_KEYS
+        if key in projected
+    }
+    session.update(
+        {
+            "project_id": project_id,
+            "timeline_id": timeline_id,
+            "segments": [deepcopy(dict(segment)) for segment in segments],
+            "history": [],
+            "undo_stack": [],
+            "redo_stack": [],
+            "session_revision": 1,
+        }
+    )
+    return session
+
+
 def variant_timeline_needs_rebuild(
     *,
     cached_timeline: Mapping[str, object] | None,

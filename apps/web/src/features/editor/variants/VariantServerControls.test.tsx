@@ -72,6 +72,42 @@ describe("VariantServerControls", () => {
     expect(screen.getByRole("button", { name: "전체 장면으로 되돌리기" })).toBeInTheDocument();
   });
 
+  it("lets the owner unfold a short form and says the original stops following", () => {
+    // 대표님 문장(2026-09-12) 후반부: "받아봤는데 보정이 좀 더 필요하면 수동으로
+    // 수정하면 되잖아." 숏폼에는 장면별 편집을 담을 자리가 없어서, 펼치지 않고
+    // 숏폼의 한 장면을 고치면 **원본 영상의 그 장면도 같이 바뀐다.**
+    //
+    // 규칙은 **누르기 전에** 보여야 한다 -- 원본과의 줄이 끊기는 것은 되돌릴 수
+    // 없으니 누른 뒤에 알리면 늦다.
+    const onUnfoldShortForm = vi.fn();
+    const highlight = { ...variant, kind: "vertical_highlight" as const, variant_id: "highlight-1" };
+    render(
+      <VariantServerControls
+        variant={highlight}
+        onMaterialize={vi.fn()}
+        onPatch={vi.fn()}
+        onUnfoldShortForm={onUnfoldShortForm}
+        masterSegmentIds={["seg-b", "seg-a"]}
+      />,
+    );
+
+    expect(
+      screen.getByText("펼치면 독립된 편집본이 되고, 그 뒤 원본을 고쳐도 따라오지 않아요."),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "숏폼을 편집본으로 펼치기" }));
+    expect(onUnfoldShortForm).toHaveBeenCalledWith(highlight);
+  });
+
+  it("does not offer unfolding where there is nothing to unfold", () => {
+    // 없는 기능의 단추는 만들지 않는다(`2026-08-30` 승인 기록). 가로·세로
+    // 전체본의 장면 목록은 원본과 같아서 펼칠 것이 없다.
+    render(<VariantServerControls variant={variant} onMaterialize={vi.fn()} onPatch={vi.fn()} onUnfoldShortForm={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "숏폼을 편집본으로 펼치기" })).toBeNull();
+    expect(
+      screen.queryByText("펼치면 독립된 편집본이 되고, 그 뒤 원본을 고쳐도 따라오지 않아요."),
+    ).toBeNull();
+  });
+
   it("shows the conflict state without hiding server lineage", () => {
     render(<VariantServerControls variant={{ ...variant, conflicts: [{ field: "crop", reason: "master_changed_while_locked", base_master_revision: 4, current_master_revision: 5 }] }} onMaterialize={vi.fn()} onPatch={vi.fn()} />);
     expect(screen.getByText("서버 충돌 1건")).toBeInTheDocument();

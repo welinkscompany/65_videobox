@@ -462,6 +462,8 @@
 .vb-editor-variants__server-line span { color: var(--muted-foreground); }
 .vb-editor-variants__server-line span[role="status"] { color: var(--destructive); font-weight: 700; }
 .vb-editor-variants__server-warning { margin: 0; color: var(--destructive); font-size: var(--vb-text-sm); }
+/* 펼치기 규칙 한 줄. 경고(빨강)가 아니라 미리 알리는 안내다. */
+.vb-editor-variants__server-note { margin: 0; color: var(--muted-foreground); font-size: var(--vb-text-sm); }
 .vb-editor-variants__server-actions { display: flex; flex-wrap: wrap; gap: var(--vb-space-2); }
 @media (max-width: 760px) {
   .vb-editor-variants__compare { grid-template-columns: 1fr; }

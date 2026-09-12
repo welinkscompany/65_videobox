@@ -52,6 +52,8 @@ from videobox_core_engine.output_variants import (
     VariantInvariantError,
     build_variant_timeline_payload,
     materialize_variant,
+    output_variant_from_row,
+    unfolded_short_form_session,
     variant_render_session,
     variant_timeline_needs_rebuild,
 )
@@ -2869,6 +2871,102 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         self._record_timeline_build(project_id=project_id, timeline_id=str(timeline["timeline_id"]))
         return saved
 
+    def unfold_short_form_editing_session(
+        self, *, project_id: str, variant_id: str, expected_variant_revision: int | None = None
+    ) -> dict[str, Any]:
+        """숏폼을 **따로 편집할 수 있는 판**으로 펼친다.
+
+        **네 번째 세션 만들기를 베껴 짜지 않는다.** 배관은 빈 편집판
+        (`create_blank_editing_session`)과 같은 셋이다 -- 타임라인을 먼저 내고
+        (`save_timeline_run`), 세션을 붙이고(`save_editing_session`), 타임라인을
+        만들었다는 기록을 남긴다(`_record_timeline_build`, 안 남기면 완성본
+        단추가 눌리지 않는다). 장면을 만드는 일은 `materialize_variant`와
+        `variant_render_session`이 이미 한다.
+
+        **원본과의 줄은 여기서 끊는다.** 타임라인에서 `source_variant_id`를 떼는
+        것이 그 끊는 자리다 -- 그 칸이 남아 있으면 렌더가 이 판을 숏폼으로 보고
+        다시 마스터 세션에 투영한다(`_editing_session_for_output_timeline`).
+        규칙 한 문장은 `output_variants.UNFOLD_INDEPENDENCE_RULE`이고, 화면과
+        유진 안내문이 그 문장을 그대로 쓴다.
+        """
+        variant = output_variant_from_row(
+            self.store.get_output_variant(project_id=project_id, variant_id=variant_id)
+        )
+        if variant.kind != "vertical_highlight":
+            raise ValueError("only_vertical_highlight_can_be_unfolded")
+        if (
+            expected_variant_revision is not None
+            and expected_variant_revision != variant.variant_revision
+        ):
+            raise VariantInvariantError("stale_variant_revision")
+        master_session = self.store.get_editing_session(
+            project_id=project_id, session_id=variant.source_session_id
+        )
+        master_revision = int(master_session.get("session_revision") or 0)
+        # 낡은 판을 펼치면 대표님이 화면에서 본 것과 다른 장면이 나온다. 숏폼
+        # 준비(`materialize_variant_route`)와 같은 문을 쓴다.
+        if master_revision != variant.source_session_revision:
+            raise VariantInvariantError("stale_master_revision")
+        derived = materialize_variant(
+            variant,
+            master_session.get("segments", []),
+            master_session_revision=master_revision,
+        )
+        try:
+            master_timeline = self.store.get_timeline_run(
+                project_id=project_id,
+                timeline_id=str(master_session.get("timeline_id") or ""),
+            )
+        except KeyError:
+            master_timeline = {}
+        timeline_payload = build_variant_timeline_payload(
+            master_timeline=master_timeline, variant_kind=variant.kind, derived=derived
+        )
+        # **파생 표시를 떼어 낸다.** 남기면 이 판이 독립이 아니다 -- 렌더가
+        # 마스터 세션을 다시 읽어 투영하므로, 펼친 판의 편집이 완성본에 안 닿고
+        # 원본을 고치면 이 판의 결과가 따라 바뀐다.
+        for key in (
+            "source_variant_id",
+            "source_variant_revision",
+            "source_session_id",
+            "source_session_revision",
+        ):
+            timeline_payload.pop(key, None)
+        timeline = self.store.save_timeline_run(
+            project_id=project_id,
+            # 숏폼은 세로 캔버스다. 변형본의 `kind`가 아니라 일반 편집판의
+            # 이름(`vertical`)을 쓴다 -- 이 판은 이제 변형본이 아니다.
+            output_mode="vertical",
+            timeline_payload=timeline_payload,
+        )
+        session_payload = unfolded_short_form_session(
+            master_session=master_session,
+            variant_timeline=timeline_payload,
+            project_id=project_id,
+            timeline_id=str(timeline["timeline_id"]),
+        )
+        saved = self.store.save_editing_session(
+            project_id=project_id,
+            timeline_id=str(timeline["timeline_id"]),
+            session_payload=session_payload,
+        )
+        self._record_timeline_build(
+            project_id=project_id, timeline_id=str(timeline["timeline_id"])
+        )
+        # **숏폼에도 펼쳤다는 기록이 남아야 한다** -- 버전이 한 칸 오르는 것이 그
+        # 기록이다. 다만 그 쓰기를 **여기서 하지 않는다.** 단추 경로는 변형본
+        # 하나만 쓰면 되지만(`update_output_variant`), 유진 경로는 같은 트랜잭션
+        # 안에서 제안까지 소진해야 한다(`apply_director_variant_proposal_transaction`).
+        # 다시 만들기(`short_form_scenes.remade_short_form_variant`)가 이미 같은
+        # 모양이다 -- 값을 만들어 주고 commit은 부르는 쪽이 한다.
+        return {
+            "editing_session": saved,
+            "unfolded_variant": variant.model_copy(
+                update={"variant_revision": variant.variant_revision + 1}
+            ),
+            "expected_variant_revision": variant.variant_revision,
+        }
+
     def create_script_draft_editing_session(self, *, project_id: str, script_asset_id: str) -> dict[str, Any]:
         asset = self.store.get_asset(project_id=project_id, asset_id=script_asset_id)
         if str(asset.get("asset_type")) != AssetType.SCRIPT_DOCUMENT.value:
@@ -2930,6 +3028,27 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             return variant_render_session(
                 master_session=master_session, variant_timeline=timeline
             )
+        # **이 타임라인이 자기 편집본을 이름으로 들고 있으면 그것을 쓴다.**
+        #
+        # 아래의 "가장 나중 편집본" 길은 한 프로젝트에 편집본이 하나일 때만 맞다.
+        # 숏폼을 펼치면(`unfold_short_form_editing_session`) 한 프로젝트에 판이
+        # 둘이 되고, 그때 대표님이 원본 판을 한 번 고치면 "가장 나중"이 원본으로
+        # 바뀐다 -- 그러면 펼친 판의 완성본을 만들 때 `timeline_id`가 안 맞아
+        # 세션이 `None`이 되고, 화면에는 아무 설명 없이 실패만 뜬다.
+        # `bind_timeline_to_editing_session_revision`이 이미 이 칸을 적어 두므로
+        # 이름으로 바로 집는다. 이름이 가리키는 판이 이 타임라인의 것이 아니면
+        # 예전 길로 내려간다(옛 타임라인 행 대비).
+        if source_session_id:
+            try:
+                named = self.store.get_editing_session(
+                    project_id=project_id, session_id=source_session_id
+                )
+            except KeyError:
+                named = None
+            if named is not None and str(named.get("timeline_id") or "") == str(
+                timeline.get("timeline_id") or ""
+            ):
+                return named
         try:
             session = self.store.get_latest_editing_session(project_id=project_id)
         except KeyError:

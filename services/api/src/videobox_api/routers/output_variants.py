@@ -11,7 +11,9 @@ from videobox_api.models import (
     OutputVariantPatchRequest,
     OutputVariantRebaseRequest,
     OutputVariantRepickRequest,
+    OutputVariantUnfoldRequest,
 )
+from videobox_core_engine.output_variants import UNFOLD_INDEPENDENCE_RULE
 from videobox_api.short_form_scenes import (
     remade_short_form_variant,
     scene_pick_payload,
@@ -209,6 +211,53 @@ def build_output_variants_router(
             return orchestrator.get_short_form_pick_job(project_id=project_id, job_id=job_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail="short_form_repick_job_missing") from error
+
+    @router.post(
+        "/api/projects/{project_id}/output-variants/{variant_id}/unfold",
+        status_code=status.HTTP_201_CREATED,
+    )
+    def unfold_short_form_route(
+        project_id: str,
+        variant_id: str,
+        request: OutputVariantUnfoldRequest,
+    ) -> dict[str, object]:
+        """숏폼을 **따로 편집할 수 있는 판**으로 펼친다.
+
+        왜 이 문이 필요한가: 숏폼이 담을 수 있는 것은 장면 목록과 화면 전체 설정
+        다섯뿐이고, 장면별 편집은 전부 마스터 세션에서 온다. 그래서 숏폼의 한
+        장면을 고치면 **원본 영상의 그 장면도 같이 바뀐다** -- 대표님이
+        "받아봤는데 보정이 좀 더 필요하면 수동으로 수정"한다고 한 일이 막혀 있다.
+
+        펼치면 그 뒤로는 이미 있는 편집 문 전부가 그대로 돈다(자막·확대·전환·
+        효과음·오버레이·되돌리기), 그리고 유진의 편집 의도 16개도 새 배선 없이
+        붙는다. 대가는 원본과의 줄이 끊기는 것이고, 그 규칙은 응답의 `notice`로
+        화면까지 그대로 나간다.
+        """
+        if orchestrator is None:  # pragma: no cover - 배선이 빠지면 바로 드러나야 한다
+            raise HTTPException(status_code=503, detail="short_form_unfold_unavailable")
+        try:
+            unfolded = orchestrator.unfold_short_form_editing_session(
+                project_id=project_id,
+                variant_id=variant_id,
+                expected_variant_revision=request.expected_variant_revision,
+            )
+            result = {
+                "editing_session": unfolded["editing_session"],
+                # 펼쳤다는 기록(버전 +1)을 여기서 쓴다. 유진 경로는 제안 소진과
+                # 같은 트랜잭션에서 쓰므로 그쪽이 자기 문을 쓴다.
+                "variant": store.update_output_variant(
+                    project_id=project_id,
+                    variant_id=variant_id,
+                    expected_variant_revision=int(unfolded["expected_variant_revision"]),
+                    variant=unfolded["unfolded_variant"],
+                ),
+            }
+        except Exception as error:
+            _raise_variant_error(error)
+            raise AssertionError("unreachable")
+        # **규칙 문장을 여기서 같이 보낸다.** 값만 만들고 아무도 안 읽으면 배선이
+        # 아니다 -- 화면이 이 문장을 그대로 띄운다.
+        return {**result, "notice": UNFOLD_INDEPENDENCE_RULE}
 
     @router.patch("/api/projects/{project_id}/output-variants/{variant_id}")
     def patch_variant(

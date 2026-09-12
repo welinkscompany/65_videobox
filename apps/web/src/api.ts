@@ -515,6 +515,10 @@ export type ShortFormScenePick = {
    *  못했거나 밀도 대비책으로 내려갔으면 `null`이고, 그때는 문구에 이유가
    *  나오지 않는다 -- 지어내지 않는다. 읽는 자리는 `shortFormNotice.ts`. */
   spread_reason?: string | null;
+  /** 숏폼에 쓸 자리를 맞추려고 **판을 몇 군데 나눴는지**(2026-09-12). 0보다 크면
+   *  판이 바뀌었으니 화면이 다시 읽어야 한다 -- 안 읽으면 나누기 전 장면을
+   *  보여 주고 다음 편집이 낡은 판 버전으로 나가 조용히 충돌한다. */
+  board_scenes_cut?: number;
 };
 
 /** 숏폼 장면을 **다시 고르라고 걸어 둔** 결과. 진행은 `ShortFormRepickStatus`로 본다.
@@ -2461,6 +2465,22 @@ export const api = {
   getShortFormRepickJob: (projectId: string, variantId: string, jobId: string) =>
     request<ShortFormRepickStatus>(
       `/api/projects/${encodeURIComponent(projectId)}/output-variants/${encodeURIComponent(variantId)}/repick/${encodeURIComponent(jobId)}`,
+    ),
+  /**
+   * 숏폼을 **따로 편집할 수 있는 편집본으로 펼친다.**
+   *
+   * 왜 필요한가: 숏폼이 담을 수 있는 것은 장면 목록과 화면 전체 설정뿐이라,
+   * 숏폼의 한 장면을 고치면 **원본 영상의 그 장면도 같이 바뀐다.** 펼치면 그
+   * 장면들이 새 편집본이 되고, 거기서는 자막·확대·전환·효과음·되돌리기가 전부
+   * 그대로 된다.
+   *
+   * 대가는 `notice`에 온다 -- 원본과의 줄이 끊긴다. **그 문장을 화면에 그대로
+   * 띄운다.** 되돌릴 수 없는 일을 말없이 하지 않는다.
+   */
+  unfoldShortForm: (projectId: string, variantId: string, payload: { expected_variant_revision?: number }) =>
+    request<{ editing_session: EditingSession; variant: OutputVariant; notice: string }>(
+      `/api/projects/${encodeURIComponent(projectId)}/output-variants/${encodeURIComponent(variantId)}/unfold`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
     ),
   patchOutputVariant: (projectId: string, variantId: string, payload: { expected_variant_revision: number; patch: OutputVariantPatch }) =>
     request<{ variant: OutputVariant }>(

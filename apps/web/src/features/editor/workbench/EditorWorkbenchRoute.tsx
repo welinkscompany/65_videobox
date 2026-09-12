@@ -279,7 +279,15 @@ function timelineZoomReplyText(command: TimelineZoomCommand): string {
   return "타임라인이 영상 전체가 보이도록 맞춰졌어요.";
 }
 
-export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId = null }: { projectId: string; sessionId: string | null; requestedSegmentId?: string | null }) {
+export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId = null, onOpenEditingSession }: {
+  projectId: string;
+  sessionId: string | null;
+  requestedSegmentId?: string | null;
+  /** 다른 편집본으로 옮겨 간다. **숏폼을 펼치면 한 프로젝트에 판이 둘이 되므로**
+   *  옮겨 갈 문이 필요하다 -- 없으면 펼친 판을 만들어 놓고 대표님이 거기로 갈
+   *  길이 없다. 라우터를 들고 있는 쪽(`AppRouter`)이 넣어 준다. */
+  onOpenEditingSession?: (nextSessionId: string) => void;
+}) {
   const requestKey = `${projectId}:${sessionId ?? "missing"}`;
   const [refreshToken, setRefreshToken] = useState(0);
   const [state, setState] = useState<Readonly<{ key: string; view: EditorViewModel | null; session: EditorSessionSnapshot | null; error: string | null }>>({ key: requestKey, view: null, session: null, error: sessionId ? null : "편집 세션을 찾을 수 없어요. 다시 열어 주세요." });
@@ -1427,10 +1435,72 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         message,
         busy: false,
       });
+      // **판이 바뀌었으면 다시 읽는다**(2026-09-12). 서버가 숏폼에 쓸 자리에
+      // 맞춰 장면을 나누므로(`short_form_scenes.cut_only_what_the_short_uses`),
+      // 다시 읽지 않으면 대표님은 나누기 전 장면을 보고 다음 편집이 낡은 판
+      // 버전으로 나가 조용히 충돌한다. 값이 0이면 판이 안 바뀌었으니 안 읽는다 --
+      // 대표님 현재 판처럼 경계가 이미 맞는 경우다.
+      if ((result.scene_pick?.board_scenes_cut ?? 0) > 0) {
+        try {
+          const [manifest, editingSession] = await Promise.all([
+            api.getEditorPlaybackManifest(projectId, sessionId),
+            api.getEditingSession(projectId, sessionId),
+          ]);
+          if (!isCurrent()) return;
+          const next = joinEditorSnapshot(manifest, editingSession);
+          if (next.view.projectId === projectId && next.view.sessionId === sessionId) {
+            setState((current) => current.key === requestKey
+              ? { key: requestKey, view: next.view, session: next.session, error: null }
+              : current);
+          }
+        } catch {
+          // 다시 읽기가 실패하면 판 상태를 모른다. 편집을 낡은 버전으로 내보내는
+          // 대신 대표님에게 새로고침을 청한다(편집 경로와 같은 태도).
+          if (isCurrent()) setVariants((current) => current.key === requestKey
+            ? { ...current, message: `${message} 판을 다시 불러오지 못했어요. 새로고침해 주세요.` }
+            : current);
+        }
+      }
     } catch (error) {
       // 서버가 보내는 사유를 대표님이 할 수 있는 일로 옮긴다. 표는
       // `outputFailureMessages`에 있는 것을 같이 쓴다 -- 새 표를 만들면 같은
       // 코드가 화면마다 다른 문장으로 뜬다.
+      const detail = error instanceof ApiRequestError ? error.detail : null;
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: shortFormFailureMessage(detail), busy: false } : current);
+    } finally {
+      if (isCurrent()) variantMutationInFlight.current = false;
+    }
+  };
+  /** 숏폼을 **따로 편집할 수 있는 편집본으로 펼친다.**
+   *
+   * 왜 필요한가: 숏폼이 담을 수 있는 것은 장면 목록과 화면 전체 설정뿐이라,
+   * 숏폼의 한 장면을 고치면 **원본 영상의 그 장면도 같이 바뀐다**(2026-09-12
+   * 실측). 펼치면 그 장면들이 새 편집본이 되고, 거기서는 자막·확대·전환·
+   * 효과음·되돌리기가 전부 그대로 된다.
+   *
+   * 끝나면 **그 판으로 옮겨 간다.** 만들어 놓고 안 옮기면 대표님은 펼쳤다는
+   * 말만 보고 갈 길이 없다. 규칙 문장은 서버가 `notice`로 보내 주므로 우리가
+   * 다시 쓰지 않는다 -- 두 곳에 적으면 한쪽만 고쳐진다.
+   */
+  const unfoldShortForm = async (variant: OutputVariant) => {
+    if (variantMutationInFlight.current || !sessionId) return;
+    variantMutationInFlight.current = true;
+    const operationId = variantOperationId.current + 1;
+    variantOperationId.current = operationId;
+    const isCurrent = () => routeEpoch.current.key === requestKey && variantOperationId.current === operationId;
+    setVariants((current) => current.key === requestKey ? { ...current, message: "숏폼을 편집본으로 펼치는 중이에요.", busy: true } : current);
+    try {
+      const result = await api.unfoldShortForm(projectId, variant.variant_id, {
+        expected_variant_revision: variant.variant_revision,
+      });
+      if (isCurrent()) setVariants((current) => current.key !== requestKey ? current : {
+        ...current,
+        items: current.items.map((item) => item.variant_id === result.variant.variant_id ? result.variant : item),
+        message: `숏폼을 편집본으로 펼쳤어요. ${result.notice}`,
+        busy: false,
+      });
+      onOpenEditingSession?.(result.editing_session.session_id);
+    } catch (error) {
       const detail = error instanceof ApiRequestError ? error.detail : null;
       if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: shortFormFailureMessage(detail), busy: false } : current);
     } finally {
@@ -2505,6 +2575,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     onVariantPatch={patchOutputVariant}
     onVariantCreateHighlight={() => makeShortForm()}
     onVariantRemakeShortForm={makeShortForm}
+    onVariantUnfoldShortForm={unfoldShortForm}
     variantBusy={variants.key === requestKey && variants.busy}
     view={state.view}
     zoomCommand={timelineZoomCommand}

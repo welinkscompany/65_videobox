@@ -686,6 +686,16 @@ class ApiOrchestrator:
     def create_script_draft_editing_session(self, *, project_id: str, script_asset_id: str) -> dict[str, Any]:
         return self.pipeline.create_script_draft_editing_session(project_id=project_id, script_asset_id=script_asset_id)
 
+    def unfold_short_form_editing_session(
+        self, *, project_id: str, variant_id: str, expected_variant_revision: int | None = None
+    ) -> dict[str, Any]:
+        """숏폼을 따로 편집할 수 있는 판으로 펼친다(`local_pipeline` 본문 참고)."""
+        return self.pipeline.unfold_short_form_editing_session(
+            project_id=project_id,
+            variant_id=variant_id,
+            expected_variant_revision=expected_variant_revision,
+        )
+
     def apply_script_draft_narration_alignment(self, *, project_id: str, session_id: str, aligned_segments: list[dict[str, Any]], expected_revision: int) -> dict[str, Any]:
         return self.pipeline.apply_script_draft_narration_alignment(project_id=project_id, session_id=session_id, aligned_segments=aligned_segments, expected_revision=expected_revision)
 

@@ -120,6 +120,9 @@ type EditorWorkbenchProps = Readonly<{
    *  하나뿐이라 두 번 만들 수 없고, 그래서 `만들기` 단추만 있으면 한 번 쓴 뒤
    *  조용히 죽는다(2026-09-11 실물 확인). */
   onVariantRemakeShortForm?: (variant: OutputVariant) => void | Promise<void>;
+  /** 숏폼을 **따로 편집할 수 있는 편집본으로 펼친다.** 펼치지 않으면 숏폼의
+   *  한 장면을 고칠 자리가 없어 그 편집이 원본 영상에도 걸린다. */
+  onVariantUnfoldShortForm?: (variant: OutputVariant) => void | Promise<void>;
   variantBusy?: boolean;
   /** 유진 채팅에서 온 확대·축소 명령(task-3-brief.md). `TimelineDock`에
    *  그대로 흘려준다 -- 이 컴포넌트는 중간에서 판단하지 않는다. */
@@ -163,6 +166,7 @@ function EditorWorkbenchInstance({
   onVariantPatch,
   onVariantCreateHighlight,
   onVariantRemakeShortForm,
+  onVariantUnfoldShortForm,
   variantBusy = false,
   zoomCommand = null,
 }: EditorWorkbenchProps) {
@@ -768,7 +772,7 @@ function EditorWorkbenchInstance({
         {serverVariant && onVariantMaterialize && onVariantPatch ? <VariantServerControls variant={serverVariant} busy={variantBusy} onMaterialize={onVariantMaterialize} onPatch={onVariantPatch} onCreateHighlight={onVariantCreateHighlight} onRemakeShortForm={onVariantRemakeShortForm} /> : null}
       </>}
       {showVariantCompare ? <VariantConflictPanel conflicts={variantPreview.conflicts} onKeep={(field) => resolveConflict(field, "keep_local")} onRebase={(field) => resolveConflict(field, "rebase_master")} /> : null}
-      {highlightVariant && onVariantMaterialize && onVariantPatch ? <VariantServerControls variant={highlightVariant} masterSegmentIds={masterSegmentIds} busy={variantBusy} onMaterialize={onVariantMaterialize} onPatch={onVariantPatch} onRemakeShortForm={onVariantRemakeShortForm} /> : null}</> : null}
+      {highlightVariant && onVariantMaterialize && onVariantPatch ? <VariantServerControls variant={highlightVariant} masterSegmentIds={masterSegmentIds} busy={variantBusy} onMaterialize={onVariantMaterialize} onPatch={onVariantPatch} onRemakeShortForm={onVariantRemakeShortForm} onUnfoldShortForm={onVariantUnfoldShortForm} /> : null}</> : null}
     </section>
     <div
       role="separator"

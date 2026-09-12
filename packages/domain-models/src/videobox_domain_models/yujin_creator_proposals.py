@@ -435,6 +435,28 @@ class VariantShortFormRemakeParameters(_Parameters):
     action: Literal["remake_short_form"]
 
 
+class VariantShortFormUnfoldParameters(_Parameters):
+    """숏폼을 **따로 편집할 수 있는 판으로 펼친다.**
+
+    왜 이 action이 있어야 하는가. 숏폼이 담을 수 있는 것은 장면 목록과 화면 전체
+    설정 다섯뿐이라, 장면별 편집은 전부 마스터 세션으로 간다 -- 숏폼의 한 장면을
+    확대하면 원본 영상의 그 장면도 확대된다. 펼치면 그 뒤로는 **이미 있는 편집
+    의도 16개 전부**가 그 판에서 그대로 돈다(자막·확대·전환·효과음·오버레이·
+    되돌리기). 새 배선이 필요한 것은 이 문 하나다.
+
+    파라미터가 없는 이유는 `remake_short_form`과 같다 -- 펼치기는 편집이 아니라
+    **그릇을 옮기는 일**이고, 옮긴 뒤의 편집은 원래 있던 문들이 받는다. 여기에
+    편집 내용을 같이 실으면 "펼치기"가 사실은 편집인 경우가 생긴다.
+
+    **대가는 원본과의 줄이 끊기는 것이다**
+    (`videobox_core_engine.output_variants.UNFOLD_INDEPENDENCE_RULE`). 유진
+    안내문이 그 문장을 그대로 말해야 한다 -- 되돌릴 수 없는 일을 말없이 하면
+    안 된다.
+    """
+
+    action: Literal["unfold_to_editing_board"]
+
+
 VariantParameters = Annotated[
     VariantCropParameters
     | VariantFocalParameters
@@ -442,7 +464,8 @@ VariantParameters = Annotated[
     | VariantSafeAreaParameters
     | VariantAudioCorrectionParameters
     | VariantSegmentSelectionParameters
-    | VariantShortFormRemakeParameters,
+    | VariantShortFormRemakeParameters
+    | VariantShortFormUnfoldParameters,
     Field(discriminator="action"),
 ]
 
@@ -681,7 +704,13 @@ def validate_yujin_creator_response(
                 or target.variant_id != context.variant_id
             ):
                 raise ValueError("proposal_variant_identity_not_current")
-            if operation.parameters.action in {"select_segments", "remake_short_form"}:
+            if operation.parameters.action in {
+                "select_segments",
+                "remake_short_form",
+                # 펼치기도 같은 경계다 -- 장면 목록이 마스터와 다른 모양은
+                # 숏폼뿐이고, 전체본을 펼치면 원본을 한 벌 더 만드는 일이 된다.
+                "unfold_to_editing_board",
+            }:
                 # 장면 구성을 바꿀 수 있는 모양은 **숏폼(세로 하이라이트)뿐이다.**
                 # 세로 전체본은 `materialize_variant`가
                 # `vertical_full_segment_order_or_membership_changed`로,

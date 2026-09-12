@@ -5262,6 +5262,104 @@ describe("숏폼 화면 정직성", () => {
     expect(polled).toHaveBeenCalledWith("project-a", "variant-short", "job-repick");
   });
 
+  it("숏폼을 펼치면 그 편집본으로 옮겨 가고 규칙을 말한다", async () => {
+    // 대표님 문장(2026-09-12) 후반부: "받아봤는데 보정이 좀 더 필요하면 수동으로
+    // 수정하면 되잖아." 펼치지 않으면 숏폼의 한 장면을 고칠 자리가 없어 그 편집이
+    // **원본 영상에도** 걸린다.
+    //
+    // 만들어 놓고 안 옮기면 배선이 아니다 -- 대표님은 펼쳤다는 말만 보고 그 판으로
+    // 갈 길이 없다. 이 저장소가 적어 둔 "배선이 가장 자주 샌다"가 이 자리다.
+    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue(narrationManifest(1) as never);
+    vi.spyOn(api, "getEditingSession").mockResolvedValue(editingSession("project-a", "session-a") as never);
+    vi.spyOn(api, "listBrollAssets").mockResolvedValue([] as never);
+    vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({ assets: [], total: 0 } as never);
+    vi.spyOn(api, "listJobs").mockResolvedValue([]);
+    vi.spyOn(api, "listTtsCandidates").mockResolvedValue({ candidates: [] });
+    vi.spyOn(api, "listYujinMemoryCandidates").mockResolvedValue([]);
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({ conversation: null, messages: [], proposal: null, references: [] } as never);
+    const highlight = {
+      variant_id: "variant-short", kind: "vertical_highlight",
+      source_session_id: "session-a", source_session_revision: 1, variant_revision: 3,
+      overrides: { crop: null, focal: null, caption: null, safe_area: null, audio: null },
+      locks: [], conflicts: [], selected_segment_ids: ["seg-a"],
+    };
+    vi.spyOn(api, "listOutputVariants").mockResolvedValue({ variants: [highlight] } as never);
+    const unfold = vi.spyOn(api, "unfoldShortForm").mockResolvedValue({
+      editing_session: { ...editingSession("project-a", "session-short"), session_id: "session-short" },
+      variant: { ...highlight, variant_revision: 4 },
+      notice: "펼치면 독립된 편집본이 되고, 그 뒤 원본을 고쳐도 따라오지 않아요.",
+    } as never);
+    const opened: string[] = [];
+
+    render(
+      <EditorWorkbenchRoute
+        projectId="project-a"
+        sessionId="session-a"
+        onOpenEditingSession={(next) => opened.push(next)}
+      />,
+    );
+    await screen.findByRole("region", { name: "편집 작업판" });
+    const expand = screen.queryByRole("button", { name: "출력 변형 펼치기" });
+    if (expand) fireEvent.click(expand);
+    fireEvent.click(await screen.findByRole("button", { name: "숏폼을 편집본으로 펼치기" }));
+
+    expect(await screen.findByText(/펼치면 독립된 편집본이 되고/, undefined, { timeout: 8000 })).toBeVisible();
+    expect(unfold).toHaveBeenCalledWith("project-a", "variant-short", { expected_variant_revision: 3 });
+    expect(opened).toEqual(["session-short"]);
+  });
+
+  it("숏폼이 쓸 자리를 나눴으면 판을 다시 읽는다", async () => {
+    // 2026-09-12 대표님 지시로 서버가 **쓸 자리만** 나눈다. 나눴는데 화면이 판을
+    // 다시 안 읽으면 대표님은 나누기 전 장면을 보고, 다음 편집이 낡은 판 버전으로
+    // 나가 조용히 충돌한다. 이 저장소가 기록한 "배선이 가장 자주 샌다"가 이 자리다.
+    const manifest = vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue(narrationManifest(1) as never);
+    const board = vi.spyOn(api, "getEditingSession").mockResolvedValue(editingSession("project-a", "session-a") as never);
+    vi.spyOn(api, "listBrollAssets").mockResolvedValue([] as never);
+    vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({ assets: [], total: 0 } as never);
+    vi.spyOn(api, "listJobs").mockResolvedValue([]);
+    vi.spyOn(api, "listTtsCandidates").mockResolvedValue({ candidates: [] });
+    vi.spyOn(api, "listYujinMemoryCandidates").mockResolvedValue([]);
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({ conversation: null, messages: [], proposal: null, references: [] } as never);
+    vi.spyOn(api, "listOutputVariants").mockResolvedValue({
+      variants: [{
+        variant_id: "vertical-full", kind: "vertical_full",
+        source_session_id: "session-a", source_session_revision: 1, variant_revision: 1,
+        overrides: { crop: null, focal: null, caption: null, safe_area: null, audio: null },
+        locks: [], conflicts: [],
+      }],
+    } as never);
+    vi.spyOn(api, "createOutputVariant").mockResolvedValue({
+      variant: {
+        variant_id: "variant-short", kind: "vertical_highlight",
+        source_session_id: "session-a", source_session_revision: 2, variant_revision: 1,
+        overrides: { crop: null, focal: null, caption: null, safe_area: null, audio: null },
+        locks: [], conflicts: [], selected_segment_ids: ["seg-a"],
+      },
+      scene_pick: {
+        judged_by: "yujin",
+        notice: "유진이 전사의 말을 전 구간 읽고 숏폼을 골랐어요. 숏폼에 쓸 자리에 맞춰 장면을 10군데 나눴어요.",
+        scenes_total: 1, scenes_read_by_yujin: 1, board_scenes_cut: 10,
+      },
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await screen.findByRole("region", { name: "편집 작업판" });
+    const expand = screen.queryByRole("button", { name: "출력 변형 펼치기" });
+    if (expand) fireEvent.click(expand);
+    fireEvent.click(screen.getByRole("tab", { name: "세로" }));
+    const before = board.mock.calls.length;
+    const beforeManifest = manifest.mock.calls.length;
+    fireEvent.click(await screen.findByRole("button", { name: "하이라이트 변형 만들기" }));
+
+    await screen.findByText(/10군데 나눴어요/);
+    await waitFor(() => {
+      expect(board.mock.calls.length).toBeGreaterThan(before);
+      expect(manifest.mock.calls.length).toBeGreaterThan(beforeManifest);
+    });
+  });
+
   it("채팅으로 고를 때 몇 장면 중 몇 개를 봤는지 말한다", () => {
     // 단추 경로는 영상 전 구간에서 고르게 추린 장면을 읽지만, 채팅 경로는
     // 창작 맥락에 담긴 장면만 본다. 그 차이를 말하지 않으면 대표님이 이걸

@@ -75,6 +75,18 @@ class OutputVariantMaterializeRequest(BaseModel):
     expected_master_session_revision: int | None = Field(default=None, ge=1)
 
 
+class OutputVariantUnfoldRequest(BaseModel):
+    """숏폼을 **따로 편집할 판으로 펼친다.** 보낼 것은 "지금 보고 있는 버전"뿐이다.
+
+    장면 목록도, 편집 내용도 받지 않는다 -- 펼치기는 편집이 아니라 **그릇을 옮기는
+    일**이고, 옮긴 뒤의 편집은 이미 있는 편집 문 전부가 그대로 받는다.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_variant_revision: int | None = Field(default=None, ge=0)
+
+
 class CreationBriefCreateRequest(BaseModel):
     script_filename: str = Field(min_length=1)
     script_text: str

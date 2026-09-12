@@ -34,6 +34,7 @@ from videobox_core_engine.yujin_creator_proposal_adapter import (
     merged_variant_patch_from_yujin_candidates,
 )
 from videobox_core_engine.output_variants import (
+    UNFOLD_INDEPENDENCE_RULE,
     apply_variant_patch,
     output_variant_from_row,
 )
@@ -1029,13 +1030,32 @@ def build_director_proposals_router(
                     or current.variant_revision != expected_variant_revision
                 ):
                     raise HTTPException(status_code=409, detail="stale_variant_proposal")
+                unfolded_board: dict | None = None
+                scene_pick: dict | None = None
+                # **"따로 편집하게 펼쳐줘"는 변형본을 고치는 일이 아니다.** 새
+                # 편집판을 만들고 숏폼에는 펼쳤다는 기록(버전 +1)만 남긴다. 펼친
+                # 뒤로는 유진의 편집 의도 16개가 그 판에서 그대로 돌므로, 새로
+                # 배선할 것은 이 문 하나다. 변형본 쓰기는 아래 공용 트랜잭션이
+                # 제안 소진과 함께 한 번에 한다.
+                if _is_short_form_unfold(selected):
+                    if len(selected) != 1:
+                        # 펼치기는 그릇을 옮기는 일이다. 같은 메시지에 모양 조정이
+                        # 섞이면 그 조정이 어느 판에 걸린 것인지 정할 근거가 없다.
+                        raise ValueError("variant_short_form_unfold_must_be_alone")
+                    unfolded = orchestrator.unfold_short_form_editing_session(
+                        project_id=project_id,
+                        variant_id=variant_id,
+                        expected_variant_revision=expected_variant_revision,
+                    )
+                    unfolded_board = unfolded["editing_session"]
+                    updated = unfolded["unfolded_variant"]
                 # **"숏폼 다시 만들어줘"는 유진이 목록을 적는 일이 아니다.**
                 # 이 action은 단추와 똑같은 판단 쓸기를 서버에서 돌린다
                 # (`short_form_scenes.remade_short_form_variant`). 채팅 맥락은
                 # 장면을 32개에서 자르므로, 유진이 직접 고르면 롱폼에서 단추보다
                 # 못한 판단이 된다 -- 그 사실을 화면에 말하는 대신 판단 자체를
                 # 같은 코드로 돌린다.
-                if _is_short_form_remake(selected):
+                elif _is_short_form_remake(selected):
                     if len(selected) != 1:
                         # 다시 만들기는 장면 목록을 통째로 갈아 끼운다. 같은
                         # 메시지에 다른 변형 조정이 섞이면 어느 쪽이 최종인지
@@ -1050,7 +1070,7 @@ def build_director_proposals_router(
                         runtime=request.app.state.local_only_runtime_service_factory(store),
                         expected_variant_revision=expected_variant_revision,
                     )
-                    scene_pick: dict | None = scene_pick_payload(pick)
+                    scene_pick = scene_pick_payload(pick)
                 else:
                     # 모양 조정(`overrides`)과 숏폼 장면 고르기(`selected_segment_ids`)를
                     # **한 patch로** 합친다. 전에는 `overrides`만 합쳐서, 장면을
@@ -1060,7 +1080,6 @@ def build_director_proposals_router(
                         merged_variant_patch_from_yujin_candidates(selected),
                         expected_variant_revision=expected_variant_revision,
                     )
-                    scene_pick = None
                 variant = store.apply_director_variant_proposal_transaction(
                     project_id=project_id,
                     proposal_id=proposal_id,
@@ -1073,6 +1092,12 @@ def build_director_proposals_router(
                     # 누가 골랐는지를 화면에 그대로 넘긴다. 자막 밀도로 내려간
                     # 결과를 "유진이 골랐어요"라고 말하지 않게 하는 유일한 근거다.
                     applied["scene_pick"] = scene_pick
+                if unfolded_board is not None:
+                    # 어느 판으로 옮겨 갔는지와 **원본과의 줄이 끊겼다는 규칙**을
+                    # 같이 넘긴다. 규칙을 안 말하면 대표님은 원본을 고치면 숏폼도
+                    # 따라온다고 믿는다.
+                    applied["editing_session"] = unfolded_board
+                    applied["notice"] = UNFOLD_INDEPENDENCE_RULE
                 return applied
             staged, materialized = materializer.stage_batch(project_id=project_id, candidates=selected)
             session = store.get_editing_session(project_id=project_id, session_id=proposal.source_session_id)
@@ -1169,6 +1194,33 @@ def is_yujin_variant_proposal(proposal) -> bool:
     )
 
 
+def _has_variant_action(candidates, action: str) -> bool:
+    """이 후보들이 `action`을 시킨 것인가.
+
+    `controls`는 저장소를 지나면서 `mappingproxy`로 온다. `dict`로 좁히면
+    조용히 안 걸리고, 그러면 이 action이 patch 경로로 새어
+    `variant_action_forbidden` 422가 난다 -- 다시 만들기에서 실제로 그렇게
+    한 번 틀렸다.
+    """
+    for candidate in candidates:
+        controls = getattr(candidate, "controls", None)
+        if not isinstance(controls, Mapping):
+            continue
+        parameters = controls.get("parameters")
+        if isinstance(parameters, Mapping) and parameters.get("action") == action:
+            return True
+    return False
+
+
+def _is_short_form_unfold(candidates) -> bool:
+    """유진이 "이 숏폼 따로 편집하게 펼쳐줘"를 시킨 후보인가.
+
+    이 후보는 변형본 patch가 아니다 -- 새 편집판을 만들고 숏폼에 펼쳤다는 기록만
+    남긴다(`local_pipeline.unfold_short_form_editing_session`).
+    """
+    return _has_variant_action(candidates, "unfold_to_editing_board")
+
+
 def _is_short_form_remake(candidates) -> bool:
     """유진이 "숏폼 다시 만들어줘"를 시킨 후보인가.
 
@@ -1176,17 +1228,7 @@ def _is_short_form_remake(candidates) -> bool:
     만든다(`short_form_scenes.remade_short_form_variant`). 그래서 patch를 만드는
     `merged_variant_patch_from_yujin_candidates`로 보내면 안 된다.
     """
-    # `controls`는 저장소를 지나면서 `mappingproxy`로 온다. `dict`로 좁히면
-    # 조용히 안 걸리고, 다시 만들기가 patch 경로로 새어 `variant_action_forbidden`
-    # 422가 난다 -- 실제로 그렇게 한 번 틀렸다.
-    for candidate in candidates:
-        controls = getattr(candidate, "controls", None)
-        if not isinstance(controls, Mapping):
-            continue
-        parameters = controls.get("parameters")
-        if isinstance(parameters, Mapping) and parameters.get("action") == "remake_short_form":
-            return True
-    return False
+    return _has_variant_action(candidates, "remake_short_form")
 
 
 def require_current_yujin_source(*, store, project_id, proposal, candidate) -> None:
