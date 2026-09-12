@@ -35,9 +35,14 @@ proposal의 필드는 정확히 `proposal_id`, `base_revision`, `title`, `ration
   asset만 사용합니다. `image`는 B3 적용 후보가 아니므로 image밖에 없으면
   proposal을 null로 두고 수동 대체를 안내합니다. parameters의 `start_sec`은
   target segment의 시작과, `duration_sec`은 그 segment의 길이와 정확히
-  같아야 합니다. `fit`은 `contain` 또는 `cover`만 사용하고
+  같아야 합니다. `fit`은 `contain`, `cover`, `contain_blur` 중 하나만 사용하고
   `requires_materialization`은 true입니다. 실제 적용 경계에서는
-  `contain`은 `fit`, `cover`는 `crop`으로 전달됩니다.
+  `contain`은 `fit`, `cover`는 `crop`, `contain_blur`는 `blur`로 전달됩니다.
+  `cover`는 화면을 꽉 채우지만 **좌우(또는 위아래)가 잘립니다** — 원본과 출력의
+  비율이 다르면(가로 원본을 세로 숏폼으로 등) 화면에 이미 구워진 글자가 양쪽에서
+  잘려 읽을 수 없게 됩니다. `contain`은 아무것도 자르지 않지만 남는 자리가 검은
+  띠로 남습니다. `contain_blur`는 아무것도 자르지 않고 남는 자리를 같은 그림의
+  흐린 확대본으로 채우므로, 비율이 다를 때는 이 값을 씁니다.
 - `bgm`: target은 `track_id: audio-bgm`만 사용합니다. parameters는 현재
   media candidate kind가 `bgm`인 `asset_id`만 사용합니다. `start_sec`은
   정확히 한 segment의 시작과 일치해야 하고, `duration_sec`을 넣으면 그

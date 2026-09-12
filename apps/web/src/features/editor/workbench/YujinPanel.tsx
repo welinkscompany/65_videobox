@@ -10,6 +10,7 @@ import { longWaitNotice, useWaitElapsedSeconds } from "../waitingNotice";
 import type { RightDockCandidate, RightDockCompletionEntry, RightDockConversationScroll, RightDockEditingProposal, RightDockEditingProposalPreview, RightDockMemory, RightDockMessage, RightDockProposal, RightDockTransitionSuggestion, YujinRunState, YujinThinking } from "./rightDockTypes";
 import { YujinMemoryPanel } from "./YujinMemoryPanel";
 import { sceneTransitionLabel } from "../inspector/sceneTransitions";
+import { frameFitLabel } from "../inspector/frameFits";
 
 const staleProposalMessage = "편집본이 바뀌어서 이 추천은 그대로 적용할 수 없어요.";
 
@@ -89,7 +90,10 @@ function transitionSuggestionReasonLabel(reason: string): string {
 
 function controlSummary(controls: Readonly<Record<string, unknown>>) {
   const labels = Object.entries(controls).map(([name, value]) => {
-    if (name === "fit") return value === "crop" ? "화면 채우기" : "화면 안에 맞추기";
+    // 화면 맞춤 셋의 이름은 `frameFits.ts` 한 벌을 따른다 -- 여기 따로 적어
+    // 두었다가 `전체 담기`가 `화면 안에 맞추기`로 보이면, 대표님은 좌우가
+    // 잘리지 않는 값을 골라 줬는데도 잘리는 값으로 읽는다.
+    if (name === "fit") return frameFitLabel(String(value)) ?? "화면 맞춤 변경";
     if (name === "volume") return `음량 ${value}`;
     if (name === "fade_in_sec") return `시작 전환 ${value}초`;
     if (name === "fade_out_sec") return `끝 전환 ${value}초`;

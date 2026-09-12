@@ -12,6 +12,7 @@
  */
 
 import type { YujinEditingProposal } from "../../../api";
+import { frameFitLabel } from "../inspector/frameFits";
 import { photoMotionLabel } from "../inspector/photoMotions";
 import { sceneFilterLabel } from "../inspector/sceneFilters";
 import { sceneTransitionLabel } from "../inspector/sceneTransitions";
@@ -76,6 +77,12 @@ export function yujinEditingOperationSummary(operation: YujinEditingOperation): 
   if (operation.intent === "remove_image_overlay") return "화면 위에 얹은 것을 빼요.";
   if (operation.intent === "set_picture_cleanup") return "화면을 다듬어요.";
   if (operation.intent === "set_sound_cleanup") return "소리를 다듬어요.";
-  if (operation.intent === "set_scene_transform") return "화면 맞춤을 바꿔요.";
+  // `set_scene_transform`은 화면 맞춤과 변형(확대·위치·기울이기)을 함께 나른다.
+  // 화면 맞춤은 **무엇을 잃는지가 값마다 다르므로** 고른 이름을 적어 준다
+  // (2026-09-12: 대표님이 좌우가 잘린 숏폼을 실제로 봤다).
+  if (operation.intent === "set_scene_transform") {
+    const fitted = typeof operation.fit === "string" ? frameFitLabel(operation.fit) : null;
+    return fitted ? `화면 맞춤을 ${fitted}로 바꿔요.` : "화면 맞춤을 바꿔요.";
+  }
   return "편집 항목을 바꿔요.";
 }

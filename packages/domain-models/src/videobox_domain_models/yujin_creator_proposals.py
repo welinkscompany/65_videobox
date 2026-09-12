@@ -202,7 +202,11 @@ class BrollParameters(_Parameters):
     asset_id: str = Field(min_length=1, max_length=256)
     start_sec: float = Field(ge=0, le=86_400)
     duration_sec: float = Field(gt=0, le=3_600)
-    fit: Literal["contain", "cover"] = "cover"
+    #: 원본을 화면에 앉히는 방법. `contain_blur`는 2026-09-12에 들어왔다 --
+    #: 원본 전체를 담고 남는 자리를 같은 그림의 흐린 확대본으로 채운다(엔진의
+    #: `blur`). 세로 숏폼에서 구워진 자막이 양쪽에서 잘리는 것을 막는 값이다.
+    #: 이름 대응은 `yujin_creator_proposal_adapter._BROLL_FIT_BY_PROPOSAL_VALUE`.
+    fit: Literal["contain", "cover", "contain_blur"] = "cover"
 
 
 class BgmParameters(_Parameters):

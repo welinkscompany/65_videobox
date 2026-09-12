@@ -534,6 +534,15 @@ def build_director_proposals_router(
                 if isinstance(item, dict)
                 and str(((item.get("broll_override") or {}).get("media_controls") or {}).get("photo_motion") or "").strip()
             ),
+            # 지금 걸린 화면 맞춤. 색감·사진 움직임과 같은 이유로 준다 -- 목록만
+            # 주면 "원래대로 돌려줘"가 막힌다. 2026-09-12에 대표님이 "좌우가
+            # 잘렸다"를 말로 고칠 수 있게 하면서 같이 들어왔다.
+            fits_by_segment=tuple(
+                (str(item["segment_id"]), str(((item.get("broll_override") or {}).get("media_controls") or {}).get("fit") or ""))
+                for item in session.get("segments", [])
+                if isinstance(item, dict)
+                and str(((item.get("broll_override") or {}).get("media_controls") or {}).get("fit") or "").strip()
+            ),
             segment_ids_with_broll=tuple(
                 str(item["segment_id"])
                 for item in session.get("segments", [])

@@ -3078,7 +3078,9 @@ function isStringMatrix(value: unknown): value is readonly (readonly string[])[]
 function editorControlsFromCandidate(candidate: DirectorCandidate): EditorControls {
   const controls = candidate.controls ?? {};
   if (candidate.media_type === "broll") {
-    return controls.fit === "fit" || controls.fit === "crop"
+    // 화면 맞춤 셋(`frameFits.ts`). **여기 빼먹은 값은 조용히 사라진다** --
+    // 유진이 `전체 담기`를 골라 줘도 화면에는 아무것도 안 걸린다.
+    return controls.fit === "fit" || controls.fit === "crop" || controls.fit === "blur"
       ? { fit: controls.fit }
       : {};
   }

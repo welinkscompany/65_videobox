@@ -579,7 +579,7 @@ class PyCapCutRealExportAdapter:
         controls = normalize_media_controls(
             clip.get("media_controls"), media_kind="broll", duration_sec=max(target_duration_sec, 0.001)
         )
-        crop_settings = self._broll_crop_settings(path=resolved.path, fit=controls["fit"])
+        crop_settings = self._broll_crop_settings(path=resolved.path, fit=controls["fit"], warnings=warnings)
         material = VideoMaterial(str(resolved.path), crop_settings=crop_settings)
         placement_start_us = _seconds_to_us(float(clip["start_sec"]))
         needed_duration_us = _seconds_to_us(target_duration_sec)
@@ -677,7 +677,22 @@ class PyCapCutRealExportAdapter:
         script.add_segment(pad_segment, "broll")
         return pad_segment
 
-    def _broll_crop_settings(self, *, path: Path, fit: str) -> CropSettings:
+    def _broll_crop_settings(self, *, path: Path, fit: str, warnings: list[str]) -> CropSettings:
+        """화면 맞춤을 캡컷 초안의 크롭으로 옮긴다.
+
+        `blur`(화면 이름 `전체 담기`)는 흐린 배경을 깔아 채우는 방법인데, 캡컷
+        초안의 `CropSettings`에는 그런 표현이 없다. **그때 조용히 `crop`으로
+        떨어지면 안 된다** -- 대표님이 2026-09-12에 본 그 결함(구워진 자막이
+        양쪽에서 잘림)이 내보낸 초안에서 그대로 되살아난다. 그래서 잘라내지 않는
+        쪽(원본 전체를 담고 캡컷이 위아래를 비우는 쪽)으로 두고, 흐린 배경을
+        잃었다는 사실을 남긴다. 캡컷에서 배경을 직접 깔 수 있다.
+        """
+        if fit == "blur":
+            warnings.append(
+                "the blurred backdrop of '전체 담기' (fit=blur) cannot be represented in CapCut export; "
+                "the clip is letterboxed instead -- add a blurred background layer in CapCut after import"
+            )
+            return CropSettings()
         if fit == "fit":
             return CropSettings()
         source = VideoMaterial(str(path))

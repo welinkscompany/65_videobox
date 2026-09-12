@@ -373,10 +373,27 @@ _MASTER_ONLY_TIMELINE_KEYS = frozenset(
 _VERTICAL_VARIANT_KINDS = frozenset({"vertical_full", "vertical_highlight"})
 
 
+#: 세로 변형본의 화면 맞춤 기본값. **2026-09-12에 `crop`에서 뒤집혔다.**
+#:
+#: 뒤집은 이유는 대표님이 실물에서 본 것이다: "배경 좌우가 짤려서 글자가 양쪽
+#: 사이드가 안보여." 대표님 원본은 이미 유튜브에 올린 영상이라 **자막이 그림에
+#: 구워져 있고** 그 자막 띠가 1920픽셀 폭을 거의 다 쓴다. 9:16으로 잘라 채우면
+#: 가운데 607픽셀만 남아 구워진 자막이 양쪽에서 잘린다. 되돌려 `fit`을 쓰면
+#: 위아래가 검은 띠 68.3%다(2026-09-11 실측으로 이미 버린 값).
+#:
+#: `blur`(화면 이름 `전체 담기`)는 원본 전체를 비율 그대로 담고 남는 자리를 같은
+#: 그림의 흐린 확대본으로 채운다 -- 잘리는 것도, 검은 띠도 없다.
+_VERTICAL_FILL_FIT = "blur"
+
+
 def _filled_broll_controls(raw_controls: object) -> dict[str, object]:
-    """화면 채우기로 고친 `media_controls` 사본. 채우기 판단은 **여기 한 곳**이다."""
+    """세로 변형본용으로 화면 맞춤만 고친 `media_controls` 사본.
+
+    채우기 판단은 **여기 한 곳**이다. 값은 `_VERTICAL_FILL_FIT`이고, 왜 그 값인지는
+    그 상수의 주석에 있다.
+    """
     controls = dict(raw_controls) if isinstance(raw_controls, dict) else {}
-    controls["fit"] = "crop"
+    controls["fit"] = _VERTICAL_FILL_FIT
     return controls
 
 
@@ -444,7 +461,29 @@ def _fill_frame_for_vertical_session(session: dict[str, object]) -> dict[str, ob
 def _fill_frame_for_vertical_variant(
     raw_tracks: object, *, variant_kind: str
 ) -> list[dict[str, object]]:
-    """세로 변형본의 화면 클립은 **기본이 화면 채우기(crop)여야 한다.**
+    """세로 변형본의 화면 클립은 **기본이 화면을 채워야 한다.**
+
+    **2026-09-12 정정: 채우는 방법이 `crop`에서 `blur`(전체 담기)로 뒤집혔다.**
+    아래 2026-09-11 판단은 "잘라서 채우기"까지 못박고 있었는데, 대표님이 실물을
+    보고 그 판단을 뒤집었다:
+
+    > "방금 너가 쪼갠 영상을 봤는데, 배경 좌우가 짤려서 글자가 양쪽 사이드가
+    > 안보여."
+
+    대표님 원본(1920×1080)은 이미 유튜브에 올린 영상이라 **자막이 그림에 구워져
+    있다.** 그 자막 띠가 화면 폭을 거의 다 쓰는데 9:16으로 잘라 채우면 가운데
+    607픽셀만 남아, 구워진 자막이 양쪽에서 잘려 읽을 수 없게 된다. 아래 글이
+    근거로 든 "캡컷 같은 세로 변환 도구들도 기본은 잘라서 채우기"는 **자막이
+    구워지지 않은 원본**을 가정한 말이었다 -- 같은 도구들이 구워진 자막이 있는
+    원본에는 흐린 배경을 기본으로 쓴다.
+
+    그래서 기본값은 `_VERTICAL_FILL_FIT`(`blur`)다: 원본 전체를 비율 그대로 담고
+    남는 위아래는 같은 그림의 흐린 확대본으로 채운다. 아래 글의 "검은 띠 68%는
+    못 쓴다"는 판단은 **그대로 유효하다** -- `blur`도 검은 띠를 만들지 않는다.
+
+    아래는 그 앞의 판단 기록이고, 지우지 않는다.
+
+    ---
 
     2026-09-11 실측(`task-2-brief`): 마스터는 가로 캔버스에서 만들어졌고, 화면
     맞춤(`media_controls.fit`)의 기본값은 `fit`(=패딩)이다. 그 값을 그대로

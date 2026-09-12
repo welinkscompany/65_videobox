@@ -12,7 +12,8 @@ export type EditorControls = Readonly<{
   fadeInSec?: number;
   fadeOutSec?: number;
   ducking?: boolean;
-  fit?: "fit" | "crop";
+  /** 화면 맞춤(`frameFits.ts`). `blur`는 좌우를 안 자르고 흐린 배경으로 채운다. */
+  fit?: "fit" | "crop" | "blur";
   loop?: boolean;
   pad?: boolean;
   trimStartSec?: number;

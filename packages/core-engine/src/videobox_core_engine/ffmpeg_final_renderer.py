@@ -988,11 +988,55 @@ class FfmpegFinalRenderer:
             f":d=1:s={self.video_width}x{self.video_height}:fps={self.video_fps}"
         )
 
-    def _broll_fit_transform(self, controls: dict[str, Any]) -> str:
+    def _frame_fit_chain(self, fit: str, *, tag: str) -> str:
+        """원본을 출력 화면에 앉히는 필터. **렌더 경로 둘이 이 한 함수를 쓴다.**
+
+        묶어 둔 이유: 그래프 쪽(`_broll_fit_transform`)과 완성본 mp4 쪽
+        (`_extract_segment`)이 각자 `scale/crop` 사슬을 들고 있었고, 이 저장소는
+        "필터를 고치면 두 곳을 같이"라는 함정에 이미 두 번 걸렸다. 두 벌을 두면
+        화면에서는 살아 있는 좌우가 파일에서는 잘린다.
+
+        `blur`는 **사슬이 아니라 작은 그래프**다 -- 같은 그림을 둘로 갈라
+        (`split`) 하나는 잘라 채워 흐리게 깔고, 하나는 줄여 담아 그 위에 얹는다.
+        `-vf`도 `filter_complex`도 이름 붙은 갈래를 받으므로 두 경로 모두에서
+        문자열 하나로 끼워 넣을 수 있다. 그래서 `tag`가 필요하다: 한 편집본에
+        클립이 둘이면 같은 이름이 두 번 나와 ffmpeg가 통째로 거절한다.
+        """
+        width, height = self.video_width, self.video_height
+        if fit == "crop":
+            return (
+                f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+                f"crop={width}:{height}"
+            )
+        if fit == "blur":
+            # 배경은 잘라 채운 다음 흐리게 한다. 흐리게 한 뒤에 자르면 가장자리에
+            # 원본 그대로인 테두리가 남는다.
+            #
+            # `gblur`를 쓰는 이유: `boxblur`는 반지름이 크면 네모난 무늬가 보인다.
+            # sigma는 출력 폭에 비례해 잡는다 -- 고정값을 쓰면 세로 숏폼에서는
+            # 뿌옇고 가로 출력에서는 티가 안 난다.
+            sigma = max(8, round(min(width, height) / 45))
+            return (
+                f"split[{tag}_bg][{tag}_fg];"
+                f"[{tag}_bg]scale={width}:{height}:force_original_aspect_ratio=increase,"
+                f"crop={width}:{height},gblur=sigma={sigma}[{tag}_b];"
+                f"[{tag}_fg]scale={width}:{height}:force_original_aspect_ratio=decrease[{tag}_f];"
+                f"[{tag}_b][{tag}_f]overlay=(W-w)/2:(H-h)/2"
+            )
+        return (
+            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
+        )
+
+    def _broll_fit_transform(self, controls: dict[str, Any], *, tag: str = "framefit") -> str:
         """화면 클립을 출력 크기에 맞추는 방법. 전환 양쪽도 **같은 것**을 써야 한다.
 
         여기가 어긋나면 전환 중에만 그림이 튄다 -- 잘린 화면과 여백 넣은 화면이
         1초 동안 서로 넘어가는 모양이 된다.
+
+        `tag`는 `전체 담기`(`blur`)가 만드는 갈래 이름의 앞자리다. 그래프 쪽에서
+        부를 때는 **클립마다 다른 값**을 넘겨야 한다 -- 기본값을 쓰면 클립이 둘
+        이상인 편집본에서 이름이 겹쳐 ffmpeg가 그래프를 통째로 거절한다.
         """
         # 손떨림 보정은 **크기를 맞추기 전에** 건다. `deshake`는 흔들린 만큼
         # 화면을 밀어서 보정하므로 가장자리가 비는데, 원본 해상도에서 걸어야
@@ -1003,16 +1047,7 @@ class FfmpegFinalRenderer:
         # 실제로 지운다 -- 줄인 뒤에 걸면 이미 뭉개진 그림을 한 번 더 뭉개서
         # 노이즈는 남고 윤곽만 흐려진다.
         denoise = "hqdn3d," if controls.get("reduce_noise") else ""
-        if controls["fit"] == "crop":
-            transform = (
-                f"{stabilize}{denoise}scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=increase,"
-                f"crop={self.video_width}:{self.video_height}"
-            )
-        else:
-            transform = (
-                f"{stabilize}{denoise}scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,"
-                f"pad={self.video_width}:{self.video_height}:(ow-iw)/2:(oh-ih)/2"
-            )
+        transform = f"{stabilize}{denoise}{self._frame_fit_chain(controls['fit'], tag=tag)}"
         # 변형(확대·위치·회전)은 **화면 크기를 맞춘 뒤에** 온다. 앞에서 이미
         # 출력 크기(W×H)가 되어 있으므로 여기서부터는 화면 기준으로 셈할 수 있다.
         # 순서는 회전 → 확대 → 위치다. 회전을 먼저 걸어야 그 뒤의 확대가
@@ -1095,7 +1130,9 @@ class FfmpegFinalRenderer:
             label = f"v_{item.clip_id}"
             duration_sec = item.end_sec - item.start_sec
             controls = normalize_media_controls(item.media_controls, media_kind="broll", duration_sec=max(duration_sec, 0.001))
-            transform = self._broll_fit_transform(controls)
+            # `label`을 그대로 갈래 이름의 앞자리로 쓴다 -- 이 그래프 안에서
+            # 클립마다 유일한 이름이고, 이미 캔버스에 얹는 이름으로 쓰고 있다.
+            transform = self._broll_fit_transform(controls, tag=label)
             # **사진은 가만히 두면 멈춘 그림이다.** 브이로그에서 정지 화면 몇
             # 초는 못 쓴다 -- AI 장면 그림 쪽이 같은 이유로 이미 zoompan을
             # 쓴다(`scene_image_service`). 영상에는 붙이지 않는다: 이미 움직이는
@@ -1177,7 +1214,7 @@ class FfmpegFinalRenderer:
                 # 렌더러가 마지막 프레임 자리를 재서 넘겨 준다.
                 source_start_sec=outgoing_start_sec,
                 seconds=seconds, speed=float(outgoing_controls["speed"]),
-                transform=self._broll_fit_transform(outgoing_controls), sar=sar,
+                transform=self._broll_fit_transform(outgoing_controls, tag=f"transition_out_{ordinal}"), sar=sar,
                 label=f"transition_out_{ordinal}",
             ))
             filters.append(self._transition_side_filter(
@@ -1185,7 +1222,7 @@ class FfmpegFinalRenderer:
                 # 들어오는 장면은 앞당기지 않는다. 자기 첫 프레임 그대로다.
                 source_start_sec=item.source_in_sec,
                 seconds=seconds, speed=float(incoming_controls["speed"]),
-                transform=self._broll_fit_transform(incoming_controls), sar=sar,
+                transform=self._broll_fit_transform(incoming_controls, tag=f"transition_in_{ordinal}"), sar=sar,
                 label=f"transition_in_{ordinal}",
             ))
             label = f"transition_{item.clip_id}"
@@ -2001,10 +2038,14 @@ class FfmpegFinalRenderer:
                 raise FinalRenderError(
                     "B-roll source is shorter than its timeline window. Enable loop or pad to preserve timeline duration."
                 )
-            if controls["fit"] == "crop":
-                video_filter = f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=increase,crop={self.video_width}:{self.video_height},setsar={self.video_sar.replace(':', '/')}"
-            else:
-                video_filter = f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,pad={self.video_width}:{self.video_height}:(ow-iw)/2:(oh-ih)/2,setsar={self.video_sar.replace(':', '/')}"
+            # 화면 맞춤은 **그래프 쪽과 같은 함수**를 쓴다(`_frame_fit_chain`).
+            # 여기만 따로 적어 두면 화면에서는 살아 있는 좌우가 파일에서는
+            # 잘린다 -- 이 저장소가 두 번 걸린 함정이다. 이 명령은 조각 하나만
+            # 만들므로 갈래 이름이 겹칠 일이 없고, 기본 `tag`를 그대로 쓴다.
+            video_filter = (
+                f"{self._frame_fit_chain(controls['fit'], tag='framefit')},"
+                f"setsar={self.video_sar.replace(':', '/')}"
+            )
             if needs_padding:
                 video_filter += f",tpad=stop_mode=add:stop_duration={float(output_duration_sec) - available_duration_sec}"
             # 되감기(retime)는 **자르고 늘리기 전에** 온다. 배속 1이면 아무것도
@@ -2051,6 +2092,20 @@ class FfmpegFinalRenderer:
             if output_duration_sec is not None:
                 command += ["-af", f"apad,atrim=duration={output_duration_sec}"]
             command += ["-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le"]
+        # **스레드 상한은 여기도 걸어야 한다**(그래프 쪽은 위에서 이미 건다).
+        # 2026-09-12 컨테이너 실측: `전체 담기`(`blur`)는 갈래가 둘이라 필터·
+        # 인코더 스레드를 더 잡는데, 이 경로는 상한이 없어 ffmpeg가 호스트 CPU
+        # 16을 보고 스레드를 잡다가 컨테이너의 `pids.max`(128)를 넘겼다. 나오는
+        # 말은 `ff_frame_thread_encoder_init failed`뿐이고 대표님 화면에는
+        # "완성본을 만들지 못했어요"로만 보인다. 옛 `crop` 사슬은 상한 없이도
+        # 통과해서 **새 값에서만** 터졌다 -- 왜 상한이 필요한지는
+        # `encoder_thread_limit` 참고.
+        #
+        # **앞이 아니라 여기 붙이는 이유**: 위쪽 `-ss` 다시 쓰기가 `command[2:]`로
+        # 자리를 세고 있어서, 앞에 끼우면 그 셈이 어긋난다. 출력 쪽 끝에 두어도
+        # 같은 효과라는 것을 컨테이너에서 실제로 재서 확인했다.
+        threads = str(self.encoder_thread_limit())
+        command += ["-filter_threads", threads, "-threads", threads]
         command.append(str(output_path))
         result = self._run(command)
         if result.returncode != 0:

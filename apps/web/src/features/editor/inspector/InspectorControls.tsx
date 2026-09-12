@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { CaptionStyleScope } from "../../../api";
+import { FRAME_FIT_CHOICES } from "./frameFits";
 import { PHOTO_MOTION_CHOICES, PHOTO_MOTION_NONE } from "./photoMotions";
 import { SCENE_FILTER_CHOICES, SCENE_FILTER_NONE } from "./sceneFilters";
 import { Button } from "../../../components/ui/button";
@@ -180,6 +181,16 @@ function asCutAction(value: string): CutAction {
   return value === "remove" ? "remove" : "keep";
 }
 
+/** 화면 맞춤 값. **뷰모델에서 끌어온다** -- 여기 따로 적으면 값을 늘릴 때
+ *  한쪽만 늘어난다. */
+type FrameFit = NonNullable<EditorControls["fit"]>;
+
+/** 목록(`frameFits.ts`)에 있는 값만 통과시킨다. 없는 값은 서버가 422로
+ *  거절하므로 여기서 기본값으로 되돌린다. */
+function asFrameFit(value: string): FrameFit {
+  return FRAME_FIT_CHOICES.some((choice) => choice.value === value) ? (value as FrameFit) : "fit";
+}
+
 function numberValue(value: string, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -281,7 +292,7 @@ export function InspectorControls({
   // Both rode in the command port from the start with no screen offering
   // them. Phone B-roll is routinely too long and too loud.
   const [speed, setSpeed] = useState(1);
-  const [fit, setFit] = useState<"fit" | "crop">("fit");
+  const [fit, setFit] = useState<FrameFit>("fit");
   const [volume, setVolume] = useState(1);
   // 색감. 안 고른 상태는 `none`이고, 저장할 때 `null`로 바뀐다.
   const [look, setLook] = useState<string>(SCENE_FILTER_NONE);
@@ -787,18 +798,24 @@ export function InspectorControls({
                   </div>
                 </>
               ) : null}
+              {/* 화면 맞춤(`frameFits.ts`). 셋의 차이는 **무엇을 잃는가**라서
+                  이름 옆에 그것을 적는다 -- 2026-09-12에 대표님이 `꽉 채우기`
+                  기본값으로 잘린 화면을 실제로 봤다("배경 좌우가 짤려서 글자가
+                  양쪽 사이드가 안보여"). 세 번째 `전체 담기`가 그 답이다. */}
               {showMediaField("fit") ? (
                 <label>
                   {`${target.label} 화면 맞춤`}
                   <NativeSelect
                     aria-label={`${target.label} 화면 맞춤`}
                     disabled={disabled}
-                    onChange={(event) => setFit(event.target.value === "crop" ? "crop" : "fit")}
+                    onChange={(event) => setFit(asFrameFit(event.target.value))}
                     value={fit}
                   >
-                    <option value="fit">화면 안에 맞추기</option>
-                    <option value="crop">화면 채우기</option>
+                    {FRAME_FIT_CHOICES.map((choice) => (
+                      <option key={choice.value} value={choice.value}>{`${choice.label} (${choice.hint})`}</option>
+                    ))}
                   </NativeSelect>
+                  <small>세로 숏폼에서 좌우가 잘리면 전체 담기를 고르세요.</small>
                 </label>
               ) : null}
               {/* 변형(캡컷 동영상 탭 대조, 2026-09-01). 화면 맞춤이 "원본을 이

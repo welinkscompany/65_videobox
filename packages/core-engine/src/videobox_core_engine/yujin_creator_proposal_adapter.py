@@ -68,6 +68,12 @@ _ACTIONABLE_MEDIA_KINDS = frozenset({"broll", "bgm", "sfx"})
 _BROLL_SOURCE_KINDS = frozenset({"raw_video", "broll_video"})
 _ACTIONABLE_B4_KINDS = frozenset({"caption", "voice", "overlay"})
 
+#: 추천 payload의 `fit` 이름 → 엔진의 `media_controls.fit`.
+#: 추천 쪽은 CSS 이름(`contain`/`cover`)을 쓰고 엔진은 자기 이름을 쓴다. 셋째
+#: 값은 원본 전체를 담고 남는 자리를 흐리게 채우는 `blur`다.
+#: 값 자체는 `yujin_creator_proposals.BrollParameters.fit`이 이미 막고 있다.
+_BROLL_FIT_BY_PROPOSAL_VALUE = {"contain": "fit", "cover": "crop", "contain_blur": "blur"}
+
 
 def variant_patch_from_yujin_candidate(candidate: DirectorCandidate) -> dict[str, object]:
     """Translate one validated Yujin render-only operation to a pure variant patch."""
@@ -690,7 +696,12 @@ def _supported_media_controls(
     parameters: dict[str, object],
 ) -> dict[str, object]:
     if kind == "broll":
-        return {"fit": "fit" if parameters.get("fit") == "contain" else "crop"}
+        # 추천 쪽은 CSS 이름을 쓴다(`videobox-creator/SKILL.md`의 계약). 셋째
+        # 값 `contain_blur`는 2026-09-12에 들어왔다 -- 원본 전체를 담고 남는
+        # 자리를 흐린 확대본으로 채우는 값이고, 세로 숏폼에서 구워진 자막이
+        # 양쪽에서 잘리는 것을 막는다. **여기 빼먹으면 조용히 `crop`으로 떨어져**
+        # 자료실 영상을 깔 때마다 좌우가 다시 잘린다.
+        return {"fit": _BROLL_FIT_BY_PROPOSAL_VALUE.get(str(parameters.get("fit") or ""), "crop")}
     if kind == "bgm":
         return {
             "volume": parameters["volume"],

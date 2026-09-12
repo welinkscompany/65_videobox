@@ -168,13 +168,22 @@ class SetSoundCleanupOperation(_SegmentOperation):
 
 
 class SetSceneTransformOperation(_SegmentOperation):
-    """확대·위치·기울이기. 말한 것만 바꾸고 나머지는 그대로 둔다.
+    """화면 맞춤·확대·위치·기울이기. 말한 것만 바꾸고 나머지는 그대로 둔다.
 
     경계는 `media_controls.py`가 정한 것과 **같은 값**이다 -- 화면 입력이 만들 수
     없는 값을 말로는 만들 수 있게 두면, 그 값이 결국 렌더러에서 터진다.
+
+    `fit`(화면 맞춤)이 여기 붙은 이유: 적용기가 이 명령의 칸을 그대로 그 장면
+    B-roll의 조정값에 얹는데(`editing_session._merge_broll_media_controls`),
+    화면 맞춤도 **같은 자리에 사는 같은 종류의 값**이다. 명령을 하나 더 만들면
+    적용기·검증기·요약 문구가 한 벌씩 더 생긴다. 편집기 화면도 `화면 맞춤`을
+    변형 넷 바로 위에 두고 있다.
     """
 
     intent: Literal["set_scene_transform"]
+    #: 원본을 화면에 어떻게 앉힐까. 셋뿐이고 뜻은 `media_controls.BROLL_FIT_LABELS`
+    #: 에 있다 -- `blur`(전체 담기)가 좌우를 안 자르는 값이다.
+    fit: Literal["fit", "crop", "blur"] | None = None
     zoom: float | None = Field(default=None, ge=0.5, le=4.0)
     position_x_percent: float | None = Field(default=None, ge=-100.0, le=100.0)
     position_y_percent: float | None = Field(default=None, ge=-100.0, le=100.0)
@@ -182,7 +191,10 @@ class SetSceneTransformOperation(_SegmentOperation):
 
     @model_validator(mode="after")
     def asks_for_at_least_one(self) -> "SetSceneTransformOperation":
-        if all(value is None for value in (self.zoom, self.position_x_percent, self.position_y_percent, self.rotation_deg)):
+        if all(
+            value is None
+            for value in (self.fit, self.zoom, self.position_x_percent, self.position_y_percent, self.rotation_deg)
+        ):
             raise ValueError("scene_transform_needs_a_change")
         return self
 

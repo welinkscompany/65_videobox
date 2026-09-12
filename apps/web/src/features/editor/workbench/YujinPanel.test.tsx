@@ -785,7 +785,10 @@ describe("추천 후보", () => {
     expect(screen.getByText("영상")).toBeVisible();
     // 내부 세그먼트 식별자는 owner에게 뜻이 없다. 화면에는 나오지 않아야 한다.
     expect(screen.queryAllByText("segment-1")).toHaveLength(0);
-    expect(screen.getByText("화면 채우기")).toBeVisible();
+    // 이름이 `화면 채우기`에서 `꽉 채우기`로 바뀌었다(2026-09-12) -- 셋째 값
+    // `전체 담기`가 들어오면서 "채운다"만으로는 어느 쪽인지 알 수 없게 됐다.
+    // 이름은 `inspector/frameFits.ts` 한 벌을 따른다.
+    expect(screen.getByText("꽉 채우기")).toBeVisible();
     expect(screen.getByText("제안 기준 편집본 6")).toBeVisible();
     expect(screen.getByText("현재 편집본 7")).toBeVisible();
     expect(screen.getByText("후보 상태: 적용 가능")).toBeVisible();

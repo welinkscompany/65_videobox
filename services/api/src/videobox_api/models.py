@@ -1753,7 +1753,9 @@ class EditorMediaControlsResponse(BaseModel):
     fade_in_sec: float | None = None
     fade_out_sec: float | None = None
     ducking: bool | None = None
-    fit: Literal["fit", "crop"] | None = None
+    # 셋째 값 `blur`(화면 이름 `전체 담기`)는 2026-09-12에 들어왔다. 엔진만
+    # 넓히고 이 줄을 빼면 화면 저장이 422로 거절된다 -- 이 저장소의 전례다.
+    fit: Literal["fit", "crop", "blur"] | None = None
     loop: bool | None = None
     pad: bool | None = None
     trim_start_sec: float | None = Field(default=None, ge=0)

@@ -7,7 +7,11 @@ import json
 import re
 
 from videobox_core_engine.caption_translation import SUPPORTED_CAPTION_LANGUAGES
-from videobox_core_engine.media_controls import PHOTO_MOTION_CHOICES, PHOTO_MOTION_LABELS
+from videobox_core_engine.media_controls import (
+    BROLL_FIT_LABELS,
+    PHOTO_MOTION_CHOICES,
+    PHOTO_MOTION_LABELS,
+)
 from videobox_core_engine.overlay_shapes import (
     SHAPE_OVERLAY_HORIZONTALS,
     SHAPE_OVERLAY_MOTIONS,
@@ -51,7 +55,9 @@ _EDITING_OPERATION_SCHEMA = {
         # "흔들림만 잡아 줘"에 노이즈 값까지 채우게 하면 이미 켜 둔 것을 끈다.
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_picture_cleanup"}, "segment_id": {"type": "string"}, "stabilize": {"type": "boolean"}, "reduce_noise": {"type": "boolean"}}, "required": ["intent", "segment_id"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_sound_cleanup"}, "segment_id": {"type": "string"}, "media_type": {"enum": ["bgm", "sfx"]}, "normalize_loudness": {"type": "boolean"}, "denoise": {"type": "boolean"}}, "required": ["intent", "segment_id", "media_type"]},
-        {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_scene_transform"}, "segment_id": {"type": "string"}, "zoom": {"type": "number"}, "position_x_percent": {"type": "number"}, "position_y_percent": {"type": "number"}, "rotation_deg": {"type": "number"}}, "required": ["intent", "segment_id"]},
+        # `fit`(화면 맞춤)이 여기 붙은 이유는 `SetSceneTransformOperation`
+        # docstring에 있다 -- 같은 자리에 사는 같은 종류의 값이다.
+        {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_scene_transform"}, "segment_id": {"type": "string"}, "fit": {"enum": sorted(BROLL_FIT_LABELS)}, "zoom": {"type": "number"}, "position_x_percent": {"type": "number"}, "position_y_percent": {"type": "number"}, "rotation_deg": {"type": "number"}}, "required": ["intent", "segment_id"]},
         # 사진을 영상 **위에** 얹는다. 프리셋 넷과 소리(Task 4, 2026-09-11)는 전부
         # 선택이다 -- 창작자가 말한 것만 싣게 하려고 required에 안 적는다(빈칸을
         # 채우면 이미 맞춰 둔 자리가 조용히 움직인다. 소리도 같다 -- 말 안 하면
@@ -128,6 +134,32 @@ def _photo_motion_catalogue(context: YujinEditingContext) -> str:
         f"still은 '움직이지 마라'는 뜻이고, 아무것도 안 고른 장면은 알아서 움직인다 -- 둘은 다르다. "
         f"화면이 깔린 장면에만 걸 수 있다. "
         f"지금 움직임이 걸린 장면: {', '.join(f'{sid}({motion})' for sid, motion in context.photo_motions_by_segment) or '없음'}."
+    )
+
+
+def _frame_fit_catalogue(context: YujinEditingContext) -> str:
+    """원본을 화면에 어떻게 앉힐까. **목록과 지금 걸린 값을 한 쌍으로** 준다.
+
+    색감·전환·사진 움직임에서 세운 규칙 그대로다 -- 목록만 주면 "원래대로
+    돌려줘"에 "걸린 게 없습니다"라고 답한다.
+
+    셋의 **차이를 글로 적어 준다.** 이름만 늘어놓으면 "좌우 안 잘리게 해줘"를
+    어느 값으로 옮겨야 하는지 모른다 -- 2026-09-12에 대표님이 본 결함이 바로
+    이 갈림길이다.
+    """
+    fits = ", ".join(f"{key}({label})" for key, label in BROLL_FIT_LABELS.items())
+    if not context.segment_ids_with_broll:
+        return f"고를 수 있는 화면 맞춤: {fits}. 다만 지금은 화면이 깔린 장면이 없어 걸 수 없다."
+    return (
+        f"원본을 화면에 어떻게 앉힐지는 set_scene_transform의 fit으로 고른다. "
+        f"고를 수 있는 값: {fits}. "
+        f"crop은 화면을 꽉 채우지만 **좌우(또는 위아래)가 잘린다** -- 세로 숏폼에서 "
+        f"가로 원본을 이렇게 채우면 화면에 구워진 글자가 양쪽에서 잘려 안 보인다. "
+        f"fit은 아무것도 안 자르지만 남는 자리가 검은 띠로 남는다. "
+        f"blur(전체 담기)는 아무것도 안 자르고 남는 자리를 같은 그림의 흐린 확대본으로 채운다 -- "
+        f"'좌우가 잘렸다', '양쪽이 안 보인다', '다 보이게 해줘'는 blur다. "
+        f"화면이 깔린 장면에만 걸 수 있다. "
+        f"지금 화면 맞춤이 걸린 장면: {', '.join(f'{sid}({fit})' for sid, fit in context.fits_by_segment) or '없음'}."
     )
 
 
@@ -430,7 +462,8 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         "set_caption_font(자막 글꼴·크기), "
         "set_caption_text(자막 글), set_scene_look(색감), set_picture_cleanup(손떨림·화면 노이즈), "
         "set_photo_motion(사진이 어떻게 움직일지 -- \"사진 천천히 확대해줘\", \"사진 좀 가만히 둬\"가 이것이다), "
-        "set_sound_cleanup(소리 크기 맞추기·잡음 줄이기), set_scene_transform(확대·위치·기울이기), "
+        "set_sound_cleanup(소리 크기 맞추기·잡음 줄이기), "
+        "set_scene_transform(화면 맞춤·확대·위치·기울이기 -- \"좌우가 잘렸어\", \"다 보이게 해줘\"가 이것이다), "
         "set_scene_transition(장면이 넘어올 때의 전환 -- \"전환 넣어줘\"가 이것이다), "
         "apply_media(영상·음악·효과음을 깐다), "
         # **여기도 최종 리뷰에서 고친 자리다(2026-09-10).** intent 이름 옆의
@@ -461,12 +494,13 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         f"{_approved_asset_catalogue(context)} "
         f"{_scene_look_catalogue(context)} "
         f"{_photo_motion_catalogue(context)} "
+        f"{_frame_fit_catalogue(context)} "
         f"{_scene_transition_catalogue()} "
         f"{_caption_font_catalogue(context)} "
         f"{_image_overlay_catalogue(context)} "
         # 이 셋도 화면이 깔린 장면에만 걸 수 있다(색감과 같은 이유). 소리 정리는
         # 그 장면에 음악·효과음이 있어야 한다.
-        "손떨림 보정·화면 노이즈는 set_picture_cleanup, 확대·위치·기울이기는 set_scene_transform이고 "
+        "손떨림 보정·화면 노이즈는 set_picture_cleanup, 화면 맞춤·확대·위치·기울이기는 set_scene_transform이고 "
         "둘 다 화면이 깔린 장면에만 걸 수 있다. 소리 크기 맞추기·잡음 줄이기는 set_sound_cleanup이며 "
         "그 장면에 깔린 음악(bgm)이나 효과음(sfx)을 media_type으로 지목해야 한다 -- "
         # **asset_id를 찾아 헤매지 않게 못박는다**(2026-09-06 실측). "음악 소리
@@ -481,7 +515,8 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         "이 셋(set_picture_cleanup, set_sound_cleanup, set_scene_transform)은 **바꿀 칸을 "
         "적어도 하나 실어야 한다** -- set_picture_cleanup은 stabilize나 reduce_noise, "
         "set_sound_cleanup은 normalize_loudness나 denoise, set_scene_transform은 "
-        "scale·offset·rotation 중 하나. 하나도 없으면 아무것도 안 바뀌므로 거절된다. "
+        "fit·zoom·position_x_percent·position_y_percent·rotation_deg 중 하나. "
+        "하나도 없으면 아무것도 안 바뀌므로 거절된다. "
         # **어느 장면에 걸 수 있는지 목록으로 준다.** 색감에서 세운 규칙이고,
         # 규칙만 글로 적고 목록을 빼먹으면 모델이 지어내거나 아예 포기한다 --
         # 2026-09-02 실측에서 소리 정리가 그렇게 거절됐다.

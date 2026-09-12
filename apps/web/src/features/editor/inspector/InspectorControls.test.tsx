@@ -310,6 +310,35 @@ describe("InspectorControls", () => {
     });
   });
 
+  // 2026-09-12: 대표님이 세로 숏폼에서 좌우가 잘린 화면을 봤다 -- "배경 좌우가
+  // 짤려서 글자가 양쪽 사이드가 안보여." 잘리지 않는 세 번째 값을 **손으로도**
+  // 고를 수 있어야 한다. 이름 옆에 무엇을 잃는지 같이 적는다(§10.13).
+  it("lets the creator pick the fit that keeps the sides", () => {
+    const onAction = vi.fn();
+    const broll: InspectorTarget = {
+      assetId: "asset-internal-broll",
+      clearOnly: false,
+      controls: { fit: "crop" },
+      fields: ["fit"],
+      id: "clip:broll-fit-blur",
+      kind: "media",
+      label: "영상",
+      mediaKind: "broll",
+      segmentId: "segment-internal-current",
+    };
+
+    render(<InspectorControls onAction={onAction} selectedSegment={{ cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-internal-current", startSec: 1 }} target={broll} />);
+
+    const select = screen.getByRole("combobox", { name: "영상 화면 맞춤" });
+    expect(screen.getByRole("option", { name: "전체 담기 (다 보이고 빈 자리는 흐린 배경)" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "꽉 채우기 (좌우가 잘려요)" })).toBeInTheDocument();
+    fireEvent.change(select, { target: { value: "blur" } });
+    fireEvent.click(screen.getByRole("button", { name: "영상 설정 저장" }));
+    expect(onAction).toHaveBeenLastCalledWith(expect.objectContaining({
+      controls: expect.objectContaining({ fit: "blur" }),
+    }));
+  });
+
   // 캡컷 속도 탭 대조(owner 승인 2026-09-01). **기본이 켜짐인 유일한 스위치다** --
   // 지금까지의 동작이 유지였고(`atempo`), 기본값을 꺼짐으로 두면 예전에 저장한
   // 배속 클립의 소리가 편집기를 여는 것만으로 달라진다.

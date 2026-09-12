@@ -597,7 +597,9 @@ export type EditorMediaControls = {
   fade_in_sec?: number;
   fade_out_sec?: number;
   ducking?: boolean;
-  fit?: "fit" | "crop";
+  /** 원본을 화면에 앉히는 방법. `blur`(전체 담기)는 2026-09-12에 들어왔다 --
+   *  좌우를 안 자르고 남는 자리를 흐린 배경으로 채운다. 목록은 `frameFits.ts`. */
+  fit?: "fit" | "crop" | "blur";
   loop?: boolean;
   pad?: boolean;
   trim_start_sec?: number;

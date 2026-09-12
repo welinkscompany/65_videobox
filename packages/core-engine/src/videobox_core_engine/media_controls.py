@@ -36,6 +36,27 @@ def _bounded(value: object, bounds: tuple[float, float], label: str) -> float:
     return parsed
 
 
+#: 원본을 출력 화면에 앉히는 세 방법. **순서가 화면 목록의 순서다.**
+#:
+#: 2026-09-12까지 둘뿐이었고 둘 다 답이 아니었다. 대표님이 실제로 본 것:
+#: "배경 좌우가 짤려서 글자가 양쪽 사이드가 안보여." 원본 1920×1080에 자막이
+#: 구워져 있는데 9:16(1080×1920)을 `crop`으로 채우면 가운데 607픽셀만 남아 그
+#: 자막이 양쪽에서 잘린다. 되돌려 `fit`을 쓰면 위아래가 검은 띠 68.3%다
+#: (2026-09-11 실측으로 이미 버린 값).
+#:
+#: 그래서 `blur`가 들어왔다 -- 원본 전체를 비율 그대로 담고, 남는 자리는 같은
+#: 그림을 확대해 흐리게 깔아 채운다. 잘리는 것도 없고 검은 띠도 없다.
+#:
+#: 이름은 창작자에게 보여 줄 쉬운 말이다(§10.13 -- `crop`·`blur`를 화면에 쓰지
+#: 않는다). 화면 목록(`apps/web/.../inspector/frameFits.ts`)과 유진에게 주는
+#: 표가 둘 다 이것을 따르고, 두 벌이 갈라지는 것은
+#: `tests/test_vertical_short_keeps_the_sides.py`가 맞대어 본다.
+BROLL_FIT_LABELS: dict[str, str] = {
+    "fit": "화면 안에 맞추기",
+    "crop": "꽉 채우기",
+    "blur": "전체 담기",
+}
+
 #: 사진 한 장이 움직이는 방식. 여섯은 AI 장면 그림 쪽과 **같은 이름**이다
 #: (`scene_image_service.SCENE_MOTIONS`). 거기서 import하지 않는 것은 그 모듈이
 #: 제공자 인터페이스까지 끌고 오기 때문이다 -- 이 파일은 렌더·API·화면이 모두
@@ -95,8 +116,10 @@ def normalize_media_controls(
         }
     if media_kind == "broll":
         fit = str(payload.get("fit", "fit")).strip().lower()
-        if fit not in {"fit", "crop"}:
-            raise ValueError("B-roll fit must be either 'fit' or 'crop'.")
+        if fit not in BROLL_FIT_LABELS:
+            raise ValueError(
+                "B-roll fit must be one of " + ", ".join(f"'{key}'" for key in BROLL_FIT_LABELS) + "."
+            )
         trim_start_sec = _finite_control_number(payload.get("trim_start_sec", 0.0))
         if trim_start_sec < 0:
             raise ValueError("B-roll trim_start_sec must not be negative.")
