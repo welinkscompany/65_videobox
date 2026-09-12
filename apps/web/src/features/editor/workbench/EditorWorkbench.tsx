@@ -110,6 +110,9 @@ type EditorWorkbenchProps = Readonly<{
   onPrepareAssetPreview?: (card: EditorAssetCard) => Promise<string>;
   isSavingTimeline?: boolean;
   timelineMutationMessage?: string;
+  /** 저장이 길어질 때만 붙는 한 줄(`1분 5초 지났어요. ...`). 문장 자체는 위
+   *  `timelineMutationMessage`가 그대로 유지한다 -- 빠른 편집에는 그게 맞다. */
+  timelineMutationWaitNotice?: string | null;
   director?: RightDockDirector;
   requestedSegmentId?: string | null;
   serverVariants?: readonly OutputVariant[];
@@ -159,6 +162,7 @@ function EditorWorkbenchInstance({
   onPrepareAssetPreview,
   isSavingTimeline = false,
   timelineMutationMessage,
+  timelineMutationWaitNotice = null,
   director,
   requestedSegmentId = null,
   serverVariants = [],
@@ -740,6 +744,7 @@ function EditorWorkbenchInstance({
         onConversationScrollChange={rightDirector?.onConversationScrollChange}
         memory={rightDirector?.memory}
         composerDisabled={rightDirector?.composerDisabled}
+        thinking={rightDirector?.thinking}
         onSendMessage={rightDirector?.onSendMessage}
         qualityFollowUps={rightDirector?.qualityFollowUps}
         onCreateEditingProposal={rightDirector?.onCreateEditingProposal}
@@ -807,6 +812,7 @@ function EditorWorkbenchInstance({
       editToolbar={editToolbar}
       isSaving={isSavingTimeline}
       mutationMessage={timelineMutationMessage}
+      mutationWaitNotice={timelineMutationWaitNotice}
       // 끌어다 놓기는 **이미 있는 `적용` 경로**를 그대로 탄다. 같은 편집이 두 경로를
       // 갖지 않게 -- 하나만 고치면 다른 하나가 조용히 옛 동작으로 남는다.
       onDropAsset={onApplyAssetCard ? ({ cardId, segmentId }) => {

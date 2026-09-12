@@ -9,6 +9,7 @@ import { repickShortFormWithProgress } from "./shortFormRepickProgress";
 
 import { ApiConflictError, ApiRequestError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type LibraryAsset, type MediaLibraryAsset, type OutputVariant, type YujinEditingProposalPreview, type OutputVariantPatch, type ShortFormScenePick, type PartialRegenerationJob, type PartialRegenerationPreflight, type SceneTransitionSuggestion, type YujinEditingProposal, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
 import { runPartialRegenerationWithProgress, type PartialRegenerationOutcome } from "../partialRegenerationProgress";
+import { longWaitNotice, useWaitElapsedSeconds } from "../waitingNotice";
 import { Button } from "../../../components/ui/button";
 import { findLatestSucceededJob } from "../../../lib/formatters";
 import { resolveWorkspaceLocation } from "../../../app/routeManifest";
@@ -98,6 +99,10 @@ type DirectorState = Readonly<{
   conversationScroll: RightDockDirector["conversationScroll"];
   memorySourceMessageIds: readonly string[];
   isSending?: boolean;
+  /** 지금 유진이 기다리게 하고 있는 일. **`isSending`으로는 모자랐다** -- 그 값은
+   *  답장 한 번만 덮고, 실제로 몇 분이 걸리는 "말한 대로 편집할 자리 찾기"에서는
+   *  꺼져 있어서 화면이 완전히 조용해졌다(실측 437초·605초, 2026-09-12). */
+  thinking: Readonly<{ phase: "answering" | "judging" }> | null;
   /** 추천 시작이 거절된 이유. 다시 누를 수 있어야 하므로 상태는 `idle`로 남긴다. */
   startFailure: string | null;
 }>;
@@ -242,6 +247,7 @@ function createDirectorState(requestKey: string, sessionId: string | null): Dire
     selectedCandidateIds: [],
     conversationScroll: { key: requestKey, top: 0, pinnedToBottom: true },
     memorySourceMessageIds: [],
+    thinking: null,
     startFailure: null,
   };
 }
@@ -775,6 +781,14 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     }, 1200);
     return () => window.clearTimeout(poll);
   }, [projectId, requestKey, director.key, director.editingProposalPreview]);
+  // **오래 걸리는 편집을 정직하게 말한다**(대표님 상시 지시 2026-09-12).
+  // `변경 내용을 저장하고 있어요.`는 몇 분이 지나도 한 글자도 안 바뀌었다 --
+  // 장면 나누기 93번째가 실측 298초였고, "저장"은 즉시 끝난다는 뜻으로 읽힌다.
+  // 문장 자체는 그대로 두고(빠른 편집에는 그게 맞다) 길어질 때만 한 줄을 더한다.
+  // 백분율은 만들지 않는다 -- 근거가 되는 데이터가 없다. 훅이므로 아래 이른
+  // 반환보다 앞에 둔다.
+  const mutationElapsedSec = useWaitElapsedSeconds(mutation.isSaving);
+  const mutationWaitNotice = mutation.isSaving ? longWaitNotice(mutationElapsedSec) : null;
   if (state.key !== requestKey) return <section aria-live="polite"><p>편집 내용을 불러오는 중이에요.</p></section>;
   if (!state.view) return <section aria-live="polite"><p>{state.error ?? "편집 내용을 불러오는 중이에요."}</p></section>;
   const refreshPreview = async () => {
@@ -2019,6 +2033,11 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       ]),
     } : current);
   };
+  /** 기다리는 동안 화면이 무엇을 하고 있는지 말하게 한다(대표님 상시 지시
+   *  2026-09-12). `null`을 넣으면 그 줄이 사라지고 시계도 멈춘다. */
+  const setDirectorThinking = (thinking: DirectorState["thinking"]) => {
+    setDirector((current) => current.key === requestKey ? { ...current, thinking } : current);
+  };
   const sendDirectorMessage = async (text: string) => {
     const submittedDraft = text.trim();
     if (!submittedDraft) return;
@@ -2029,11 +2048,25 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     }
     const zoomCommand = timelineZoomCommandFromInstruction(submittedDraft);
     if (zoomCommand) {
+      // 확대·축소는 그 자리에서 끝난다. 기다림이 없으니 기다림 표시도 없다.
       applyTimelineZoomCommand(zoomCommand, submittedDraft, clientMessageId);
       return;
     }
-    await submitDirectorMessage(submittedDraft, clientMessageId);
-    await interpretAndApplySpokenEdit(submittedDraft);
+    // **두 구간을 한 통로로 덮는다.** 답장(`submitDirectorMessage`)이 끝나도
+    // 아직 말한 대로 편집할 자리를 찾는 일이 남아 있고, 몇 분이 걸리는 쪽은
+    // 그 두 번째다. 예전에는 첫 구간에서 `isSending`만 켜졌다가 두 번째
+    // 구간에서 화면이 완전히 조용해졌다.
+    //
+    // **끝나면 반드시 지운다.** `finally`가 아니면 도중에 던진 경우 기다림
+    // 표시가 영원히 남고, 시계도 계속 돈다.
+    setDirectorThinking({ phase: "answering" });
+    try {
+      await submitDirectorMessage(submittedDraft, clientMessageId);
+      setDirectorThinking({ phase: "judging" });
+      await interpretAndApplySpokenEdit(submittedDraft);
+    } finally {
+      setDirectorThinking(null);
+    }
   };
   /** 편집안 하나를 지금 편집본에 적용한다.
    *
@@ -2191,7 +2224,14 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       || !activeDirector.conversationId
       || submission.conversationId !== activeDirector.conversationId
     ) return;
-    await submitDirectorMessage(submission.text, submission.clientMessageId);
+    // 다시 보내는 것도 기다림이다. 여기서 빼먹으면 "같은 요청 다시 보내기"를
+    // 누른 뒤부터 다시 아무 표시가 없다.
+    setDirectorThinking({ phase: "answering" });
+    try {
+      await submitDirectorMessage(submission.text, submission.clientMessageId);
+    } finally {
+      setDirectorThinking(null);
+    }
   };
   const startDirector = async () => {
     if (
@@ -2416,6 +2456,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       onDelete: deleteMemoryCandidate,
     },
     composerDisabled: mutation.isSaving || activeDirector.isSending === true || activeDirector.state === "analysis_running" || activeDirector.state === "applying" || ownsActiveHermesRouteRun,
+    thinking: activeDirector.thinking,
     onDraftChange: (draft) => setDirector((current) => current.key === requestKey ? { ...current, draft } : current),
     onSelectedCandidateIdsChange: (selectedCandidateIds) => setDirector((current) => current.key === requestKey ? { ...current, selectedCandidateIds } : current),
     onConversationScrollChange: (conversationScroll) => setDirector((current) => current.key === requestKey ? { ...current, conversationScroll } : current),
@@ -2521,7 +2562,11 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   return <>
     {state.error ? <p role="status">{state.error}</p> : null}
     {assets.key === requestKey && assets.error ? <p role="status">{assets.error}</p> : null}
-    {activePartial.message ? <p role="status">{activePartial.message}</p> : null}
+    {/* 부분 재생성 문구는 이제 **누른 자리 옆**(세부 정보의 부분 재생성 칸)에
+        선다. 예전에는 이 자리에 줄 하나가 붙었는데, 작업판 바깥의 꾸밈 없는
+        띠라 세부 정보 창을 보고 있던 창작자 눈에 안 들어왔고, 한 줄이 생길
+        때마다 `height:100%`인 작업판을 아래로 밀어냈다(2026-09-12). 두 곳에
+        같이 두지 않는다 -- 같은 문장이 화면에 두 번 나온다. */}
     {partialRecoveryError ? <Button onClick={() => setPartialRecoveryRetryToken((current) => current + 1)} type="button">이전 결과 다시 찾기</Button> : null}
     {activePartial.preflight?.affected_output_areas.length ? <ul aria-label="부분 재생성 영향 범위">{activePartial.preflight.affected_output_areas.map((area) => <li key={area}>{affectedAreaLabel(area)}</li>)}</ul> : null}
     {activePartial.isResultOpen && activePartial.result && partialResultIsCurrent ? <dl aria-label="부분 재생성 결과">
@@ -2564,10 +2609,12 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       preparedSegmentId: activePartial.ticket?.segmentId,
       canRun: partialTicketIsCurrent,
       canResume: partialResultIsCurrent,
+      message: activePartial.message,
     }}
     session={state.session}
     ttsCandidateScopeKey={requestKey}
     timelineMutationMessage={mutation.message}
+    timelineMutationWaitNotice={mutationWaitNotice}
     director={rightDock}
     requestedSegmentId={requestedSegmentId}
     serverVariants={activeVariants}

@@ -74,6 +74,9 @@ type Props = Readonly<{
   onDropAsset?: (input: Readonly<{ cardId: string; segmentId: string }>) => void;
   isSaving?: boolean;
   mutationMessage?: string;
+  /** 저장이 길어질 때만 붙는 한 줄. **회색으로 잠긴 단추와 안 바뀌는 문장은
+   *  "멈췄다"로 읽힌다**(대표님 상시 지시 2026-09-12). */
+  mutationWaitNotice?: string | null;
   /** 되돌리기·자르기 같은 편집 동작 단추 묶음. 캡컷 참조(2026-08-30 버튼
    *  단위 벤치마킹 승인) -- 이 동작들은 상단 도구줄이 아니라 타임라인
    *  바로 위, 확대·축소와 같은 줄에 있다. 그 버튼들의 상태·핸들러는
@@ -223,7 +226,7 @@ function navigationReducer(
   return reduceTimelineNavigation(state, action, options);
 }
 
-export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, onTrimNarration, onReorderNarration, onUpdatePlacements, onUpdateTrackStates, onSelectSegment, onPlaybackSeek, onDropAsset, selectedSegmentId = null, selectionResetKey = null, playbackSec, isSaving = false, mutationMessage, editToolbar, zoomCommand = null }: Props) {
+export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, onTrimNarration, onReorderNarration, onUpdatePlacements, onUpdateTrackStates, onSelectSegment, onPlaybackSeek, onDropAsset, selectedSegmentId = null, selectionResetKey = null, playbackSec, isSaving = false, mutationMessage, mutationWaitNotice = null, editToolbar, zoomCommand = null }: Props) {
   // 늘리기·줄이기의 한계는 **영상 길이와 화면 폭에서 나온다.** 줄이기는 영상
   // 전체가 한 화면에 들어온 자리에서 멈추고, 늘리기는 프레임이 보이는 자리에서
   // 멈춘다(`timelineZoomScale.ts`).
@@ -1064,6 +1067,10 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
           actually tell them where the playhead landed. */}
       {snap ? <p>스냅: {snapKindLabel[snap.kind]} ({formatSeconds(snap.timeSec)}초)</p> : <p>스냅 없음</p>}
       {mutationMessage ? <p role="status" aria-label="편집 저장 상태">{mutationMessage}</p> : null}
+      {/* 시간이 흐르는 것을 보여 주는 줄. 5초마다 바뀌므로 `role="status"`를
+          주지 않는다 -- 화면 읽기 프로그램이 계속 떠들게 된다. 위 문장이
+          이미 살아 있는 영역이다. */}
+      {mutationWaitNotice ? <p aria-label="편집 기다린 시간">{mutationWaitNotice}</p> : null}
       <output aria-label="재생 위치" data-seconds={formatSeconds(state.playheadSec)}>{formatSeconds(state.playheadSec)}초</output>
       {draftProjection.rects.length === 0 && visibleGaps.length === 0 ? <p>표시할 타임라인 항목이 없습니다.</p> : null}
     </div>

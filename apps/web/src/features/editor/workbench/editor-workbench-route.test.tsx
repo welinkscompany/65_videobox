@@ -3269,6 +3269,30 @@ describe("EditorWorkbenchRoute", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
+  // 대표님 상시 지시 2026-09-12. 문구는 이미 만들어져 있었는데 **누른 자리에서
+  // 읽는 곳이 없었다** -- 작업판 바깥 꾸밈 없는 줄 하나가 전부여서, 세부 정보
+  // 창에서 단추를 누른 창작자는 일반 안내인 `변경 내용을 저장하고 있어요.`만 봤다.
+  it("다시 만드는 동안 세부 정보 창에서 무엇을 하는 중인지 읽을 수 있다", async () => {
+    vi.mocked(api.getEditorPlaybackManifest).mockResolvedValue(inspectorManifest(7) as never);
+    vi.mocked(api.getEditingSession).mockResolvedValue(inspectorSession(7) as never);
+    vi.spyOn(api, "previewPartialRegeneration").mockResolvedValue(partialPreflight as never);
+    vi.spyOn(api, "startPartialRegeneration").mockImplementation(() => new Promise(() => undefined) as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    const inspector = await openInspector();
+    fireEvent.click(screen.getByRole("button", { name: "재생성 범위 미리보기" }));
+    const runButton = screen.getByRole("button", { name: "부분 재생성 실행" });
+    await waitFor(() => expect(runButton).toBeEnabled());
+    fireEvent.click(runButton);
+
+    // **소비자는 세부 정보 창 안에 있다.** 접힌 `부분 재생성` 밖이라 펼치지
+    // 않아도 읽힌다.
+    const status = await within(inspector).findByRole("status", { name: "부분 재생성 상태" });
+    expect(status).toHaveTextContent("선택한 범위를 다시 만들고 있어요.");
+    expect(status.closest("details")).toBeNull();
+  });
+
   it("ignores an old result read after a manual mutation advances the session", async () => {
     let resolveResume!: (value: ReturnType<typeof partialJob>) => void;
     vi.mocked(api.getEditorPlaybackManifest)
@@ -3551,6 +3575,46 @@ describe("EditorWorkbenchRoute", () => {
     await waitFor(() => expect(load).toHaveBeenCalledTimes(4));
     await expectEditorRevision(11);
     expect(screen.getByText("변경 내용을 저장했어요.")).toBeVisible();
+  });
+
+  // 대표님 상시 지시 2026-09-12. `변경 내용을 저장하고 있어요.`는 몇 분을 지나도
+  // 한 글자도 안 바뀌었다 -- 장면 나누기 93번째가 실측 298초였고, "저장"이라는
+  // 말은 즉시 끝난다는 뜻으로 읽힌다. 백분율은 만들지 않는다(근거가 없다).
+  it("오래 걸리는 저장은 몇 분이 지났는지 정직하게 말하고, 끝나면 시계를 거둔다", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let resolveUpdate!: (value: unknown) => void;
+      vi.mocked(api.getEditorPlaybackManifest)
+        .mockResolvedValueOnce(twoNarrationManifest(1) as never)
+        .mockResolvedValueOnce(twoNarrationManifest(2) as never);
+      mockEditingSessionRevisions(1, 2);
+      vi.spyOn(api, "reorderEditingSessionSegments")
+        .mockImplementation(() => new Promise((resolve) => { resolveUpdate = resolve; }) as never);
+
+      render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+      await expectEditorRevision(1);
+      fireEvent.click(clipSelectionButton("n-1"));
+      const reorder = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 순서 바꾸기" });
+      fireEvent.keyDown(reorder, { key: "ArrowRight" });
+      await waitFor(() => expect(screen.getByText("변경 내용을 저장하고 있어요.")).toBeVisible());
+
+      // 처음 몇 초는 아무 말도 더하지 않는다 -- 빠른 편집에 기다림 안내를 붙이면
+      // 그게 더 불안하다.
+      expect(screen.queryByLabelText("편집 기다린 시간")).toBeNull();
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(65_000); });
+      const notice = screen.getByLabelText("편집 기다린 시간");
+      expect(notice).toHaveTextContent("1분 5초 지났어요. 오래 걸릴 수 있어요.");
+      expect(notice.textContent).not.toMatch(/%/);
+
+      await act(async () => { resolveUpdate({}); });
+      await waitFor(() => expect(screen.getByText("변경 내용을 저장했어요.")).toBeVisible());
+      await act(async () => { await vi.advanceTimersByTimeAsync(600_000); });
+
+      expect(screen.queryByLabelText("편집 기다린 시간")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps the committed A mutation current when an uncommitted B render is abandoned", async () => {
@@ -4455,6 +4519,57 @@ describe("EditorWorkbenchRoute", () => {
     expect(composer).toHaveValue("");
     expect(composer).toBeEnabled();
     expect(clipSelectionButton("n-1")).toBeEnabled();
+  });
+
+  // 대표님 상시 지시 2026-09-12: "이런 기다림이 필요한 작업은 항상 뭔가 하고
+  // 있다는 메세지가 나와야되". 보낸 말은 **두 구간**을 지난다 -- 답장과, 말한
+  // 대로 편집할 자리 찾기. 실제로 몇 분이 걸리는 쪽은 두 번째다(실측 437초·605초).
+  // 한 구간만 덮으면 나머지에서 다시 침묵하므로 둘을 같은 시험에서 잰다.
+  it("유진이 답하고 편집할 자리를 찾는 두 구간 모두 화면에 말한다", async () => {
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000077");
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal: null, references: [],
+    } as never);
+    let resolveSend!: (value: unknown) => void;
+    vi.spyOn(api, "sendDirectorMessage")
+      .mockImplementation(() => new Promise((resolve) => { resolveSend = resolve; }) as never);
+    let resolveJudge!: (value: unknown) => void;
+    vi.mocked(api.createYujinEditingProposal)
+      .mockImplementation(() => new Promise((resolve) => { resolveJudge = resolve; }) as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
+    const composer = await screen.findByRole("textbox", { name: "유진에게 요청하기" });
+    fireEvent.change(composer, { target: { value: "숏폼으로 잘라줘" } });
+    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+
+    // 첫 구간: 답을 기다리는 중. 회색 단추가 아니라 **글씨가 바뀐다.**
+    expect(await screen.findByRole("status", { name: "유진 진행 상태" }))
+      .toHaveTextContent("유진이 생각하고 있어요. 답이 오면 화면이 저절로 바뀌어요.");
+    expect(screen.getByRole("button", { name: "유진이 생각하는 중" })).toBeInTheDocument();
+
+    await act(async () => {
+      resolveSend({
+        kind: "exchange",
+        exchange: {
+          user_message: { message_id: "user-77", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "숏폼으로 잘라줘", proposal_id: null, metadata: {}, client_message_id: "00000000-0000-4000-8000-000000000077", created_at: "1" },
+          assistant_message: { message_id: "assistant-77", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "잘라 볼게요.", proposal_id: null, metadata: {}, client_message_id: null, created_at: "2" },
+        },
+      });
+    });
+
+    // 두 번째 구간: 답장은 왔지만 아직 편집할 자리를 찾는 중이다. 예전에는
+    // 여기서 화면이 완전히 조용해졌다.
+    await waitFor(() => expect(screen.getByRole("status", { name: "유진 진행 상태" }))
+      .toHaveTextContent("방금 말한 대로 편집할 자리를 찾고 있어요. 다 되면 화면이 저절로 바뀌어요."));
+
+    await act(async () => { resolveJudge({ status: "clarification", reply_text: "", proposal: null }); });
+
+    await waitFor(() => expect(screen.queryByRole("status", { name: "유진 진행 상태" })).toBeNull());
+    expect(screen.getByRole("button", { name: "요청 보내기" })).toBeInTheDocument();
   });
 
   // 대표님 상시 지시(2026-09-11): 화면으로 되는 일은 전부 유진에게 말해서도

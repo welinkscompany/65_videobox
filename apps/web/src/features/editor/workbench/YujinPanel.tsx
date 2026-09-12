@@ -6,11 +6,21 @@ import { Input } from "../../../components/ui/input";
 import { Textarea } from "../../../components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../../components/ui/dialog";
 import { YujinStarters } from "../../yujin/YujinStarters";
-import type { RightDockCandidate, RightDockCompletionEntry, RightDockConversationScroll, RightDockEditingProposal, RightDockEditingProposalPreview, RightDockMemory, RightDockMessage, RightDockProposal, RightDockTransitionSuggestion, YujinRunState } from "./rightDockTypes";
+import { longWaitNotice, useWaitElapsedSeconds } from "../waitingNotice";
+import type { RightDockCandidate, RightDockCompletionEntry, RightDockConversationScroll, RightDockEditingProposal, RightDockEditingProposalPreview, RightDockMemory, RightDockMessage, RightDockProposal, RightDockTransitionSuggestion, YujinRunState, YujinThinking } from "./rightDockTypes";
 import { YujinMemoryPanel } from "./YujinMemoryPanel";
 import { sceneTransitionLabel } from "../inspector/sceneTransitions";
 
 const staleProposalMessage = "편집본이 바뀌어서 이 추천은 그대로 적용할 수 없어요.";
+
+const yujinThinkingMessages: Readonly<Record<YujinThinking["phase"], string>> = {
+  answering: "유진이 생각하고 있어요. 답이 오면 화면이 저절로 바뀌어요.",
+  judging: "방금 말한 대로 편집할 자리를 찾고 있어요. 다 되면 화면이 저절로 바뀌어요.",
+};
+
+/** 기다리는 동안 단추 글씨도 바뀐다. **회색으로 잠긴 단추는 표시가 아니다** --
+ *  완성본 만들기가 2026-09-11에 같은 이유로 `완성본 만드는 중`이 됐다. */
+const YUJIN_THINKING_BUTTON_TEXT = "유진이 생각하는 중";
 
 const SCRIPT_MINIMUM_CHARACTERS = 30;
 function looksLikeScript(draft: string): boolean {
@@ -115,6 +125,8 @@ export type YujinPanelProps = Readonly<{
   onConversationScrollChange?: (scroll: RightDockConversationScroll) => void;
   memory?: RightDockMemory;
   composerDisabled?: boolean;
+  /** 지금 유진이 기다리게 하고 있는 일. `null`이면 기다릴 것이 없다. */
+  thinking?: YujinThinking | null;
   onSendMessage?: (draft: string) => void | Promise<void>;
   qualityFollowUps?: readonly string[];
   onCreateEditingProposal?: () => void | Promise<void>;
@@ -156,6 +168,7 @@ export function YujinPanel({
   onConversationScrollChange,
   memory,
   composerDisabled = false,
+  thinking = null,
   onSendMessage,
   qualityFollowUps = [],
   onCreateEditingProposal,
@@ -220,7 +233,14 @@ export function YujinPanel({
     void onRefreshProposal();
   }, [onRefreshProposal, proposal?.currentRevision, proposalIsOutOfDate, state]);
 
-  // 위 두 효과(훅) 다음, 나머지 파생 상태보다 앞에 둔다 -- 클릭 한 번으로
+  // 기다린 시간을 세는 시계. **접혀 있어도 훅은 불러야 하므로** 아래 `!open`
+  // 이른 반환보다 앞에 둔다(Rules of Hooks). 기다릴 것이 없으면(`thinking`이
+  // `null`) 시계가 스스로 멈춘다 -- `waitingNotice.ts`의 시험이 시간을 한참
+  // 넘겨 보고 남은 타이머가 0인지 확인한다.
+  const thinkingElapsedSec = useWaitElapsedSeconds(thinking !== null);
+  const thinkingWaitNotice = thinking ? longWaitNotice(thinkingElapsedSec) : null;
+
+  // 위 세 효과(훅) 다음, 나머지 파생 상태보다 앞에 둔다 -- 클릭 한 번으로
   // 얻는 알약 버튼일 뿐인 접힌 모습에는 후보·검사 결과 파생값이 전혀
   // 안 쓰이는데, 이 확인을 훅들보다 먼저 두면 Rules of Hooks를 어긴다.
   // 훅 호출 없이 순수 계산만 건너뛰는 것이라 여기가 안전한 가장 이른 자리다.
@@ -313,7 +333,7 @@ export function YujinPanel({
       ref={historyRef}
       role="log"
       aria-label="유진 대화"
-      aria-busy={runState.kind === "streaming"}
+      aria-busy={runState.kind === "streaming" || thinking !== null}
       className="vb-editor-right-dock__history"
       tabIndex={0}
       onScroll={(event) => {
@@ -339,7 +359,7 @@ export function YujinPanel({
           것은 권하지 않고, 누르면 실제로 되는 것만 있다(`qualityFollowUps.ts`).
           누르면 입력칸에 채워진다 -- 대화 스타터·편집안 꼬리질문과 같은 방식이라
           "누르면 바로 실행되나?"를 새로 배울 필요가 없다. */}
-      {qualityFollowUps.length > 0 && runState.kind !== "streaming"
+      {qualityFollowUps.length > 0 && runState.kind !== "streaming" && thinking === null
         ? <div className="vb-yujin-panel__follow-ups" role="group" aria-label="이어서 해볼 것">
           <p>이어서 해볼 것</p>
           {qualityFollowUps.map((question) => (
@@ -447,11 +467,19 @@ export function YujinPanel({
         </>
         : null}
     </div>
+    {/* **기다리는 동안 화면이 계속 말한다**(대표님 상시 지시 2026-09-12).
+        입력칸 바로 위에 둔다 -- 방금 누른 자리에서 눈이 떠나지 않는다.
+        기다린 시간은 따로 한 줄인데 `role="status"`를 주지 않는다: 5초마다
+        바뀌는 값을 읽어 주면 화면 읽기 프로그램이 계속 떠든다. */}
+    {thinking ? <>
+      <p role="status" aria-live="polite" aria-atomic="true" aria-label="유진 진행 상태">{yujinThinkingMessages[thinking.phase]}</p>
+      {thinkingWaitNotice ? <p aria-label="유진 기다린 시간">{thinkingWaitNotice}</p> : null}
+    </> : null}
     <label htmlFor="vb-eugene-request">유진에게 요청하기</label>
     <div ref={composerContainerRef}>
       <Textarea id="vb-eugene-request" disabled={composerDisabled} value={draft} onChange={(event) => onDraftChange(event.target.value)} placeholder="예: 이 구간에 어울리는 영상을 추천해 줘" />
     </div>
-    <Button type="button" disabled={!canSend} onClick={submit}>요청 보내기</Button>
+    <Button type="button" disabled={!canSend} onClick={submit}>{thinking ? YUJIN_THINKING_BUTTON_TEXT : "요청 보내기"}</Button>
     {onCreateEditingProposal && messages.some((message) => message.role === "assistant")
       ? <Button type="button" disabled={editingProposalCreating || Boolean(editingProposal)} onClick={() => void onCreateEditingProposal()}>
         {editingProposalCreating ? "편집안 만드는 중" : "이 대화로 편집안 만들기"}

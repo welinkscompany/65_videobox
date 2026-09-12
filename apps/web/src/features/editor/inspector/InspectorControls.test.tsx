@@ -118,6 +118,43 @@ describe("InspectorControls", () => {
     });
   });
 
+  // 문구는 이미 만들어져 있었는데(`EditorWorkbenchRoute.tsx`가 채운다) **읽는
+  // 자리가 없었다.** 창작자는 일반 안내인 "변경 내용을 저장하고 있어요."만 봤다.
+  // 접힌 `부분 재생성` 안에 넣으면 또 안 보이므로 접힘 **밖**에 세운다.
+  it("무엇을 다시 만드는 중인지 접힘 밖에 그대로 보여 준다", () => {
+    render(
+      <InspectorControls
+        onAction={vi.fn()}
+        partialRegeneration={{
+          canResume: false,
+          canRun: true,
+          fields: ["caption", "music"],
+          message: "선택한 범위를 다시 만들고 있어요.",
+        }}
+        selectedSegment={{ cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-internal-current", startSec: 1 }}
+        target={null}
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "부분 재생성 상태" });
+    expect(status).toHaveTextContent("선택한 범위를 다시 만들고 있어요.");
+    // 접혀 있어도 보여야 한다 -- `details` 안에 있으면 닫힌 채로는 안 읽힌다.
+    expect(status.closest("details")).toBeNull();
+  });
+
+  it("할 말이 없으면 빈 줄을 만들지 않는다", () => {
+    render(
+      <InspectorControls
+        onAction={vi.fn()}
+        partialRegeneration={{ canResume: false, canRun: false, fields: ["caption"] }}
+        selectedSegment={{ cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-internal-current", startSec: 1 }}
+        target={null}
+      />,
+    );
+
+    expect(screen.queryByRole("status", { name: "부분 재생성 상태" })).toBeNull();
+  });
+
   it("lets the creator include B-roll, music, SFX, overlays, cut, and voice fields without auto-running", () => {
     const onAction = vi.fn();
     render(

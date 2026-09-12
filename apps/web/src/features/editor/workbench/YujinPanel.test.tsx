@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { YujinPanel } from "./YujinPanel";
 import type { RightDockEditingProposal, RightDockProposal } from "./rightDockTypes";
@@ -208,6 +208,77 @@ describe("YujinPanel", () => {
     rendered.rerender(<YujinPanel open onOpenChange={vi.fn()} draft="다른 초안" onDraftChange={vi.fn()} proposal={proposal} onRefreshProposal={onRefreshProposal} />);
 
     expect(onRefreshProposal).toHaveBeenCalledTimes(1);
+  });
+
+  // 대표님 상시 지시 2026-09-12: "만드는중에 화면에 아무것도 안나오면 안되니까.
+  // '제작중' 같은 뭔가 표시가 있어야 되잖아." 회색으로 잠긴 단추는 그 표시가
+  // 아니다 -- 완성본 만들기가 2026-09-11에 같은 이유로 고쳐졌다.
+  it("유진이 생각하는 동안 무엇을 하고 있는지 말하고 단추 글씨도 바뀐다", () => {
+    renderOpen({
+      draft: "숏폼으로 잘라줘",
+      onSendMessage: vi.fn(),
+      thinking: { phase: "answering" },
+    });
+
+    expect(screen.getByRole("status", { name: "유진 진행 상태" }))
+      .toHaveTextContent("유진이 생각하고 있어요. 답이 오면 화면이 저절로 바뀌어요.");
+    // 회색 단추만으로는 "멈췄다"로 읽힌다. 글씨가 바뀌어야 표시다.
+    expect(screen.getByRole("button", { name: "유진이 생각하는 중" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "요청 보내기" })).toBeNull();
+    expect(screen.getByRole("log", { name: "유진 대화" })).toHaveAttribute("aria-busy", "true");
+  });
+
+  // 답장이 온 뒤에도 침묵하는 두 번째 구간이 있었다 -- 말한 대로 편집할 자리를
+  // 찾는 일(실측 437초·605초)이 그때 돈다.
+  it("답장 뒤 편집할 자리를 찾는 동안에도 계속 말한다", () => {
+    renderOpen({
+      messages: [
+        { id: "u-1", role: "user", text: "숏폼으로 잘라줘" },
+        { id: "a-1", role: "assistant", text: "잘라 볼게요." },
+      ],
+      qualityFollowUps: ["1번 장면에 어울리는 배경 음악을 넣어 줘"],
+      thinking: { phase: "judging" },
+    });
+
+    expect(screen.getByRole("status", { name: "유진 진행 상태" }))
+      .toHaveTextContent("방금 말한 대로 편집할 자리를 찾고 있어요. 다 되면 화면이 저절로 바뀌어요.");
+    // 아직 무슨 일이 될지 모르는 채로 다음 할 일을 들이밀지 않는다.
+    expect(screen.queryByRole("group", { name: "이어서 해볼 것" })).toBeNull();
+  });
+
+  it("기다림이 길어지면 시간이 흐르는 것을 보여 주고, 끝나면 시계를 거둔다", () => {
+    vi.useFakeTimers();
+    try {
+      const rendered = render(<YujinPanel
+        open
+        onOpenChange={vi.fn()}
+        draft="숏폼으로 잘라줘"
+        onDraftChange={vi.fn()}
+        onSendMessage={vi.fn()}
+        thinking={{ phase: "answering" }}
+      />);
+
+      expect(screen.queryByLabelText("유진 기다린 시간")).toBeNull();
+      act(() => { vi.advanceTimersByTime(65_000); });
+      expect(screen.getByLabelText("유진 기다린 시간")).toHaveTextContent("1분 5초 지났어요.");
+      // 가짜 진행바는 만들지 않는다 -- 근거가 되는 데이터가 없다.
+      expect(screen.getByLabelText("유진 기다린 시간").textContent).not.toMatch(/%/);
+
+      rendered.rerender(<YujinPanel
+        open
+        onOpenChange={vi.fn()}
+        draft=""
+        onDraftChange={vi.fn()}
+        onSendMessage={vi.fn()}
+        thinking={null}
+      />);
+      act(() => { vi.advanceTimersByTime(600_000); });
+
+      expect(screen.queryByLabelText("유진 기다린 시간")).toBeNull();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("preserves the composer and conversation scroll while closing and reopening", () => {

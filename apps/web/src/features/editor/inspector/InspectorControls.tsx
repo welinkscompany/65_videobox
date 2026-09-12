@@ -110,6 +110,12 @@ export type PartialRegenerationControls = Readonly<{
   preparedSegmentId?: string;
   canRun: boolean;
   canResume: boolean;
+  /** 지금 무엇을 하고 있는지(`선택한 범위를 다시 만들고 있어요.` 등).
+   *
+   *  **이 문구는 만들어져 있었는데 누른 자리 근처에서 읽는 곳이 없었다.** 편집기
+   *  맨 위에 붙은 줄 하나뿐이어서, 세부 정보 창에서 단추를 누른 창작자는 일반
+   *  안내인 `변경 내용을 저장하고 있어요.`만 봤다(2026-09-12). */
+  message?: string | null;
 }>;
 
 type Props = Readonly<{
@@ -1366,6 +1372,13 @@ export function InspectorControls({
           4.25배(1840px)가 된 데 이 묶음이 가장 컸다 -- owner가 "스크롤 밑으로
           때려박아 놨다"고 한 자리다. 캡컷 속성 패널은 고른 갈래 하나만 보여 준다.
           지우지 않고 기본만 접는다. */}
+      {/* **접힘 밖에 세운다.** 진행 문구를 `details` 안에 넣으면 닫힌 채로는
+          아무것도 안 보이고, 기다림 표시가 없다는 문제가 그대로 남는다.
+          기다리는 동안 화면이 계속 말해야 한다(대표님 상시 지시 2026-09-12). */}
+      {partialRegeneration?.message && selectedSegment ? (
+        <p role="status" aria-live="polite" aria-atomic="true" aria-label="부분 재생성 상태">{partialRegeneration.message}</p>
+      ) : null}
+
       {partialRegeneration && selectedSegment ? (
         <details className="vb-inspector-fold"><summary>부분 재생성</summary>
         <fieldset>

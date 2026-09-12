@@ -69,6 +69,11 @@ export type RightDockCompletionEntry = Readonly<{
   items: readonly Readonly<{ label: string; sceneLabel?: string }>[];
 }>;
 
+/** 유진이 기다리게 하고 있는 두 구간. 하나만 덮으면 나머지 하나에서 다시
+ *  침묵한다 -- 보낸 말은 **답장**과 **말한 대로 편집할 자리 찾기**를 차례로
+ *  지나고, 실제로 몇 분이 걸리는 쪽은 두 번째다(실측 437초·605초, 2026-09-12). */
+export type YujinThinking = Readonly<{ phase: "answering" | "judging" }>;
+
 export type YujinRunState =
   | { kind: "idle" }
   | {
@@ -154,6 +159,9 @@ export type RightDockDirector = Readonly<{
   conversationScroll: RightDockConversationScroll;
   memory?: RightDockMemory;
   composerDisabled?: boolean;
+  /** 지금 유진이 기다리게 하고 있는 일. **잠긴 단추는 표시가 아니다** --
+   *  기다리는 동안 화면이 계속 말해야 한다(대표님 상시 지시 2026-09-12). */
+  thinking?: YujinThinking | null;
   onDraftChange: (draft: string) => void;
   onSelectedCandidateIdsChange: (candidateIds: readonly string[]) => void;
   onConversationScrollChange: (scroll: RightDockConversationScroll) => void;
