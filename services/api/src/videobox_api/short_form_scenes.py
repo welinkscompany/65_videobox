@@ -37,6 +37,7 @@ from typing import Any
 from videobox_core_engine.editing_session import (
     plan_board_splits,
     split_segments_at,
+    undo,
 )
 from videobox_core_engine.output_variants import (
     VariantInvariantError,
@@ -79,6 +80,33 @@ def _board_source_asset_ids(segments: list[dict]) -> list[str]:
     return [asset_id for asset_id in dict.fromkeys(asset_ids) if asset_id]
 
 
+def board_before_the_last_short_form_cut(
+    session: Mapping[str, object],
+) -> dict[str, Any] | None:
+    """직전 변환이 낸 자리를 되돌린 판. 되돌릴 자리가 없으면 `None`.
+
+    **세션에 새 칸을 더하지 않는다.** 나누기가 이미 되돌리기 항목에 `_CUT_LABEL`을
+    남긴다(`split_segments_at(..., label=_CUT_LABEL)` -> `apply_user_transaction`이
+    그 말을 `event["label"]`에 적는다). 그 표식만 읽으면 "이 단추가 만든 자리"를
+    알 수 있으므로 `editing_session.py`의 저장 화이트리스트를 건드릴 일이 없다.
+
+    **맨 위 한 칸만 본다.** 변환한 뒤 대표님이 손으로 무엇이든 고쳤으면 맨 위는 그
+    편집이고, 그때 되돌리면 대표님 작업을 지운다. 되돌리기는 `undo`를 그대로 쓴다 --
+    같은 복원 계산을 두 자리에 두지 않는다.
+    """
+    undo_stack = session.get("undo_stack")
+    if not isinstance(undo_stack, list) or not undo_stack:
+        return None
+    latest = undo_stack[-1]
+    if not isinstance(latest, Mapping) or str(latest.get("label") or "") != _CUT_LABEL:
+        return None
+    restored = undo(session=dict(session))
+    # 되돌린 자리를 `다시 하기`로 되살릴 수 있게 두면, 방금 우리가 거둔 조각이
+    # 되돌리기 목록에 유령으로 남는다. 이번 나누기가 그 자리를 대신한다.
+    restored["redo_stack"] = []
+    return restored
+
+
 def short_form_scene_pick(
     *,
     store: Any,
@@ -97,9 +125,22 @@ def short_form_scene_pick(
     **2026-09-12부터 판단 재료는 전사의 발화다.** 장면 요약보다 원본에 가깝고,
     시각이 붙어 있어 문장 끝에서 묶을 수 있다. 전사가 없거나 판에 깔린 소재의
     것이 아니면 장면 자막으로 내려가되 **판단 흐름은 하나**다.
+
+    **판단하기 전에 직전 변환이 낸 자리를 되돌린다**(2026-09-12 실물). 안 되돌리면
+    두 번째 누름이 원본이 아니라 **첫 번째가 이미 자른 판**을 보고 판단한다 --
+    실물에서 유진이 읽은 장면 수가 1 -> 13으로 늘고 조각이 1 -> 19까지 쌓였다.
+    되돌린 뒤 새로 나누므로, 몇 번을 눌러도 출발점이 같은 판이다.
     """
-    session = store.get_editing_session(project_id=project_id, session_id=session_id)
+    stored = store.get_editing_session(project_id=project_id, session_id=session_id)
+    restored = board_before_the_last_short_form_cut(stored)
+    session = restored if restored is not None else stored
     segments = [segment for segment in session.get("segments", []) if isinstance(segment, dict)]
+    cuts_undone = (
+        0
+        if restored is None
+        else len([item for item in stored.get("segments", []) if isinstance(item, dict)])
+        - len(segments)
+    )
     utterances: list[dict] = []
     try:
         utterances = store.latest_transcript_segments(
@@ -117,7 +158,12 @@ def short_form_scene_pick(
         budget_seconds=budget_seconds,
     )
     return cut_only_what_the_short_uses(
-        store=store, project_id=project_id, session_id=session_id, session=session, pick=pick
+        store=store,
+        project_id=project_id,
+        session_id=session_id,
+        session=session,
+        pick=pick,
+        cuts_undone=cuts_undone,
     )
 
 
@@ -128,10 +174,16 @@ def cut_only_what_the_short_uses(
     session_id: str,
     session: Mapping[str, object],
     pick: ShortFormScenePick,
+    cuts_undone: int = 0,
 ) -> ShortFormScenePick:
     """고른 대목의 **양 끝에서만** 판을 나누고, 새 장면 목록으로 고른다.
 
     대표님 지시(2026-09-12): *"굳이 안쓰는걸 다 쪼갤필요는 없잖아."*
+
+    `session`은 **직전 변환이 낸 자리를 되돌린 판**이다(부르는 쪽인
+    `short_form_scene_pick`이 되돌린다). `cuts_undone`은 그때 거둔 조각 수이고,
+    0이면 되돌릴 것이 없던 첫 변환이다. 되돌리기와 새 나누기를 **한 덩이로**
+    저장하므로 되돌리기 스택은 몇 번을 눌러도 한 칸만 먹는다.
 
     ## 왜 이 순서인가
 
@@ -147,37 +199,57 @@ def cut_only_what_the_short_uses(
     ## 안 나누는 경우
 
     - 자막 밀도로 내려간 결과(대목이 없다). 나눌 자리를 모르므로 있는 장면에서 고른다.
-    - 대목의 양 끝이 **이미 경계**인 경우(대표님 현재 판이 그렇다 -- 장면이 발화
-      끝점에서 이미 나뉘어 있다). `plan_board_splits`가 걸러 내므로 판 버전이
-      움직이지 않는다. `다시 만들기`를 두 번 눌러도 조각이 안 생기는 근거다.
+    - 대목의 양 끝이 **이미 경계**인 경우. `plan_board_splits`가 걸러 낸다.
+
+    되돌릴 자리가 없고(`cuts_undone == 0`) 나눌 자리도 없으면 판을 안 건드린다.
+    되돌리기만 하고 나눌 자리가 없을 때는 **되돌린 판을 저장한다** -- 판단은 이미
+    되돌린 판에서 했으므로, 저장을 건너뛰면 고른 장면 id가 실제 판과 어긋난다.
+
+    ## 왜 검토 승인을 풀지 않는가
+
+    장면 경계를 나누는 것은 완성본을 **한 바이트도** 바꾸지 않는다(이 저장소가
+    2026-09-12에 md5로 증명했다). 그래서 `invalidate_output_freshness=False`로
+    저장하고, 이미 있는 승인이 가리키는 판 버전만 옮긴다. 안 그러면 승인이 풀려
+    `숏폼으로 변환`이 비활성이 되고, 두 번째 누름 전에 대표님이
+    `검토본 다시 만들기` -> `검토 승인`을 다시 밟아야 한다.
+    **승인을 대신 눌러 주지는 않는다** -- 없던 승인은 여전히 없다
+    (`bind_timeline_to_editing_session_revision`의 `keep_existing_review_approval`).
     """
-    if not pick.chosen_source_ranges:
-        return pick
     segments = [segment for segment in session.get("segments", []) if isinstance(segment, dict)]
-    # 대목의 **시작과 끝** 둘만 나눈다. 구간당 둘이라 여섯 대목이면 최대 열둘이다.
-    source_secs = [value for start, end in pick.chosen_source_ranges for value in (start, end)]
-    planned = plan_board_splits(
-        segments=segments,
-        board_secs=list(board_times_for_source_times(segments, source_secs)),
-    )
-    if not planned:
+    planned: tuple[tuple[str, float], ...] = ()
+    if pick.chosen_source_ranges:
+        # 대목의 **시작과 끝** 둘만 나눈다. 구간당 둘이라 여섯 대목이면 최대 열둘이다.
+        source_secs = [value for start, end in pick.chosen_source_ranges for value in (start, end)]
+        planned = plan_board_splits(
+            segments=segments,
+            board_secs=list(board_times_for_source_times(segments, source_secs)),
+        )
+    if not planned and not cuts_undone:
         _LOGGER.info(
             "숏폼 자리 나누기: 나눌 자리가 없어요(이미 경계). 장면 %d개 그대로 씁니다.",
             len(segments),
         )
         return pick
+    payload = (
+        split_segments_at(session=dict(session), splits=planned, label=_CUT_LABEL)
+        if planned
+        # 되돌리기만 저장한다. 판 버전은 저장소가 한 칸 올린다(`update_editing_session`).
+        else dict(session)
+    )
     saved = store.update_editing_session(
         project_id=project_id,
         session_id=session_id,
-        session_payload=split_segments_at(
-            session=dict(session), splits=planned, label=_CUT_LABEL
-        ),
+        session_payload=payload,
         expected_revision=int(session.get("session_revision") or 1),
+        invalidate_output_freshness=False,
     )
     new_segments = [segment for segment in saved.get("segments", []) if isinstance(segment, dict)]
+    _carry_the_owners_approval_to_the_new_board(
+        store=store, project_id=project_id, session_id=session_id, saved=saved
+    )
     _LOGGER.info(
-        "숏폼 자리 나누기: 대목 %d개를 위해 %d자리를 나눴어요. 장면 %d개 -> %d개.",
-        len(pick.chosen_source_ranges), len(planned), len(segments), len(new_segments),
+        "숏폼 자리 나누기: 대목 %d개를 위해 %d자리를 나눴어요(직전 %d자리는 되돌림). 장면 %d개 -> %d개.",
+        len(pick.chosen_source_ranges), len(planned), cuts_undone, len(segments), len(new_segments),
     )
     # **`scenes_total`·`scenes_read_by_yujin`은 안 건드린다.** 그 둘은 유진이
     # **무엇을 읽었는지**를 말하고 문구가 그 숫자를 그대로 인용한다. 나눈 뒤의
@@ -185,15 +257,50 @@ def cut_only_what_the_short_uses(
     # 다시 생긴다 -- 2026-09-12에 실물에서 고친 바로 그 결함이다.
     return replace(
         pick,
-        segment_ids=segment_ids_for_source_ranges(new_segments, pick.chosen_source_ranges),
-        board_scenes_cut=len(planned),
+        segment_ids=(
+            segment_ids_for_source_ranges(new_segments, pick.chosen_source_ranges)
+            if planned
+            # 되돌리기만 한 경우 고른 장면은 이미 되돌린 판의 것이고 그 판이 저장됐다.
+            else pick.segment_ids
+        ),
+        # **판을 몇 군데 바꿨는지.** 0보다 크면 화면이 판을 다시 읽는다. 되돌리기만
+        # 한 경우에도 판이 바뀌었으므로 그 수를 싣는다 -- 안 실으면 화면이 낡은 판
+        # 버전을 들고 있다가 다음 편집에서 조용히 충돌한다.
+        board_scenes_cut=len(planned) or cuts_undone,
         # 판이 바뀌었으면 **대표님께 말한다.** 안 말하면 화면의 장면 수가 갑자기
         # 달라진 이유를 알 수 없다. 되돌리기 한 번으로 원래대로 돌아간다.
         notice=(
             f"{pick.notice} 숏폼에 쓸 자리에 맞춰 장면을 {len(planned)}군데 나눴어요. "
             "되돌리기 한 번으로 원래대로 돌아가요."
+            if planned
+            else f"{pick.notice} 지난번에 나눴던 자리는 원래 장면으로 되돌렸어요."
         ).strip(),
     )
+
+
+def _carry_the_owners_approval_to_the_new_board(
+    *, store: Any, project_id: str, session_id: str, saved: Mapping[str, object]
+) -> None:
+    """이미 있는 검토 승인을 나눈 뒤의 판 버전으로 옮긴다. 승인을 만들지는 않는다.
+
+    화면 단추(`OutputsPage.canRenderSubtitle`)는 타임라인과 승인 **둘 다** 지금 판
+    버전을 가리킬 것을 요구한다. 한쪽만 옮기면 단추는 여전히 잠긴다.
+    """
+    timeline_id = str(saved.get("timeline_id") or "")
+    if not timeline_id:
+        return
+    try:
+        store.bind_timeline_to_editing_session_revision(
+            project_id=project_id,
+            timeline_id=timeline_id,
+            session_id=session_id,
+            session_revision=int(saved.get("session_revision") or 1),
+            keep_existing_review_approval=True,
+        )
+    except KeyError:
+        # 타임라인 행이 아직 없는 초안 판이다. 그때는 어떤 출력도 승인 못 받은
+        # 상태이므로 옮길 것이 없다(`save_editing_session`도 같은 이유로 지나간다).
+        return
 
 
 def remade_short_form_variant(

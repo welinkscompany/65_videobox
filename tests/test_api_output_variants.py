@@ -1186,7 +1186,7 @@ def _owner_sized_transcript() -> list[dict[str, object]]:
     ]
 
 
-def _owner_sized_board(app, project_id: str) -> dict:
+def _owner_sized_board(app, project_id: str, *, timeline_id: str = "timeline-source") -> dict:
     """제품의 실제 문이 만드는 모양 -- **장면 하나**가 영상 전체다.
 
     `+ 새로 만들기`(장면 1개) -> 자료실 영상 깔기 -> 장면 길이를 영상 길이로.
@@ -1201,7 +1201,7 @@ def _owner_sized_board(app, project_id: str) -> dict:
     )
     return store.save_editing_session(
         project_id=project_id,
-        timeline_id="timeline-source",
+        timeline_id=timeline_id,
         session_payload={
             "segments": [
                 {
@@ -1279,7 +1279,14 @@ def test_a_short_cuts_only_the_places_it_uses_not_the_whole_video(tmp_path: Path
 
 
 def test_remaking_a_short_twice_does_not_cut_the_same_place_again(tmp_path: Path) -> None:
-    """`다시 만들기`를 두 번 눌러도 같은 자리를 두 번 나누지 않는다."""
+    """`다시 만들기`를 두 번 눌러도 같은 자리를 두 번 나누지 않는다.
+
+    **왜 판 버전이 그래도 한 칸 오르는가**(2026-09-12 정정): 두 번째 누름은 직전
+    변환이 낸 자리를 **되돌린 뒤 새로 나눈다**. 판단이 같은 대목을 골라 결과 장면이
+    같아도, 되돌리고 다시 나누는 일은 한 덩이 편집이라 판 버전이 한 칸 오른다.
+    전에는 "나눌 자리가 없다"며 아무것도 안 해서 버전이 그대로였는데, 그 길은 두 번째
+    판단이 **이미 잘린 판**을 보게 만드는 원인이었다.
+    """
     provider = _OwnerSizedSpreadProvider()
     app = create_app(
         projects_root=tmp_path / "projects",
@@ -1305,8 +1312,14 @@ def test_remaking_a_short_twice_does_not_cut_the_same_place_again(tmp_path: Path
         project_id=project_id, session_id=session["session_id"]
     )
     assert len(after_second["segments"]) == len(after_first["segments"]), "조각이 늘면 안 된다"
-    assert int(after_second["session_revision"]) == int(after_first["session_revision"])
+    # 같은 판단이면 **같은 자리**가 나와야 한다 -- 되돌리고 새로 나눠도 결과는 같다.
+    assert _picked_bounds(after_second, again["variant"]) == _picked_bounds(
+        after_first, created.json()["variant"]
+    )
     assert again["variant"]["selected_segment_ids"] == created.json()["variant"]["selected_segment_ids"]
+    # 되돌리기·다시 나누기가 **한 덩이**다. 판 버전은 누름마다 정확히 한 칸만 오른다.
+    assert int(after_second["session_revision"]) == int(after_first["session_revision"]) + 1
+    assert len(after_second["undo_stack"]) == 1, "되돌리기 한 번으로 원래대로 돌아가야 한다"
 
 
 @dataclass
@@ -1398,8 +1411,11 @@ def test_yujin_telling_us_to_remake_also_cuts_only_what_it_uses(tmp_path: Path) 
     after = app.state.store.get_editing_session(
         project_id=project_id, session_id=session["session_id"]
     )
-    # 새 자리를 나눴다 -- 두 번째 판단이 다른 대목을 골랐으니까.
-    assert len(after["segments"]) > len(board["segments"])
+    # 새 자리를 나눴다 -- 두 번째 판단이 다른 대목을 골랐으니까. **장면 수로는 잴 수
+    # 없다**(2026-09-12 정정): 직전 자리를 되돌린 뒤 새로 나누므로 조각이 쌓이지 않고,
+    # 대목 수가 같으면 장면 수도 같다. 그래서 고른 **자리**가 옮겨졌는지를 잰다.
+    assert _picked_bounds(after, body["variant"]) != _picked_bounds(board, variant)
+    assert len(after["segments"]) == len(board["segments"]), "조각이 쌓이면 안 된다"
     # 모양이 **지금** 판 버전을 가리켜야 출력이 `stale_master_revision`으로 안 막힌다.
     assert int(body["variant"]["source_session_revision"]) == int(after["session_revision"])
     materialized = client.post(
@@ -1407,3 +1423,193 @@ def test_yujin_telling_us_to_remake_also_cuts_only_what_it_uses(tmp_path: Path) 
         json={"expected_master_session_revision": int(after["session_revision"])},
     )
     assert materialized.status_code == 201, materialized.text
+
+
+def _picked_bounds(board: dict, variant: dict) -> list[tuple[float, float]]:
+    """숏폼이 실제로 쓰는 **판 위 시각**. 장면 이름이 아니라 자리를 잰다."""
+    picked = set(variant["selected_segment_ids"])
+    return [
+        (round(float(segment["start_sec"]), 3), round(float(segment["end_sec"]), 3))
+        for segment in board["segments"]
+        if str(segment["segment_id"]) in picked
+    ]
+
+
+def test_pressing_convert_again_judges_the_original_board_and_never_stacks_cuts(
+    tmp_path: Path,
+) -> None:
+    """두 번째 누름은 **첫 번째가 자른 판**이 아니라 원래 판을 보고 판단한다.
+
+    2026-09-12 실물: 장면 하나짜리 판에서 `숏폼으로 변환`을 세 번 누르니
+    **1 -> 19 장면**이 되고 이름이 `...__split_6__split_5`처럼 겹쳐 붙었다. 유진이
+    읽은 장면 수도 1 -> 13으로 늘어, 두 번째 판단이 원본이 아니라 이미 잘린 판을
+    본다는 증거가 됐다.
+    """
+    provider = _ShiftingSpreadProvider()
+    app = create_app(
+        projects_root=tmp_path / "projects",
+        local_only_runtime_service_factory=_runtime_factory(provider),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "두 번 눌러도 같은 출발점"}).json()["project_id"]
+    session = _owner_sized_board(app, project_id)
+    assert len(session["segments"]) == 1
+
+    created = client.post(
+        f"/api/projects/{project_id}/output-variants",
+        json={"source_session_id": session["session_id"], "kind": "vertical_highlight"},
+    )
+    assert created.status_code == 201, created.text
+    first = created.json()
+    assert first["scene_pick"]["scenes_total"] == 1
+    after_first = app.state.store.get_editing_session(
+        project_id=project_id, session_id=session["session_id"]
+    )
+    assert len(after_first["segments"]) > 1, "첫 번째에 자리를 냈어야 두 번째를 잴 수 있다"
+
+    again = _repick(client, project_id, first["variant"])
+
+    # **유진이 본 판이 첫 번째와 같아야 한다.** 지금은 첫 번째가 자른 장면 수가
+    # 그대로 넘어가 판단 재료가 달라진다.
+    assert again["scene_pick"]["scenes_total"] == first["scene_pick"]["scenes_total"]
+    after_second = app.state.store.get_editing_session(
+        project_id=project_id, session_id=session["session_id"]
+    )
+    # 두 번째 판단은 **다른 대목**을 골랐다(`_ShiftingSpreadProvider`). 그래도 조각이
+    # 쌓이지 않는다 -- 직전 변환이 낸 자리를 먼저 되돌리고 새로 나누니까.
+    #
+    # 장면 **id**로는 잴 수 없다. 되돌린 뒤 같은 원본 장면을 다시 나누면 이름 번호가
+    # 처음부터 다시 붙어 다른 자리에도 같은 id가 나온다 -- 그래서 **시각**을 잰다.
+    assert _picked_bounds(after_second, again["variant"]) != _picked_bounds(
+        after_first, first["variant"]
+    ), "두 번째가 다른 대목을 골라야 '되돌리고 새로 나눴다'를 잴 수 있다"
+    assert len(after_second["segments"]) == len(after_first["segments"])
+    stacked = [
+        str(segment["segment_id"])
+        for segment in after_second["segments"]
+        if str(segment["segment_id"]).count("__split_") > 1
+    ]
+    assert not stacked, f"이름이 겹쳐 붙었다: {stacked}"
+    # 안내문 `되돌리기 한 번으로 원래대로 돌아가요`가 참이어야 한다.
+    assert len(after_second["undo_stack"]) == 1
+    undone = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/undo",
+        json={"expected_revision": int(after_second["session_revision"])},
+    )
+    assert undone.status_code == 200, undone.text
+    restored = app.state.store.get_editing_session(
+        project_id=project_id, session_id=session["session_id"]
+    )
+    assert len(restored["segments"]) == 1, "한 번 눌러 원래 판으로 돌아와야 한다"
+
+
+def _owner_sized_board_with_approved_review(app, project_id: str) -> tuple[dict, dict]:
+    """검토 승인까지 마친 판. `숏폼으로 변환` 단추가 켜지는 조건 그대로다.
+
+    화면 단추는 `canRenderSubtitle`(`OutputsPage.tsx`)로 잠기는데, 그 조건이
+    타임라인과 승인 둘 다 **지금 판 버전**을 가리킬 것을 요구한다. 그래서 시험도
+    타임라인 행을 실제로 만들고 승인을 그 판 버전에 묶는다.
+    """
+    store = app.state.store
+    timeline = store.save_timeline_run(
+        project_id=project_id,
+        output_mode="review",
+        source_session_id="pending-session",
+        source_session_revision=1,
+        timeline_payload={"segments": [{"segment_id": "seg_001", "text": ""}], "tracks": []},
+    )
+    session = _owner_sized_board(app, project_id, timeline_id=timeline["timeline_id"])
+    store.save_review_state(
+        project_id=project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+        source_session_id=session["session_id"],
+        source_session_revision=int(session["session_revision"]),
+    )
+    return session, timeline
+
+
+def test_cutting_only_scene_boundaries_does_not_unlock_the_owners_approval(
+    tmp_path: Path,
+) -> None:
+    """장면 경계를 나누는 것은 완성본을 **한 바이트도** 바꾸지 않으므로 승인을 풀지 않는다.
+
+    2026-09-12 실물: 변환이 판을 바꾸니 승인이 풀려 `숏폼으로 변환`이 비활성이 됐고,
+    두 번째로 누르려면 대표님이 `검토본 다시 만들기` -> `검토 승인`을 다시 밟아야
+    했다. "한 번 누르면 되는 단추"가 두 번째부터 세 번 누르는 단추가 된 것이다.
+
+    **승인을 대신 눌러 주는 것이 아니다** -- 이미 있는 승인의 상태와 승인 시각을
+    그대로 두고, 가리키는 판 버전만 옮긴다. 승인이 없었으면 여전히 없다.
+    """
+    provider = _OwnerSizedSpreadProvider()
+    app = create_app(
+        projects_root=tmp_path / "projects",
+        local_only_runtime_service_factory=_runtime_factory(provider),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "승인이 풀리지 않는다"}).json()["project_id"]
+    session, timeline = _owner_sized_board_with_approved_review(app, project_id)
+    store = app.state.store
+    approved_at = store.get_review_state(
+        project_id=project_id, timeline_id=timeline["timeline_id"]
+    )["approved_at"]
+
+    created = client.post(
+        f"/api/projects/{project_id}/output-variants",
+        json={"source_session_id": session["session_id"], "kind": "vertical_highlight"},
+    )
+
+    assert created.status_code == 201, created.text
+    assert created.json()["scene_pick"]["board_scenes_cut"] > 0, "나눠야 잴 수 있는 시험이다"
+    board = store.get_editing_session(project_id=project_id, session_id=session["session_id"])
+    review = store.get_review_state(project_id=project_id, timeline_id=timeline["timeline_id"])
+    assert review["status"] == "approved"
+    assert bool(review["is_current"]) is True, "경계 나누기는 승인을 풀지 않는다"
+    assert int(review["source_session_revision"]) == int(board["session_revision"])
+    assert review["source_session_id"] == session["session_id"]
+    # 승인 시각은 **대표님이 실제로 누른 때**로 남는다. 다시 찍으면 없던 승인을
+    # 방금 받은 것처럼 보인다.
+    assert review["approved_at"] == approved_at
+    # 화면 단추는 타임라인 쪽 판 버전도 본다. 한쪽만 옮기면 단추는 여전히 잠긴다.
+    assert int(
+        store.get_timeline_run(project_id=project_id, timeline_id=timeline["timeline_id"])[
+            "source_session_revision"
+        ]
+    ) == int(board["session_revision"])
+
+
+def test_a_board_with_no_approval_does_not_gain_one_from_the_short_form_cut(
+    tmp_path: Path,
+) -> None:
+    """승인이 없던 판은 나누기를 지나도 승인이 **생기지 않는다.**
+
+    사람 게이트를 없애지 않는다는 경계다(`CLAUDE.md` §2.1). 승인을 옮기는 코드가
+    `save_review_state`를 쓰면 `is_current`를 1로 되살리고 `approved_at`을 다시
+    찍어 없던 승인이 생긴 것처럼 보인다 -- 그 길을 안 쓴다는 것을 여기서 지킨다.
+    """
+    provider = _OwnerSizedSpreadProvider()
+    app = create_app(
+        projects_root=tmp_path / "projects",
+        local_only_runtime_service_factory=_runtime_factory(provider),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "승인 없는 판"}).json()["project_id"]
+    store = app.state.store
+    timeline = store.save_timeline_run(
+        project_id=project_id,
+        output_mode="review",
+        source_session_id="pending-session",
+        source_session_revision=1,
+        timeline_payload={"segments": [{"segment_id": "seg_001", "text": ""}], "tracks": []},
+    )
+    session = _owner_sized_board(app, project_id, timeline_id=timeline["timeline_id"])
+
+    created = client.post(
+        f"/api/projects/{project_id}/output-variants",
+        json={"source_session_id": session["session_id"], "kind": "vertical_highlight"},
+    )
+
+    assert created.status_code == 201, created.text
+    review = store.get_review_state(project_id=project_id, timeline_id=timeline["timeline_id"])
+    assert review["status"] != "approved"
+    assert review["approved_at"] is None

@@ -2843,8 +2843,20 @@ class LocalProjectStore(OutputVariantMixin, PreviewShareMixin, YujinMemoryMixin,
         timeline_id: str,
         session_id: str,
         session_revision: int,
+        keep_existing_review_approval: bool = False,
     ) -> dict[str, Any]:
-        """Persist the editing-session revision consumed by a timeline and review."""
+        """Persist the editing-session revision consumed by a timeline and review.
+
+        `keep_existing_review_approval`은 **완성본을 한 바이트도 바꾸지 않는 편집**이
+        지난 뒤에만 쓴다(장면 경계 나누기 -- `short_form_scenes.cut_only_what_the_short_uses`).
+        그때는 검토 승인 행을 다시 쓰지 않고 **가리키는 판 버전만** 옮긴다.
+
+        왜 그때 `save_review_state`를 못 쓰는가: 그쪽은 `approved_at`을 지금으로 다시
+        찍고 `is_current`를 1로 되살린다. 대표님이 누른 적 없는 승인이 방금 생긴 것처럼
+        보이고, 한 번 무효가 된 승인도 부활한다 -- 사람 게이트를 없애는 일이다
+        (`CLAUDE.md` §2.1). 아래 UPDATE는 상태·승인 시각·`is_current`를 건드리지
+        않으므로 없던 승인을 만들 수 없다.
+        """
         timeline = self.get_timeline_run(project_id=project_id, timeline_id=timeline_id)
         timeline["source_session_id"] = str(session_id)
         timeline["source_session_revision"] = int(session_revision)
@@ -2853,6 +2865,14 @@ class LocalProjectStore(OutputVariantMixin, PreviewShareMixin, YujinMemoryMixin,
             timeline_id=timeline_id,
             timeline_payload=timeline,
         )
+        if keep_existing_review_approval:
+            self._execute(
+                project_id,
+                "UPDATE review_approvals SET source_session_id = ?, source_session_revision = ? "
+                "WHERE project_id = ? AND timeline_id = ?",
+                (str(session_id), int(session_revision), project_id, timeline_id),
+            )
+            return updated
         review = self.get_review_state(project_id=project_id, timeline_id=timeline_id)
         self.save_review_state(
             project_id=project_id,
