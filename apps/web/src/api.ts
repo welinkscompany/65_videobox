@@ -511,6 +511,10 @@ export type ShortFormScenePick = {
   notice: string;
   scenes_total: number;
   scenes_read_by_yujin: number;
+  /** 유진이 댄 **"이 숏폼이 왜 퍼질지"** 한 줄(2026-09-12). 유진이 후보를 짜지
+   *  못했거나 밀도 대비책으로 내려갔으면 `null`이고, 그때는 문구에 이유가
+   *  나오지 않는다 -- 지어내지 않는다. 읽는 자리는 `shortFormNotice.ts`. */
+  spread_reason?: string | null;
 };
 
 export type OutputVariantPatch = {

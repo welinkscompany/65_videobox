@@ -44,6 +44,26 @@ from videobox_core_engine.short_form_scene_pick import (
 from videobox_domain_models.output_variants import OutputVariant
 
 
+def _board_source_asset_ids(segments: list[dict]) -> list[str]:
+    """판에 실제로 깔려 있는 소재 id. 전사를 고를 때 대조용으로 쓴다.
+
+    보는 자리는 화면이 자료실 영상을 장면에 깔 때 적히는 곳들이다 --
+    `broll_override.asset_id`와 교체 구간(`media_windows`)의 소재. 2026-09-12에
+    실물 세션을 열어 확인했다(대표님 판은 `broll_override` 쪽이었다).
+    """
+    asset_ids: list[str] = []
+    for segment in segments:
+        override = segment.get("broll_override")
+        if isinstance(override, Mapping):
+            asset_ids.append(str(override.get("asset_id") or ""))
+        windows = segment.get("media_windows")
+        if isinstance(windows, list):
+            for window in windows:
+                if isinstance(window, Mapping):
+                    asset_ids.append(str(window.get("asset_id") or ""))
+    return [asset_id for asset_id in dict.fromkeys(asset_ids) if asset_id]
+
+
 def short_form_scene_pick(
     *,
     store: Any,
@@ -51,15 +71,30 @@ def short_form_scene_pick(
     session_id: str,
     runtime: Any | None,
 ) -> ShortFormScenePick:
-    """편집본을 읽어 숏폼에 넣을 장면을 고른다. 누가 골랐는지도 함께 돌려준다.
+    """편집본을 읽어 숏폼을 고른다. 누가 골랐는지와 왜 퍼질지도 함께 돌려준다.
 
     저장소에는 런타임이 없어서 고르는 일은 저장소 밖에서 한다(2026-09-11).
+
+    **2026-09-12부터 판단 재료는 전사의 발화다.** 장면 요약보다 원본에 가깝고,
+    시각이 붙어 있어 문장 끝에서 묶을 수 있다. 전사가 없거나 판에 깔린 소재의
+    것이 아니면 장면 자막으로 내려가되 **판단 흐름은 하나**다.
     """
     session = store.get_editing_session(project_id=project_id, session_id=session_id)
+    segments = [segment for segment in session.get("segments", []) if isinstance(segment, dict)]
+    utterances: list[dict] = []
+    try:
+        utterances = store.latest_transcript_segments(
+            project_id=project_id, source_asset_ids=_board_source_asset_ids(segments)
+        )
+    except Exception:  # noqa: BLE001
+        # 전사를 못 읽는 것은 숏폼을 못 만드는 이유가 아니다. 장면 자막으로
+        # 내려가고, 그 사실은 결과 문구가 말한다.
+        utterances = []
     return pick_short_form_scenes(
-        [segment for segment in session.get("segments", []) if isinstance(segment, dict)],
+        segments,
         project_id=project_id,
         runtime=runtime,
+        utterances=utterances or None,
     )
 
 
@@ -123,4 +158,7 @@ def scene_pick_payload(pick: ShortFormScenePick) -> dict[str, object]:
         "notice": pick.notice,
         "scenes_total": pick.scenes_total,
         "scenes_read_by_yujin": pick.scenes_read_by_yujin,
+        # **왜 퍼질지**. 유진이 짜 준 한 줄이고 화면 문구에 그대로 붙는다
+        # (`shortFormNotice.ts`). 여기서 빼면 판단이 보이지 않는다.
+        "spread_reason": pick.spread_reason,
     }

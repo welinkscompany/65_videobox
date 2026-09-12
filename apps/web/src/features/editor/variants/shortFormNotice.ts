@@ -17,5 +17,9 @@ export function shortFormPickNotice(
   const made = options.remade ? "숏폼을 다시 만들었어요." : "숏폼을 만들었어요.";
   const undo = "마음에 안 들면 전체 장면으로 되돌릴 수 있어요.";
   const detail = pick?.notice?.trim() || "자막이 많은 장면 위주로 자동으로 골랐어요.";
-  return `${made} ${detail} ${undo}`;
+  // 2026-09-12: 유진이 **왜 퍼질지**를 댔으면 그 문장을 그대로 보여 준다.
+  // 지어내지 않는다 -- 이유가 없으면 이 문장 자체가 없다.
+  const reason = pick?.spread_reason?.trim();
+  const why = reason ? ` 퍼질 이유: ${reason}` : "";
+  return `${made} ${detail}${why} ${undo}`;
 }

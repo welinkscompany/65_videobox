@@ -12,7 +12,10 @@ owner 요청(2026-08-28): "하이라이트 변형 만들기 - 이것도 자동�
 **2026-09-11부터 이 파일은 "고르는 사람"이 아니다.** 마케팅용 숏폼을 고르는 판단은
 `short_form_scene_pick.py`에서 유진이 한다. 여기 남은 두 가지 몫은 이것뿐이다.
 
-1. `shortlist_short_form_candidates` -- 유진에게 보여줄 후보를 **추린다**(판단 아님).
+1. `shortlist_short_form_candidates` -- **2026-09-12부터 숏폼 경로는 이걸 안 쓴다.**
+   낱말로 거르면 숫자 없이 퍼지는 대목이 유진 눈에서 사라지기 때문이다
+   (`short_form_scene_pick` 머리말). 남겨 둔 이유는 부르는 자리가 아직 있는지
+   지우기 전에 세어야 하기 때문이다.
 2. `select_highlight_segment_ids` -- 유진이 대답을 못 할 때의 **대비책**. 이때는
    결과에 "자막 밀도로 골랐다"는 꼬리표가 붙어 화면까지 간다. 유진의 판단인 척하지
    않는다(`short_form_scene_pick.ShortFormScenePick.judged_by`).

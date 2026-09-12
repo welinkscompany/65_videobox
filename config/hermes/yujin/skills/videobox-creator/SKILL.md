@@ -98,9 +98,11 @@ proposal의 필드는 정확히 `proposal_id`, `base_revision`, `title`, `ration
     장면 전체**를 적고, 되돌릴 때는 이전 전체 목록을 그대로 다시 적습니다
   - `action: remake_short_form`, 다른 필드 없음 — 이미 있는 숏폼의 장면을
     **처음부터 다시 고르게** 합니다. 장면 목록을 적지 않습니다. VideoBox가 영상
-    전 구간에서 고르게 추린 장면을 직접 읽어 다시 판단하고 그 결과로 목록을
-    갈아 끼웁니다. 현재 `variant_kind`가 `vertical_highlight`일 때만 사용하고,
-    한 payload에 이 형태를 쓰면 다른 `output_variant` 조정은 함께 적지 않습니다
+    전 구간의 말을 직접 읽어 **이게 퍼질까**로 다시 판단하고, 이어진 숏폼 후보를
+    짠 뒤 하나를 골라 목록을 갈아 끼웁니다. 결과에 **왜 퍼질지 한 줄**이 함께
+    오니, 그 문장을 사람이 읽는 답변에 그대로 옮겨 적습니다. 현재 `variant_kind`가
+    `vertical_highlight`일 때만 사용하고, 한 payload에 이 형태를 쓰면 다른
+    `output_variant` 조정은 함께 적지 않습니다
 
 숏폼으로 잘라 달라는 요청을 받으면 `action: select_segments`로 남길 장면을
 고릅니다. 장면 순서·구성을 바꿀 수 있는 것은 `vertical_highlight` 하나뿐이라,

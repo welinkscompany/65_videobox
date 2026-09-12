@@ -418,8 +418,8 @@ class VariantShortFormRemakeParameters(_Parameters):
 
     `select_segments`와 왜 따로 있는가. 채팅으로 장면을 직접 고를 때 유진이 보는
     것은 창작 맥락의 `segment_summaries`이고 그건 32개에서 잘린다 -- 243장면짜리
-    롱폼에서는 단추 경로(영상 전 구간에서 고르게 추린 48개를 읽는
-    `short_form_scene_pick`)보다 못한 판단이다. 그래서 프로필은 그럴 때 단추를
+    롱폼에서는 단추 경로(영상 전 구간의 말을 묶어 전부 읽고 "이게 퍼질까"로
+    판단하는 `short_form_scene_pick`)보다 못한 판단이다. 그래서 프로필은 그럴 때 단추를
     쓰라고 안내해 왔는데, "단추를 쓰세요"는 **말로 시킬 수 있어야 한다**는
     대표님 상시 지시를 못 지킨다.
 

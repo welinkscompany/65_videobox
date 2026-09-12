@@ -539,6 +539,32 @@ def test_yujin_short_form_cut_applies_through_the_real_apply_route(tmp_path: Pat
 # 말든 결과가 같아야 하므로 시험은 절대 진짜 모델을 부르지 않는다.
 
 
+def _compose_answer(prompt: str) -> StructuredLLMResponse:
+    """짜기 단계의 가짜 응답. 훑기에서 고른 대목을 그대로 이어 붙인 후보 하나.
+
+    **가짜를 한 자리에만 둔다.** 2026-09-12에 짜기 단계가 생겼을 때 시험 대역이
+    셋이었고, 하나만 고치면 나머지가 `IndexError`로 죽는다.
+    """
+    lines = [
+        int(line.strip().partition(". ")[0])
+        for line in prompt.split("고를 대목:", 1)[1].splitlines()
+        if line.strip()[:1].isdigit()
+    ]
+    output_data = {
+        "thinking": "가짜 유진이 먼저 생각한다",
+        "candidates": [{"lines": lines, "reason": "퍼질 이유 한 줄"}],
+        "chosen": 1,
+        "schema_version": "videobox.short-form-compose.v1",
+    }
+    return StructuredLLMResponse(
+        provider_name="local_qwen",
+        model_name="Qwen3-32B",
+        output_data=output_data,
+        raw_text=json.dumps(output_data, ensure_ascii=False),
+        metadata={},
+    )
+
+
 @dataclass
 class _ScenePickProvider:
     """훅·결론·숫자를 보고 고르는 가짜 심사자. 자막 길이는 보지 않는다."""
@@ -547,6 +573,8 @@ class _ScenePickProvider:
 
     def complete_structured(self, request: StructuredLLMRequest) -> StructuredLLMResponse:
         self.calls.append(request)
+        if "고를 대목:" in request.prompt:
+            return _compose_answer(request.prompt)
         block = request.prompt.split("고를 장면:", 1)[1]
         picks = []
         for line in block.splitlines():
@@ -554,6 +582,10 @@ class _ScenePickProvider:
             if not stripped[:1].isdigit():
                 continue
             number_text, _, caption = stripped.partition(". ")
+            # 줄 모양은 `번호. (N초) 글`이다. 시각 표시를 떼지 않으면 `(0초)`의
+            # 숫자가 "숫자·결과가 있다"로 세어진다.
+            if caption.startswith("("):
+                caption = caption.partition(") ")[2]
             if "결론" in caption:
                 picks.append({"scene": int(number_text), "worth": 5, "why": "conclusion"})
             elif any(character.isdigit() for character in caption):
@@ -696,10 +728,13 @@ def test_a_long_form_does_not_take_its_short_only_from_the_opening(tmp_path: Pat
     picked = body["variant"]["selected_segment_ids"]
     assert "timeline_001:242" in picked, "결론이 빠지면 마케팅용이 아니다"
     assert body["scene_pick"]["judged_by"] == "yujin"
-    # 유진이 **전부** 본 것처럼 말하지 않는다.
+    # 2026-09-12부터는 **빠지는 구간이 없다.** 상한을 넘으면 대목을 버리는 대신
+    # 합쳐서 줄이므로 유진이 영상 전 구간을 읽는다. 그러니 문구도 그렇게 말한다 --
+    # 덜 봤다고 말하는 것도, 더 봤다고 말하는 것도 거짓이다.
     assert body["scene_pick"]["scenes_total"] == 243
-    assert body["scene_pick"]["scenes_read_by_yujin"] < 243
-    assert "전체 243개" in body["scene_pick"]["notice"]
+    assert body["scene_pick"]["scenes_read_by_yujin"] == 243
+    assert "전 구간" in body["scene_pick"]["notice"]
+    assert "확인하지 못했어요" not in body["scene_pick"]["notice"]
 
 
 # --- 숏폼 다시 만들기 --------------------------------------------------------
@@ -726,6 +761,8 @@ class _ChangingScenePickProvider:
     sweeps: int = 0
 
     def complete_structured(self, request: StructuredLLMRequest) -> StructuredLLMResponse:
+        if "고를 대목:" in request.prompt:
+            return _compose_answer(request.prompt)
         self.sweeps += 1
         wanted = "결론입니다" if self.sweeps == 1 else "중간 설명"
         block = request.prompt.split("고를 장면:", 1)[1]
@@ -735,6 +772,8 @@ class _ChangingScenePickProvider:
             if not stripped[:1].isdigit():
                 continue
             number_text, _, caption = stripped.partition(". ")
+            if caption.startswith("("):
+                caption = caption.partition(") ")[2]
             if wanted in caption:
                 picks.append({"scene": int(number_text), "worth": 5, "why": "conclusion"})
         output_data = {"schema_version": "videobox.short-form-scene-pick.v1", "picks": picks}
@@ -844,3 +883,109 @@ def test_yujin_can_remake_the_short_when_the_owner_tells_her_to(tmp_path: Path) 
     assert body["variant"]["selected_segment_ids"] == ["seg-middle"]
     assert body["scene_pick"]["judged_by"] == "yujin"
     assert provider.sweeps == 2
+
+
+# --- 2026-09-12: 퍼질까로 고르고, 그 이유를 화면까지 보낸다 -------------------
+#
+# owner 지시: "단순히 자르는것보다 자극적으로 숏폼이 확산할수 있을정도로 llm 이
+# 구분 하도록 생각하면서 만들어야지." 그리고 장면이 아니라 **발화**에서 고른다.
+
+
+@dataclass
+class _SpreadProvider:
+    """퍼질까로 고르고 후보 숏폼을 짜는 가짜 유진. 두 단계를 다 받는다."""
+
+    calls: list[StructuredLLMRequest] = field(default_factory=list)
+
+    def complete_structured(self, request: StructuredLLMRequest) -> StructuredLLMResponse:
+        self.calls.append(request)
+        if "고를 대목:" in request.prompt:
+            lines = [
+                int(line.strip().partition(". ")[0])
+                for line in request.prompt.split("고를 대목:", 1)[1].splitlines()
+                if line.strip()[:1].isdigit()
+            ]
+            output_data = {
+                "thinking": "통념을 뒤집는 첫마디가 손을 멈춘다",
+                "candidates": [{"lines": lines, "reason": "대놓고 솔직한 한마디라 남에게 보내고 싶어져요"}],
+                "chosen": 1,
+                "schema_version": "videobox.short-form-compose.v1",
+            }
+        else:
+            picks = []
+            for line in request.prompt.split("고를 장면:", 1)[1].splitlines():
+                stripped = line.strip()
+                if not stripped[:1].isdigit():
+                    continue
+                number_text, _, rest = stripped.partition(". ")
+                if "뭐하러 알려" in rest:
+                    picks.append({"scene": int(number_text), "worth": 5})
+            output_data = {"schema_version": "videobox.short-form-spread-scan.v1", "picks": picks}
+        return StructuredLLMResponse(
+            provider_name="local_qwen",
+            model_name="Qwen3-32B",
+            output_data=output_data,
+            raw_text=json.dumps(output_data, ensure_ascii=False),
+            metadata={},
+        )
+
+
+def test_the_short_form_is_judged_from_the_transcript_and_its_reason_reaches_the_screen(
+    tmp_path: Path,
+) -> None:
+    """**장면 자막이 비어 있어도** 숏폼이 나온다 -- 판단 재료가 전사에 있다.
+
+    그리고 유진이 "왜 퍼질지" 댄 문장이 화면이 받는 응답에 실려 온다. 값만
+    만들고 아무도 안 읽으면 배선이 아니다.
+    """
+    provider = _SpreadProvider()
+    app = create_app(
+        projects_root=tmp_path / "projects",
+        local_only_runtime_service_factory=_runtime_factory(provider),
+    )
+    client = TestClient(app)
+    project = client.post("/api/projects", json={"name": "퍼질까로 고르기"}).json()
+    store = app.state.store
+    store.save_transcript(
+        project_id=project["project_id"],
+        source_asset_id="asset-video",
+        transcript_text="전사",
+        segments=[
+            {"start_sec": 0.0, "end_sec": 10.0, "text": "오늘은 세 가지를 알려드릴게요"},
+            {"start_sec": 10.0, "end_sec": 20.0, "text": "그걸 알면 제가 팔지 뭐하러 알려 줄까요"},
+            {"start_sec": 20.0, "end_sec": 30.0, "text": "정리하면 이렇습니다"},
+        ],
+    )
+    session = store.save_editing_session(
+        project_id=project["project_id"],
+        timeline_id="timeline-source",
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": f"seg-{index}",
+                    "caption_text": "",
+                    "start_sec": float(index) * 10.0,
+                    "end_sec": float(index + 1) * 10.0,
+                    "source_offset_sec": float(index) * 10.0,
+                    "broll_override": {"asset_id": "asset-video"},
+                }
+                for index in range(3)
+            ],
+            "history": [],
+        },
+    )
+
+    response = client.post(
+        f"/api/projects/{project['project_id']}/output-variants",
+        json={"source_session_id": session["session_id"], "kind": "vertical_highlight"},
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["variant"]["selected_segment_ids"] == ["seg-1"]
+    assert body["scene_pick"]["judged_by"] == "yujin"
+    assert (
+        body["scene_pick"]["spread_reason"]
+        == "대놓고 솔직한 한마디라 남에게 보내고 싶어져요"
+    )
+    assert "뭐하러 알려" in "\n".join(call.prompt for call in provider.calls)

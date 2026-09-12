@@ -11,7 +11,7 @@ import shutil
 import sqlite3
 import subprocess
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Literal
@@ -7555,6 +7555,41 @@ class LocalProjectStore(OutputVariantMixin, PreviewShareMixin, YujinMemoryMixin,
         payload = dict(row)
         payload["segments"] = json.loads(payload.pop("segments_json"))
         return payload
+
+    def latest_transcript_segments(
+        self, *, project_id: str, source_asset_ids: Sequence[str]
+    ) -> list[dict[str, Any]]:
+        """이 판이 쓰는 소재의 **가장 최근 전사 발화**. 없으면 빈 목록.
+
+        숏폼을 고를 때 쓴다(`short_form_scenes`). 발화에는 시각과 글이 함께 있어
+        "이게 퍼질까"를 판단할 재료가 장면 요약보다 정확하다.
+
+        **소재를 대조하는 이유**: 한 프로젝트에 전사가 여럿일 수 있다(내레이션
+        녹음, 가져온 영상). 판에 깔려 있지 않은 소재의 전사를 읽으면 유진이 판에
+        없는 말을 고르고, 이을 장면이 없어 결과가 조용히 비어 버린다.
+        """
+        wanted = [asset_id for asset_id in dict.fromkeys(source_asset_ids) if asset_id]
+        if not wanted:
+            return []
+        placeholders = ", ".join("?" for _ in wanted)
+        row = self._fetchone(
+            project_id,
+            f"""
+            SELECT segments_json FROM transcripts
+            WHERE project_id = ? AND source_asset_id IN ({placeholders})
+            ORDER BY created_at DESC, transcript_id DESC LIMIT 1
+            """,
+            (project_id, *wanted),
+        )
+        if row is None:
+            return []
+        try:
+            parsed = json.loads(str(row["segments_json"]))
+        except (TypeError, ValueError):
+            return []
+        if not isinstance(parsed, list):
+            return []
+        return [item for item in parsed if isinstance(item, dict)]
 
     def get_segment_analysis(self, *, project_id: str, segment_analysis_id: str) -> dict[str, Any]:
         row = self._fetchone(
