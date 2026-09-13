@@ -99,6 +99,30 @@ def test_ordinary_message_is_answered_by_the_local_model():
     assert call["response_schema"] == YUJIN_CONVERSATION_RESPONSE_SCHEMA
 
 
+def test_system_prompt_tells_the_model_direct_edits_already_ran() -> None:
+    """실물 확인(2026-09-13)에서 잡은 결함의 회귀 시험.
+
+    "숏폼 내보내줘"를 실제로 타이핑하면 렌더가 진짜로 성공하는데도, 유진의
+    대화 답변은 "저는 실행 못 해요, 단추를 누르세요"라고 방금 성공한 일을
+    부정했다. 원인은 이 프롬프트가 "편집은 사람이 직접 승인해야 한다"고
+    못박고 있었기 때문이다(2026-09-01 결정 전에는 맞았지만 지금은 아니다).
+    이 시험은 프롬프트 문구 자체를 잠가 같은 결함이 조용히 되돌아오는 것을
+    막는다 -- 실물 재확인은 owner-ready.ps1로 컨테이너를 띄워야만 가능해서
+    여기서는 문구만 잠근다.
+    """
+    runtime = _RecordingRuntime()
+    service = YujinLocalConversationService(runtime=runtime)
+
+    service.reply(project_id="proj-1", user_text="숏폼 내보내줘")
+
+    prompt = runtime.calls[0]["prompt"]
+    assert "이미 실행되고 있다거나 실행됐다고 답해도 거짓이 아니다" in prompt
+    assert "그게 거짓말이다" in prompt
+    # 낡은 문장(2026-09-01 결정 전 문구)이 되살아나지 않게 잠근다.
+    assert "사람이 화면에서 직접 승인해야" not in prompt
+    assert "렌더러를 직접 조작" not in prompt
+
+
 def test_blank_user_text_is_rejected_before_calling_the_model():
     service = YujinLocalConversationService(runtime=_ExplodingRuntime())
 

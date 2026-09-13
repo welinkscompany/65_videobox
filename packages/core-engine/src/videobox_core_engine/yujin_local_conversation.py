@@ -4,15 +4,28 @@ Owner decision (2026-08-05): docs/decisions/2026-08-05-local-first-assistant-dec
 Yujin's primary conversation route runs on the local model instead of waiting
 for the (undeployed) Hermes agent gateway. This module deliberately stays
 outside that gateway's capability-token protocol: it grants no publish/tool
-capability, so its output cannot mutate the project by itself. Editing
-mutation still goes through the existing human-approval UI; a chat "네" is
-never treated as approval. Script and title suggestions are allowed (owner,
-2026-08-16), and so are thumbnail *prompt* suggestions -- text the owner
-pastes into an external image tool (owner, 2026-08-19). Generating the
-thumbnail image itself or a recommended video stays out of scope
-(docs/implementation-plan.ko.md §23.3B) -- those requests are rejected
-before the model is ever called, since that boundary must not depend on the
-model choosing to comply.
+capability, so its own reply text cannot mutate the project by itself --
+that mutation happens through a *separate* LLM call and code path
+(`yujin_editing_proposal_service.py` -> `..._adapter.py` ->
+`editing_session.apply_yujin_editing_proposal`, wired into the screen chat
+at `routers/director_proposals.py`'s `create_yujin_editing_proposal`/
+`apply_yujin_editing_proposal_route`). This module's reply and that other
+path's decision are generated independently and do not see each other's
+output -- see `videobox-chat-reply-text-is-a-separate-blind-llm-call`
+memory. As of 2026-09-01
+(docs/decisions/2026-09-01-yujin-chat-applies-edits-directly.ko.md), a
+spoken direct-edit intent (segment edits, and the short-form
+create/remake/unfold/render intents added 2026-09-12/13) is applied by the
+screen automatically -- no button click, undo is the safety net -- so this
+module's system prompt must not claim the opposite. A screen recommendation
+*card* (broll/music/sfx candidates) is different: those still require the
+owner to press "적용" explicitly, and a chat "네" is not that click. Script
+and title suggestions are allowed (owner, 2026-08-16), and so are thumbnail
+*prompt* suggestions -- text the owner pastes into an external image tool
+(owner, 2026-08-19). Generating the thumbnail image itself or a recommended
+video stays out of scope (docs/implementation-plan.ko.md §23.3B) -- those
+requests are rejected before the model is ever called, since that boundary
+must not depend on the model choosing to comply.
 """
 
 from __future__ import annotations
@@ -33,11 +46,22 @@ YUJIN_CONVERSATION_RESPONSE_SCHEMA = {
 _YUJIN_SYSTEM_PROMPT = (
     "너는 VideoBox의 창작 도우미 유진이다. 항상 한국어로, 영상을 만드는 창작자에게 "
     "말하듯 답한다. 다음은 절대 하지 않는다: 데이터베이스나 파일시스템 조작, 셸 명령 실행, "
-    "자격증명·API key 요청 또는 노출, CapCut이나 렌더러를 직접 조작, 썸네일·추천 영상 자체를 생성. "
+    "자격증명·API key 요청 또는 노출, CapCut 앱을 직접 열거나 조작, 썸네일·추천 영상 자체를 생성. "
     "대본과 제목은 먼저 쓰거나 제안해도 된다. 썸네일 이미지를 직접 만들지는 않지만, 창작자가 "
     "이미지 생성 도구에 붙여 넣을 썸네일 프롬프트 문구를 제안하는 것은 된다. "
-    "편집이 실제로 반영되려면 사람이 화면에서 직접 승인해야 하며, "
-    "대화 중 '네'라는 대답은 승인이 아니다. 응답은 JSON 객체 {\"reply\": \"...\"} 형태로만 낸다."
+    # 2026-09-01 결정(유진에게 말한 편집은 바로 적용된다) 전에는 "편집은 사람이
+    # 직접 승인해야 한다"가 맞았다. 지금은 아니다 -- 2026-09-13 실물 확인에서
+    # 유진이 실제로 성공시킨 렌더를 "저는 실행 못 해요"라고 부정하는 것을 봤다
+    # (실제로는 이미 실행되고 있었다). 그래서 이 구분을 명확히 못박는다.
+    "창작자가 장면 편집(속도·컷·자막·색감·전환·미디어 배치 등)이나 숏폼 "
+    "만들기·다시 만들기·펼치기·내보내기를 말로 시키면, 그 편집·렌더는 화면이 "
+    "곧바로 자동으로 적용하거나 실행한다 -- 사람이 따로 단추를 누르지 않는다. "
+    "**이미 실행되고 있다거나 실행됐다고 답해도 거짓이 아니다.** 반대로 "
+    "'저는 직접 실행할 수 없다'거나 '단추를 눌러야 한다'고 답하면 그게 거짓말이다 "
+    "(실제로는 이미 실행되고 있다). 안전장치는 승인 클릭이 아니라 되돌리기다. "
+    "다만 화면에 카드로 뜨는 자료 추천(영상·음악·효과음 후보)은 다르다 -- 그건 "
+    "지금도 창작자가 직접 '적용' 단추를 눌러야 반영되고, 대화 중 '네'라는 대답은 "
+    "그 클릭을 대신하지 않는다. 응답은 JSON 객체 {\"reply\": \"...\"} 형태로만 낸다."
 )
 
 # 답 형식 가이드: 썸네일 프롬프트 요청일 때만 붙는다. 이미지 생성 도구(GPT,
