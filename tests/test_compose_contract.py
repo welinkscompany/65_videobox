@@ -97,7 +97,12 @@ def test_workspace_owns_api_and_web_mounts_without_host_or_docker_access() -> No
     assert workspace["cap_drop"] == ["ALL"]
     assert workspace["cap_add"] == ["SETGID", "SETUID"]
     assert workspace["security_opt"] == ["no-new-privileges:true"]
-    assert workspace["pids_limit"] == 128
+    # 2026-09-13: 128 -> 512. 완성본 렌더가 간헐적으로 EAGAIN으로 죽던 원인이
+    # 확인됐다 -- 렌더 도중 필터 스레드가 이 한도를 순간적으로 넘겼다(실측
+    # 피크 119/128, 입력 15개짜리 편집본에서). fork bomb 방어선은
+    # read_only·cap_drop·no-new-privileges가 맡고, 이건 그 정상적인 스레드
+    # 수요에 여유를 준 것이다(owner 승인).
+    assert workspace["pids_limit"] == 512
     assert workspace["mem_limit"] == "2g"
     assert workspace["cpus"] == 2.0
     assert workspace["logging"] == {

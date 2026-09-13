@@ -222,7 +222,19 @@ services:
     # PID 1 only needs to launch two already-unprivileged children.
     cap_add: [SETGID, SETUID]
     security_opt: [no-new-privileges:true]
-    pids_limit: 128
+    # **2026-09-13 실측으로 512로 올렸다(원래 128).** 완성본 렌더가 세그먼트가
+    # 쌓인 편집본에서 간헐적으로 EAGAIN(`Terminating thread with return code
+    # -11`)으로 죽었다 -- ffmpeg가 필터 그래프 스레드를 컨테이너 프로세스
+    # 한도(pids)를 넘겨 잡으려다 실패한 것이다. `/sys/fs/cgroup/pids.current`를
+    # 렌더 도중 직접 재 보니 평소 39~40인데 순간적으로 119까지 치솟았다 --
+    # 입력 15개짜리 편집본만으로도 128에 아슬아슬했다. 이건 **렌더 자체가
+    # 필요로 하는 정상적인 스레드 수**이지 폭주(fork bomb)가 아니다 -- 값을
+    # 재배분하는 것보다, 정직하게 실제로 필요한 만큼 한도를 올리는 쪽을
+    # 골랐다(owner 승인, 2026-09-13). `read_only`·`cap_drop: [ALL]`·
+    # `no-new-privileges`는 그대로 둔다 -- 이 서비스가 여는 프로세스는 여전히
+    # 자기 자신(ffmpeg 워커 스레드)뿐이라, 진짜 방어선은 그 셋이고 `pids_limit`은
+    # 2차 안전망이다. 512는 실측 피크(119)의 4배가 넘는 여유다.
+    pids_limit: 512
     mem_limit: 2g
     cpus: 2.0
     healthcheck:
