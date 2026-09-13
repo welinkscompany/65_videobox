@@ -1984,7 +1984,11 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         messages: capDirectorMessages([
           ...current.messages.filter((message) => message.id !== optimisticUserId),
           { id: exchange.user_message.message_id, role: "user", text: exchange.user_message.text },
-          { id: exchange.assistant_message.message_id, role: "assistant", text: exchange.assistant_message.text },
+          {
+            id: exchange.assistant_message.message_id,
+            role: "assistant",
+            text: localizeDirectorAssistantText(exchange.assistant_message.text),
+          },
         ]),
         runState: { kind: "complete", runId: exchange.assistant_message.message_id },
       } : current);
@@ -3148,7 +3152,23 @@ function projectDirectorMessages(messages: readonly DirectorMessage[]): readonly
     : []));
 }
 
+// `submit_conversation_message`(routers/director_proposals.py)가 로컬 모델
+// 예외를 잡으면 이 접두사 뒤에 **원본 예외 문자열을 그대로** 붙여 보낸다
+// (내부 오류 문자열, creator-language 위반). `metadata.status === "blocked"`로
+// 걸러 내면 안 된다 -- 그 값은 정책 거절(이미 깨끗한 한국어 문장,
+// `error_code: "policy_restricted_intent"`)에도 똑같이 붙기 때문에, 그러면
+// 멀쩡한 거절 문구까지 뭉개 버린다(`editor-workbench-route.test.tsx`의
+// "shows the local policy guard's own blocked reply" 시험이 바로 그 경우다).
+// 그래서 이 정확한 접두사로만 좁힌다.
+const LOCAL_ONLY_BLOCKED_TEXT_PREFIX = "local_only_blocked: ";
+
 function localizeDirectorAssistantText(text: string) {
+  // HomeYujinChat.tsx는 metadata.status로 걸러 내는데 이 편집기 채팅창은
+  // 놓치고 있었다(2026-09-13 발견). 실시간 전송 응답과 대화 기록 다시 불러올
+  // 때 둘 다 여기를 거치게 해서 한쪽만 고쳐지는 것을 막는다.
+  if (text.startsWith(LOCAL_ONLY_BLOCKED_TEXT_PREFIX)) {
+    return yujinUnavailableMessage;
+  }
   if (text === hermesUnavailableTechnicalText) {
     return yujinUnavailableMessage;
   }

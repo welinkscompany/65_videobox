@@ -5004,6 +5004,36 @@ describe("EditorWorkbenchRoute", () => {
     expect(clipSelectionButton("n-1")).toBeEnabled();
   });
 
+  it("never shows the raw local runtime exception when the model itself fails (2026-09-13)", async () => {
+    // 위 시험("shows the local policy guard's own blocked reply")과
+    // metadata.status는 똑같이 "blocked"지만, 이건 정책 거절이 아니라
+    // 로컬 모델 자체가 죽은 경우다 -- 서버(submit_conversation_message)가
+    // `f"local_only_blocked: {exc}"`를 text에 그대로 담아 보낸다. 이 화면이
+    // 그 원본 예외 문자열을 그대로 보여 준 적이 실제로 있었다(HomeYujinChat.tsx만
+    // 걸러 내고 이 편집기 채팅창은 놓치고 있었다).
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal: null, references: [],
+    } as never);
+    vi.spyOn(api, "sendDirectorMessage").mockResolvedValue({
+      kind: "exchange",
+      exchange: {
+        user_message: { message_id: "user-runtime-fail", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "이 장면 어때?", proposal_id: null, metadata: {}, client_message_id: "client-runtime-fail", created_at: "1" },
+        assistant_message: { message_id: "assistant-runtime-fail", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "local_only_blocked: LM Studio unavailable", proposal_id: null, metadata: { status: "blocked", error_code: "local_runtime_error" }, client_message_id: null, created_at: "2" },
+      },
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
+    fireEvent.change(await screen.findByRole("textbox", { name: "유진에게 요청하기" }), { target: { value: "이 장면 어때?" } });
+    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+
+    expect(await screen.findByText("유진의 답을 받지 못했어요.")).toBeVisible();
+    expect(screen.queryByText(/local_only_blocked|LM Studio/)).toBeNull();
+  });
+
   it("preserves the draft and manual controls when the local send fails", async () => {
     vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
       conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
