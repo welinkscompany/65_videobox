@@ -111,7 +111,40 @@ sendDirectorMessage -> POST .../director/conversations/{id}/messages
 - 컨테이너를 세 번 재빌드하며 실제 웹 화면에서 직접 타이핑해 확인했다
   (R3 + 렌더 실물 확인 + 답변 문구 버그 재현·오진 확인).
 
-## 4. 다음 세션이 먼저 할 일
+## 4. 부수적으로 닫은 것 — 편집기 채팅창의 내부 오류 문구 누출 (같은 세션 자율 진행)
+
+숏폼 작업과는 별개 항목이던 `task_a9fbf3bb`("유진 로컬 대화 실패 시 내부
+오류 문구가 화면에 그대로 샌다")도 이어서 닫았다.
+
+`submit_conversation_message`(routers/director_proposals.py)가 로컬 모델
+호출에서 예외를 잡으면 `"local_only_blocked: <원본 예외>"`를
+`assistant_text`에 그대로 담아 보낸다. `HomeYujinChat.tsx`(홈 화면 채팅)는
+이미 `metadata.status === "blocked"`로 이걸 걸러 친절한 문구로 바꾸는데,
+`EditorWorkbenchRoute.tsx`(편집판 안 채팅창 — 실제로 더 자주 쓰는 화면)만
+그 걸러내기가 없어서 원본 예외 문자열이 그대로 나갔다.
+
+**단순히 `metadata.status === "blocked"`로 거르면 안 된다** — 같은 값이
+이미 깨끗한 정책 거절 문구("이 요청은 유진이 직접 할 수 없어요.")에도
+붙어서, 그러면 멀쩡한 거절 문구까지 뭉개 버린다(기존 시험 "shows the local
+policy guard's own blocked reply"가 이 경우를 지키고 있었다 — 처음에
+metadata 기준으로 고쳤다가 이 시험이 실패하는 것을 보고 정확한 접두사
+매칭으로 바꿨다). `"local_only_blocked: "` 접두사로 정확히 좁혀서 기존
+helper `localizeDirectorAssistantText`(Hermes 불가 문구를 거르던 자리, 실시간
+전송과 대화 기록 다시 불러오기 둘 다 거치는 한 곳)에 얹었다.
+
+검증: 실제 누출 모양을 재현하는 회귀 시험 추가, 프론트 전체 1746 passed
+(139 files), `tsc --noEmit` 통과. **실물(브라우저) 확인은 안 했다** — 실제로
+로컬 모델을 죽여서 재현하려면 지금 돌고 있는 실제 LM Studio 모델을 내려야
+하는데, 이 컴퓨터를 다른 프로젝트와 공유하고 있어(`videobox-two-models-
+thrash-one-gpu` 메모 참고) 그 부작용이 이 세션 범위를 벗어난다고 판단했다.
+대신 백엔드 코드에서 실제 예외 문자열 모양(`f"local_only_blocked: {exc}"`,
+`metadata: {"status": "blocked", ...}`)을 그대로 읽어 시험에 옮겨 썼다 — 짐작이
+아니라 실제 소스에서 그대로 가져온 값이다.
+
+커밋: `f07ebf43` fix: 편집기 채팅창이 유진 로컬 대화 실패의 원본 예외를
+그대로 보여주던 것.
+
+## 5. 다음 세션이 먼저 할 일
 
 1. 완성본(마스터) 렌더 자원 오류(별도 task, 세그먼트 94개 프로젝트) —
    여전히 안 풀림. R1(md5 재확인)이 여기 막혀 있다.
@@ -120,8 +153,12 @@ sendDirectorMessage -> POST .../director/conversations/{id}/messages
    (자료 추천 카드가 뜬 상태에서의 대화 등)도 실물로 한 번 더 훑어서,
    이번 프롬프트 수정이 의도치 않게 다른 답변을 이상하게 만들지 않았는지
    확인하면 좋다 — 이번 세션은 렌더 + 색감 편집 둘만 확인했다.
+4. 위 4절의 오류 문구 누출 수정도 여유가 있을 때 실물(브라우저)로 한 번
+   확인하면 좋다 — LM Studio가 한가할 때 `lms unload`로 잠깐 내렸다가
+   재현해 보는 방법이 있다(단, 실행 전에 대표님께 확인할 것 — 다른
+   프로젝트가 쓰고 있을 수 있다).
 
-## 5. 커밋
+## 6. 커밋
 
 - `ffb8d5926` feat: 유진 채팅으로 숏폼 만들기·다시 만들기·펼치기
 - `2a25e390a` docs: 배선 완료 반영
@@ -131,3 +168,5 @@ sendDirectorMessage -> POST .../director/conversations/{id}/messages
 - `fcf35544` fix: (오진, 더 나빠짐) 렌더 답변의 거짓 부정
 - `6ad7f192` docs: 렌더 배선 완료 + 답변 문구 버그의 진짜 원인 반영
 - `a349539c` fix: 유진 대화 답변이 실제로 성공한 편집·렌더를 거짓 부정하던 근본 원인 (**진짜 수정**, 실물 재확인 완료)
+- `6c0f0eea` docs: Task 3의 렌더+답변 문구 결함까지 전부 닫음
+- `f07ebf43` fix: 편집기 채팅창의 내부 오류 문구 누출 (task_a9fbf3bb, 프론트만)
