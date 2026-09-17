@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Callable, Protocol
@@ -14,6 +15,20 @@ from videobox_provider_interfaces.llm import (
     StructuredLLMRequest,
     StructuredLLMResponse,
 )
+
+
+# Qwen3 계열은 "생각" 모드가 켜지면 실제 답 앞에 <think>...</think> 추론
+# 블록을 content에 그대로 얹어 보낸다. LM Studio가 이걸 골라내는지는
+# 그때그때(로드 방식·프리셋에 따라) 다르다는 것이 2026-09-17에 실측으로
+# 드러났다 -- 같은 모델을 CLI로 다시 올렸더니(재부팅 뒤) 골라내기가 멈췄고,
+# 그 순간 실제 화면 채팅이 전부 "invalid_json"으로 죽었다(json.loads가
+# "<think>...")로 시작하는 문자열을 못 읽는다). LM Studio 설정에 기대는
+# 대신 여기서 직접 걷어내 그 설정과 무관하게 항상 통하게 한다.
+_REASONING_BLOCK_PATTERN = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
+
+
+def _strip_reasoning_block(text: str) -> str:
+    return _REASONING_BLOCK_PATTERN.sub("", text).strip()
 
 
 class LocalChatTransport(Protocol):
@@ -138,7 +153,7 @@ class LocalQwenStructuredProvider(StructuredLLMProvider):
             response_schema=request.response_schema,
             timeout_seconds=timeout_seconds,
         )
-        raw_text = self._extract_message_content(payload)
+        raw_text = _strip_reasoning_block(self._extract_message_content(payload))
         try:
             output_data = json.loads(raw_text)
         except json.JSONDecodeError as exc:
