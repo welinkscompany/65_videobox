@@ -10,6 +10,8 @@ from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, Re
 from fastapi.responses import FileResponse, JSONResponse
 
 from videobox_core_engine.mojibake import repair_mojibake_metadata
+from videobox_core_engine.thumbnail_generator import render_thumbnail_bytes
+from videobox_domain_models.assets import AssetType
 from videobox_api.asset_browser_preview_service import AssetBrowserPreviewService, AssetBrowserPreviewUnsupported
 from videobox_api.content_delivery import deliver_file
 from videobox_api.errors import _http_error
@@ -606,13 +608,31 @@ def build_assets_router(
     @router.get("/api/projects/{project_id}/assets/{asset_id}/thumbnail")
     def get_asset_thumbnail(project_id: str, asset_id: str) -> FileResponse:
         try:
-            store.get_asset(project_id=project_id, asset_id=asset_id)
+            asset = store.get_asset(project_id=project_id, asset_id=asset_id)
         except Exception as exc:
             raise _http_error(exc) from exc
         thumbnail_path = store.thumbnail_storage_path(project_id=project_id, asset_id=asset_id)
+        if not thumbnail_path.exists() and asset["asset_type"] == AssetType.IMAGE.value:
+            # brol(video)은 들여올 때 이미 만들어 둔다(`_try_generate_broll_
+            # thumbnail`). 이미지는 그 자리가 없어서 여기서 처음 물을 때
+            # 즉석으로 그려 캐시한다 -- 2026-09-17 화면 점검 실측: 실제
+            # 프로젝트에서 이미지 자산 썸네일이 그냥 404였다.
+            try:
+                source = store.resolve_storage_uri(project_id=project_id, storage_uri=asset["storage_uri"])
+                rendered = render_thumbnail_bytes(source=source, media_type="image", kind="thumbnail") if source.exists() else None
+            except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired):
+                rendered = None
+            if rendered is not None:
+                thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
+                thumbnail_path.write_bytes(rendered)
         if not thumbnail_path.exists():
             raise _http_error(FileNotFoundError(f"No thumbnail generated for asset '{asset_id}'."))
-        return FileResponse(thumbnail_path)
+        # 저장 경로 확장자는 늘 `.jpg`다(broll 영상 썸네일이 정한 규칙, 위
+        # `thumbnail_storage_path`). 이미지 자산은 위에서 png로 그려 그 자리에
+        # 그대로 쓰므로, 확장자만 보고 고르면 틀린다 -- 맨 앞 바이트로 가른다.
+        with thumbnail_path.open("rb") as handle:
+            media_type = "image/png" if handle.read(4) == b"\x89PNG" else "image/jpeg"
+        return FileResponse(thumbnail_path, media_type=media_type)
 
     @router.get("/api/projects/{project_id}/assets/{asset_id}/waveform")
     def get_asset_waveform(project_id: str, asset_id: str) -> FileResponse:

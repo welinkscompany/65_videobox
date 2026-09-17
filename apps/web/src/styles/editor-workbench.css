@@ -274,7 +274,13 @@
 .vb-preview-stage__empty { max-width: 28rem; padding: var(--vb-space-7); text-align: center; color: var(--muted-foreground); }
 /* 여기도 어두운 미리보기 판 위다. `--foreground`는 밝은 바탕용이라 대비가 1.04였다. */
 .vb-preview-stage__empty strong { display: block; color: var(--vb-preview-text, #F4F4F5); }
-.vb-preview-stage__playback { color: var(--muted-foreground); font-size: var(--vb-text-md); }
+/* 재생 버튼 5개(`__transport`)는 안 줄어든다(`flex: 0 0 auto`, 아래). 좁은
+   화면에서 그 옆의 "타임라인 0.0 / 8.0초" 글자가 밀려날 자리가 없으면, 기본
+   `flex-shrink`가 가장 긴 낱말("타임라인") 너비까지만 줄이고 나머지는 줄바꿈해
+   글자가 세로로 쪼개져 재생 버튼과 겹쳐 보였다(2026-09-17 화면 점검 실측,
+   모바일 375px). 줄을 바꿔 시간 글자를 다음 줄로 내린다. */
+.vb-preview-stage__playback { flex-wrap: wrap; color: var(--muted-foreground); font-size: var(--vb-text-md); }
+.vb-preview-stage__playback output { flex: 1 1 auto; min-width: max-content; }
 .vb-preview-stage__status { margin: 0; color: var(--muted-foreground); font-size: var(--vb-text-xs); }
 /* 재생 위치가 미리보기 밖일 때의 안내문. 이 클래스에 CSS가 없어 기본 문단으로 떠 있었다. */
 .vb-preview-stage__elsewhere { margin: 0; color: var(--muted-foreground); font-size: var(--vb-text-xs); }

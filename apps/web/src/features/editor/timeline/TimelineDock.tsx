@@ -901,8 +901,14 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
 
             빈 자리는 그대로 통과시킨다. 안 그러면 이 줄이 트랙 폭 전체를
             차지해서 이번엔 클립을 못 누른다. 이 파일이 클립 안 손잡이에
-            쓰는 방식과 같다. */}
-        {TIMELINE_LANES.map((lane) => <div key={lane} aria-label={laneLabel[lane]} role="listitem" style={{ height: `${LANE_HEIGHT_PX}px`, borderTop: "1px solid currentColor", position: "relative", zIndex: 1, pointerEvents: "none" }}>
+            쓰는 방식과 같다.
+
+            **재생 위치 선(`z-index: 3`)보다도 위여야 한다.** 재생 위치가
+            0초일 때 그 선이 트랙 이름 글자의 왼쪽 몇 픽셀과 정확히 겹쳐서
+            "영상"이 "경상"처럼 보이는 식으로 글자가 뭉개졌다(2026-09-17
+            화면 점검 실측 -- 폭이 좁아서가 아니라 두 층이 겹쳐서였다, DOM은
+            글자 전체를 이미 담고 있었다). */}
+        {TIMELINE_LANES.map((lane) => <div key={lane} aria-label={laneLabel[lane]} role="listitem" style={{ height: `${LANE_HEIGHT_PX}px`, borderTop: "1px solid currentColor", position: "relative", zIndex: 4, pointerEvents: "none" }}>
           <span style={{ pointerEvents: "auto" }}>{laneLabel[lane]}</span>
           {/* **잠금 · 눈 · 음소거**(`capcut-observed` 기록 §2: "트랙마다 왼쪽에
               잠금 · 눈 · 음소거 · `···`"). 셋의 성격이 다르다 --

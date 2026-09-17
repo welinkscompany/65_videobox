@@ -217,6 +217,45 @@ def test_a_library_image_becomes_a_project_image_asset(tmp_path: Path) -> None:
     assert materialized.json()["asset"]["asset_type"] == "image"
 
 
+@pytest.mark.skipif(FFMPEG is None, reason="ffmpeg is required to make a real png")
+def test_a_project_image_asset_gets_a_thumbnail_on_first_request(tmp_path: Path) -> None:
+    """이 파일 머리말의 "프로젝트 안의 이미지는 이미 됐다"는 주장이 실은 틀렸다
+    (2026-09-17 화면 점검 실측: `사진 브이로그 실기 0907` 프로젝트의 이미지
+    자산 2개가 썸네일 404).
+
+    `GET /api/projects/{id}/assets/{asset_id}/thumbnail`(`routers/assets.py`)은
+    브이로그(broll) 영상만 들여올 때 미리 만든 썸네일을 서빙할 뿐, 이미지
+    자산은 애초에 아무도 썸네일을 만들지 않았다 -- 파일이 없으면 그냥 404였다.
+    반면 공유 자료실 쪽(`/api/library/assets/{id}/thumbnail`)은 이미 이미지를
+    실제로 그려서 서빙한다(`test_an_image_gets_a_thumbnail_and_never_a_
+    waveform`). 그 렌더 로직(`render_thumbnail_bytes`)을 그대로 재사용해
+    프로젝트 쪽도 첫 요청에서 즉석으로 만들어 캐시하도록 고쳤다.
+    """
+    client = TestClient(_app(tmp_path))
+    created = client.post(
+        "/api/library/ingest",
+        data={"media_type": "image", "idempotency_key": "image-thumb"},
+        files=[("files", ("logo.png", _png(tmp_path / "logo.png"), "image/png"))],
+    ).json()["items"][0]
+    project_id = client.post("/api/projects", json={"name": "P"}).json()["project_id"]
+    materialized = client.post(
+        f"/api/library/assets/{created['library_asset_id']}/materialize",
+        json={"project_id": project_id},
+    ).json()
+    asset_id = materialized["asset"]["asset_id"]
+
+    thumbnail = client.get(f"/api/projects/{project_id}/assets/{asset_id}/thumbnail")
+    assert thumbnail.status_code == 200, thumbnail.text
+    assert thumbnail.headers["content-type"] == "image/png"
+    assert len(thumbnail.content) > 0
+
+    # 한 번 더 부르면 방금 만든 파일을 그대로 서빙해야 한다 -- 매번 ffmpeg를
+    # 다시 부르면 자산 목록을 스크롤할 때마다 느려진다.
+    again = client.get(f"/api/projects/{project_id}/assets/{asset_id}/thumbnail")
+    assert again.status_code == 200
+    assert again.content == thumbnail.content
+
+
 def test_an_owner_library_with_footage_triggers_can_still_widen_to_images(tmp_path: Path) -> None:
     """이관은 **실제 owner 라이브러리에서** 돌아야 한다.
 

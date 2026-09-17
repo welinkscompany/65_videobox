@@ -31,6 +31,7 @@ from videobox_api.models import (
 from videobox_core_engine.library_ingest import LibraryIngestIdempotencyConflict, LibraryIngestService
 from videobox_core_engine.library_usage import scan_library_asset_usage
 from videobox_core_engine.project_asset_materializer import ProjectAssetMaterializer
+from videobox_core_engine.thumbnail_generator import render_thumbnail_bytes
 from videobox_domain_models.library_assets import LibraryAssetLifecycle, LibraryAssetOrigin, LibraryMediaType
 from videobox_storage.library_user_asset_store import LibraryUserAssetStore
 from videobox_storage.managed_path_resolution import resolve_managed_path, sha256_file
@@ -812,7 +813,7 @@ def _ensure_derivative(store: LibraryUserAssetStore, root: Path, asset: Any, kin
     target.parent.mkdir(parents=True, exist_ok=True)
     if not target.exists():
         try:
-            rendered = _render_derivative(source=source, media_type=asset.media_type.value, kind=kind)
+            rendered = render_thumbnail_bytes(source=source, media_type=asset.media_type.value, kind=kind)
         except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired) as exc:
             raise _DerivativeToolUnavailable("ffmpeg_unavailable") from exc
         if rendered is None:
@@ -832,22 +833,6 @@ def _ensure_derivative(store: LibraryUserAssetStore, root: Path, asset: Any, kin
     mime_type = "image/svg+xml" if target.suffix == ".svg" else "image/png"
     digest = _sha256(target)
     return store.upsert_derivative(library_asset_id=asset.library_asset_id, kind=kind, managed_relative_path=relative.as_posix(), content_sha256=digest, byte_count=target.stat().st_size, mime_type=mime_type, metadata={"source_sha256": asset.content_sha256, "version": DERIVATIVE_VERSION, "generator": "ffmpeg" if target.suffix != ".svg" else "hash-fallback"})
-
-
-def _render_derivative(*, source: Path, media_type: str, kind: str) -> bytes | None:
-    if media_type == "image":
-        # 파형 필터(`showwavespic`)를 그림에 태우면 ffmpeg가 실패하고, 화면에는
-        # 해시 막대 대체 이미지가 떠서 "썸네일이 있다"고 거짓말한다.
-        command = ["ffmpeg", "-y", "-v", "error", "-i", str(source), "-frames:v", "1", "-vf", "scale=640:360:force_original_aspect_ratio=decrease", "-f", "image2pipe", "-vcodec", "png", "pipe:1"]
-    elif media_type == "broll":
-        command = ["ffmpeg", "-y", "-v", "error", "-ss", "0", "-i", str(source), "-frames:v", "1", "-vf", "scale=640:360:force_original_aspect_ratio=decrease", "-f", "image2pipe", "-vcodec", "png", "pipe:1"]
-    else:
-        height = "220" if kind == "waveform" else "360"
-        command = ["ffmpeg", "-y", "-v", "error", "-i", str(source), "-filter_complex", f"aformat=channel_layouts=mono,showwavespic=s=640x{height}:colors=orangered", "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "pipe:1"]
-    result = subprocess.run(command, capture_output=True, timeout=30, check=False)
-    if result.returncode != 0 or not result.stdout:
-        return None
-    return bytes(result.stdout)
 
 
 def _sha256(path: Path) -> str:
