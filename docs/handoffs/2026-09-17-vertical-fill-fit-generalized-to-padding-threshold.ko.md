@@ -1,5 +1,21 @@
 # 세로 배경 채우기(blur/검정) 판단을 여백 크기 기준값으로 일반화
 
+**이 문서가 2026-09-17 세션 전체의 마지막 인계다.** 이 세션은 세 가지를
+순서대로 했다:
+
+1. LM Studio 재부팅 뒤 `<think>` 누출로 실제 채팅이 전부 죽어 있던 것을
+   찾아 고침(`2026-09-17-think-block-outage-and-ambiguous-confirmation-
+   fixed.ko.md`에 상세).
+2. 애매한 확인 문장("그걸로 적용해줘") 거짓 긍정 고침 — 같은 문서.
+3. **세로 배경 채우기 일반화(이 문서의 본론, 아래).**
+
+세 가지 다 실물로 확인했고, 전체 backend pytest는 두 단계 모두 단독
+실행했다(마지막 결과는 아래 §검증). 커밋 6개(문서 포함), `§10.21` 규정대로
+"논리 단위 닫힘 + 전체 시험 초록" 시점에 `origin/main`이 이 브랜치의
+조상임을 확인(`git merge-base --is-ancestor origin/main HEAD`)한 뒤
+순수 fast-forward로 `origin/codex/videobox-container-compatibility`와
+`origin/main` 둘 다 push 완료.
+
 앞 인계(`2026-09-17-think-block-outage-and-ambiguous-confirmation-fixed.
 ko.md`)에 이어, 대표님이 세로 배경 채우기를 장면마다 LLM이 판단하게
 하면 어떠냐고 물었다. 코드를 확인해 보니 이미 "제목 띠 유무"로 갈리는
@@ -49,7 +65,9 @@ ko.md`)에 이어, 대표님이 세로 배경 채우기를 장면마다 LLM이 �
 
 **코드리뷰(medium)**: 이번엔 결함 없음(빈 배열로 보고).
 
-**전체 backend pytest**: 재실행 중 — 결과는 다음 턴/알림에서 확인.
+**전체 backend pytest(단독 실행)**: **5132 passed, 56 skipped, 1 xfailed,
+실패 0건**(38분 36초). 이번 세션이 추가한 시험 5건(local_qwen 앵커링 1건 +
+여백 기준값 4건)만큼 정확히 늘었다 — 회귀 없음.
 
 **실제 렌더로 눈으로 보는 확인은 못 했다.** `/output-variants/{id}/
 materialize` API로 확인하려 했으나, 그 엔드포인트는 `materialize_variant`
@@ -59,14 +77,46 @@ materialize` API로 확인하려 했으나, 그 엔드포인트는 `materialize_
 `unresolved_variant_conflicts`로 막혀 있었다. `task_acfd8147`로 다음
 세션 확인 항목으로 큐에 올렸다.
 
-## 남은 것
+## 다음 세션이 먼저 할 일
 
-- `task_acfd8147`: 실제 숏폼/일반 세로 렌더를 한 번씩 돌려 배경이 여전히
-  의도대로(검정/블러) 보이는지 눈으로 확인.
-- `task_006f1523`(R1 경계 나누기), CapCut R2(세로 블러 육안 확인)는 여전히
-  대기 — 전자는 급하지 않음 확인됨, 후자는 대표님 몫.
+1. `task_acfd8147`: 실제 숏폼/일반 세로 렌더를 한 번씩 돌려 배경이 여전히
+   의도대로(검정/블러) 보이는지 눈으로 확인 — 이번 세션이 못 한 것.
+2. `task_77685434`는 이미 닫혔다(이 세션에서 고치고 실물 확인 완료) — 큐에서
+   빠졌는지 확인만 하면 됨.
+3. `task_006f1523`(R1 경계 나누기), CapCut R2(세로 블러 육안 확인)는 여전히
+   대기 — 전자는 급하지 않음 확인됨, 후자는 대표님이 사무실 데스크톱에서
+   직접 캡컷을 열어야 하는 항목.
+4. 서버가 꺼져 있으면(재부팅 등) `scripts/owner-ready.ps1 -Mode Start
+   -WithYujinMemory`로 켠다. LM Studio 모델이 이상하게 느리면(150초+)
+   `lms ps`로 CONTEXT/PARALLEL이 평소(32768/1)와 다른지 먼저 본다
+   ([[videobox-lm-studio-think-leak-broke-all-chat]] 메모 참고, 코드
+   방어는 이미 되어 있지만 확인 습관은 남겨 둔다).
 
-## 커밋
+## 이번 세션 전체 커밋 (2026-09-13 세션 이후, main에 push 완료)
 
+- `427ff5a7d`, `61dccd37`: 프롬프트 스윕·오류 문구 실물 확인 인계 문서
+  (2026-09-13 세션 마무리분, 이번 세션 시작 시점에 이미 있었음).
+- `2546808b`: LM Studio `<think>` 블록 방어적 제거, 애매한 확인 문장
+  되묻기 지침 추가, 신규 단위 시험 4건.
+- `b79b5c09`: 코드리뷰에서 잡은 결함(정규식 앵커링) 수정 + 회귀 시험 1건 +
+  `short_form_scene_pick.py` 낡은 주석 정정.
+- `61dccd37`: 전체 pytest 결과(5127 passed) + 코드리뷰 결과 인계 반영.
 - `4bf61c03`: `_vertical_fill_fit`을 `box_aspect` 기반 여백 비율 계산으로
   일반화, `_video_box_aspect` 추가(제목 띠 영상 띠 재사용), 시험 4건.
+- `1108b64d`: 세로 배경 채우기 일반화 인계 + `task_acfd8147` 큐에 올림.
+
+## 서버·환경 상태 (세션 종료 시점)
+
+- 컨테이너: 이번 세션이 재빌드한 최신 코드로 켜져 있음(`videobox-workspace`
+  등 healthy).
+- LM Studio: `qwen/qwen3.8-27b`, `CONTEXT 32768 / PARALLEL 1`(정상 설정으로
+  되돌려 둠). 여전히 `<think>` 블록을 흘리지만(원인 미상, GUI 프리셋
+  추정) 코드가 방어하므로 제품 동작에는 영향 없음.
+- worktree: `.worktrees/videobox-container-compatibility`, 브랜치
+  `codex/videobox-container-compatibility`. `origin/codex/videobox-
+  container-compatibility`와 `origin/main` 둘 다 fast-forward로 push
+  완료(충돌 없음, 26커밋).
+- 저장소 루트(`D:\...\65_videobox`, 이 worktree 아님)의 로컬 `main` 체크아웃은
+  이번 push 전에는 `origin/main`보다도 뒤처져 있었다(다른 세션들이 각자
+  worktree에서 작업 중이라 루트를 오래 안 갱신한 것으로 보임) — 다음에 그
+  경로에서 작업하면 먼저 `git pull`부터 할 것.
