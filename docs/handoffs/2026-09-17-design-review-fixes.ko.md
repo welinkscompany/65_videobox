@@ -1,5 +1,7 @@
 # web-design-reviewer·no-ai-design-slop로 화면 점검 → 실제 결함 셋 고침
 
+**대체됨:** `docs/handoffs/2026-09-17-review-output-variant-conflict-resolution.ko.md`
+
 대표님이 skills.sh에서 `github/awesome-copilot@web-design-reviewer`,
 `mengto/skills@no-ai-design-slop` 두 스킬을 설치해 이 저장소를 점검해
 보자고 하셨다. `/projects` 목록·편집기(`/projects/{id}/editor`) 화면을

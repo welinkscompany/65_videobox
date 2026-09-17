@@ -33,6 +33,9 @@ import { mergeVariantRenderItems, variantLabel, variantRenderSummary } from "../
 // 지금도 같은 경로로 부르고 있어서다 -- 옮기면 두 화면이 갈라진다.
 import { shortFormPickNotice } from "../features/editor/variants/shortFormNotice";
 import { repickShortFormWithProgress } from "../features/editor/workbench/shortFormRepickProgress";
+// 변형 충돌 해결 UI도 편집기 것을 그대로 쓴다(위 둘과 같은 이유) -- 새로
+// 짜면 문구·판정이 화면마다 갈린다.
+import { VariantConflictPanel } from "../features/editor/variants/VariantConflictPanel";
 
 export { capcutDraftFailureMessage, finalRenderFailureMessage, subtitleFailureMessage } from "../features/outputs/outputFailureMessages";
 // "지금 편집본의 마스터 완성본"을 고르는 판정은 여기서 새로 짜지 않는다 --
@@ -387,7 +390,12 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   const [capcutRejectedReason, setCapcutRejectedReason] = useState<string | null>(null);
   const [isRegisteringCapcutHandoff, setIsRegisteringCapcutHandoff] = useState(false);
   const [capcutHandoffErrorProjectId, setCapcutHandoffErrorProjectId] = useState<string | null>(null);
-  const [variantOptions, setVariantOptions] = useState<{ variant_id: string; kind: string }[]>([]);
+  const [variantOptions, setVariantOptions] = useState<
+    { variant_id: string; kind: string; variant_revision: number; conflicts: OutputVariant["conflicts"] }[]
+  >([]);
+  // 변형 충돌을 이 화면에서 풀 때 진행 표시. 여러 변형이 동시에 충돌해도 각자
+  // 따로 누르므로 변형 id로 구분한다.
+  const [resolvingVariantId, setResolvingVariantId] = useState<string | null>(null);
   const [selectedVariantIds, setSelectedVariantIds] = useState<string[]>([]);
   const [variantItems, setVariantItems] = useState<VariantRenderItem[]>([]);
   const [confirmedVariantIds, setConfirmedVariantIds] = useState<string[]>([]);
@@ -624,7 +632,20 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
         if (!active) return;
         const options = result.variants
           .filter((variant) => variant.kind === "horizontal" || variant.kind === "vertical_full" || variant.kind === "vertical_highlight")
-          .map((variant) => ({ variant_id: variant.variant_id, kind: variant.kind }));
+          .map((variant) => ({
+            variant_id: variant.variant_id,
+            kind: variant.kind,
+            variant_revision: variant.variant_revision,
+            // 서버 응답을 그대로 믿지 않는다 -- 낡은 fixture·시험은 이 칸이
+            // 없는 변형본도 준다. 마스터가 여러 번 바뀌는 동안 `rebase_variant`가
+            // 같은 필드로 충돌을 거듭 밀어 넣을 수 있다(실물 2026-09-12-ca6dd9ed
+            // 확인) -- 필드당 하나만 남긴다. 어느 쪽을 남기든 안내 문구와
+            // 풀기(해결) 동작은 같다: `patchOutputVariant`는 필드 이름으로만
+            // 푼다.
+            conflicts: Array.from(
+              new Map((variant.conflicts ?? []).map((conflict) => [conflict.field, conflict])).values(),
+            ),
+          }));
         setVariantOptions(options);
         setSelectedVariantIds(options.filter((variant) => variant.kind !== "vertical_highlight").map((variant) => variant.variant_id));
       } catch { if (active) setVariantError(true); }
@@ -733,6 +754,34 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
       setVariantError(true);
     } finally {
       setIsRenderingVariants(false);
+    }
+  };
+  /** task_3dc11426: 숏폼을 펼치면(편집본이 둘로 나뉘면) 마스터가 바뀔 때마다
+   *  가로·세로 변형본에 충돌이 쌓이고(`EditorWorkbenchRoute.tsx`의 자동
+   *  `rebaseOutputVariant` 호출), 렌더는 `unresolved_variant_conflicts`로
+   *  막힌다. 풀 수 있는 문(`VariantConflictPanel` + `patchOutputVariant`)은
+   *  편집기의 `가로·세로 비교` 모드에만 있었다 -- **이 화면에는 없었다.**
+   *  같은 로직을 새로 짜지 않고 편집기가 쓰는 문(`patchOutputVariant`,
+   *  `resolve_conflicts`)을 그대로 재사용한다. */
+  const resolveVariantConflict = async (
+    option: { variant_id: string; variant_revision: number },
+    field: string,
+    decision: "keep_local" | "rebase_master",
+  ) => {
+    if (resolvingVariantId) return;
+    setResolvingVariantId(option.variant_id);
+    try {
+      const result = await api.patchOutputVariant(projectId, option.variant_id, {
+        expected_variant_revision: option.variant_revision,
+        patch: { resolve_conflicts: { [field]: decision } },
+      });
+      setVariantOptions((current) => current.map((item) => item.variant_id === option.variant_id
+        ? { ...item, variant_revision: result.variant.variant_revision, conflicts: result.variant.conflicts }
+        : item));
+    } catch {
+      setVariantError(true);
+    } finally {
+      setResolvingVariantId(null);
     }
   };
   /** 화면에 있는 가로·세로 카드의 상태를 서버에 다시 묻는다. `출력 상태 다시
@@ -1316,6 +1365,17 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
                 onChange={() => setSelectedVariantIds((current) => current.includes(option.variant_id) ? current.filter((id) => id !== option.variant_id) : [...current, option.variant_id])}
               /> {variantLabel(option.kind)}
             </label>
+          ))}
+          {/* task_3dc11426: 숏폼을 펼친 뒤 마스터를 계속 고치면 가로·세로
+              변형본에 충돌이 쌓인다 -- 여기서 못 풀면 이 화면에서 다시 만들
+              길이 아예 없다(편집기의 `가로·세로 비교` 모드까지 찾아가야 했다). */}
+          {variantOptions.filter((option) => option.conflicts.length > 0).map((option) => (
+            <VariantConflictPanel
+              key={`${option.variant_id}-conflicts`}
+              conflicts={option.conflicts}
+              onKeep={(field) => void resolveVariantConflict(option, field, "keep_local")}
+              onRebase={(field) => void resolveVariantConflict(option, field, "rebase_master")}
+            />
           ))}
           <div className="vb-output-actions">
             <Button disabled={!currentState?.session || !selectedVariantIds.length || isRenderingVariants} onClick={() => void handleRenderVariants()}>{isRenderingVariants ? "출력 만드는 중" : "가로·세로 출력 만들기"}</Button>

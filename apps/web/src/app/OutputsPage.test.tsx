@@ -2569,6 +2569,79 @@ describe("완성본 실패 이유", () => {
     expect(screen.queryByText("이 출력을 만들지 못했어요.")).not.toBeInTheDocument();
   });
 
+  /** task_3dc11426: 숏폼을 펼치면(편집본이 둘로 나뉘면) 마스터가 계속 바뀌면서
+   *  가로·세로 변형본에 "스토리(story)" 충돌이 쌓인다(`rebase_variant`가 구조
+   *  필드는 항상 충돌로 남긴다). 렌더는 `unresolved_variant_conflicts`로
+   *  막히는데, 이 화면(`확인과 내보내기`)에는 그걸 풀 방법이 **전혀 없었다** --
+   *  편집기의 `가로·세로 비교` 모드에만 `VariantConflictPanel`이 있었다.
+   *  그래서 "숏폼을 펼친 뒤에는 이 화면에서 세로·가로 영상을 다시 만들 방법이
+   *  막힌다"는 증상이 실제로 재현된다(2026-09-17 실물 재현, project
+   *  2026-09-12-ca6dd9ed). 이 화면에도 같은 해결 UI를 심어야 한다. */
+  it("가로세로 출력에 마스터 충돌이 있으면 이 화면에서 바로 풀 수 있다", async () => {
+    stubCanonicalSubtitleApi();
+    const conflictedVariant = {
+      variant_id: "variant-vf1",
+      kind: "vertical_full",
+      source_session_id: "session-a",
+      source_session_revision: 7,
+      variant_revision: 2,
+      overrides: { crop: null, focal: null, caption: null, safe_area: null, audio: null },
+      locks: [],
+      conflicts: [{ field: "story", reason: "master_changed_while_locked", base_master_revision: 5, current_master_revision: 7 }],
+      selected_segment_ids: null,
+      master_segment_ids: ["segment-a"],
+    };
+    vi.spyOn(api, "listOutputVariants").mockResolvedValue({ variants: [conflictedVariant] as never });
+    const patchOutputVariant = vi.spyOn(api, "patchOutputVariant").mockResolvedValue({
+      variant: { ...conflictedVariant, conflicts: [], variant_revision: 3 },
+    } as never);
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    // 화면이 충돌을 보여주고, 풀 수 있는 단추를 준다 -- 편집기와 같은 문구.
+    expect(await screen.findByText(/마스터가 바뀌었는데 이 항목은 고정돼 있어요/)).toBeVisible();
+    const rebaseButton = screen.getByRole("button", { name: "마스터 기준 다시 맞추기" });
+
+    fireEvent.click(rebaseButton);
+
+    expect(patchOutputVariant).toHaveBeenCalledWith("project_a", "variant-vf1", {
+      expected_variant_revision: 2,
+      patch: { resolve_conflicts: { story: "rebase_master" } },
+    });
+    // 풀고 나면 안내가 사라진다 -- 남아 있으면 대표님이 또 막힌 줄 안다.
+    await waitFor(() => expect(screen.queryByText(/마스터가 바뀌었는데 이 항목은 고정돼 있어요/)).not.toBeInTheDocument());
+  });
+
+  /** 실물(project 2026-09-12-ca6dd9ed)에서 확인함: 마스터가 여러 번 바뀌는
+   *  동안 `rebase_variant`가 같은 필드("story")로 충돌을 매번 밀어 넣어서
+   *  한 변형본의 `conflicts` 배열에 같은 필드가 두 번 들어 있을 수 있다.
+   *  그대로 늘어놓으면 같은 안내가 두 번 뜬다(React key도 겹친다) --
+   *  화면은 필드당 하나만 보여줘야 한다. */
+  it("한 변형본에 같은 필드 충돌이 여러 개 쌓여도 안내는 한 번만 보여준다", async () => {
+    stubCanonicalSubtitleApi();
+    const conflictedVariant = {
+      variant_id: "variant-h1",
+      kind: "horizontal",
+      source_session_id: "session-a",
+      source_session_revision: 11,
+      variant_revision: 3,
+      overrides: { crop: null, focal: null, caption: null, safe_area: null, audio: null },
+      locks: [],
+      conflicts: [
+        { field: "story", reason: "master_changed_while_locked", base_master_revision: 5, current_master_revision: 10 },
+        { field: "story", reason: "master_changed_while_locked", base_master_revision: 10, current_master_revision: 11 },
+      ],
+      selected_segment_ids: null,
+      master_segment_ids: ["segment-a"],
+    };
+    vi.spyOn(api, "listOutputVariants").mockResolvedValue({ variants: [conflictedVariant] as never });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    await screen.findByText(/마스터가 바뀌었는데 이 항목은 고정돼 있어요/);
+    expect(screen.getAllByText(/마스터가 바뀌었는데 이 항목은 고정돼 있어요/)).toHaveLength(1);
+  });
+
   /** `handleRefreshVariants`("출력 상태 다시 확인")도 같은 병이었다 --
    *  진짜 이유는커녕 `error_code`를 아예 옮기지 않아서 방금 실패로 바뀐
    *  항목은 이유 문장 자체가 안 떴다. */
