@@ -1,5 +1,7 @@
 # task_3dc11426 실제로 고침 -- 숏폼을 펼친 뒤 확인과 내보내기 화면에서 세로·가로 영상을 다시 못 만들던 결함
 
+**대체됨:** `docs/handoffs/2026-09-17-vertical-blur-fill-confirmed-on-real-render.ko.md`
+
 대표님이 "계속 진행하자, 자율모드 실행해"라고 지시해서 백로그 다음 항목을
 판단해서 진행했다.
 
