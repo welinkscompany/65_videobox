@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 
-from videobox_core_engine.shorts_layout import shorts_title_from_override
+from videobox_core_engine.shorts_layout import ShortsTitle, shorts_geometry, shorts_title_from_override
 from videobox_domain_models.output_variants import (
     OutputVariant,
     VariantConflict,
@@ -374,44 +374,84 @@ _MASTER_ONLY_TIMELINE_KEYS = frozenset(
 _VERTICAL_VARIANT_KINDS = frozenset({"vertical_full", "vertical_highlight"})
 
 
-#: 세로 변형본의 화면 맞춤 기본값. **2026-09-12에 `crop`에서 뒤집혔다.**
+#: 세로 변형본의 화면 맞춤 기본값을 가르는 **진짜 잣대**.
 #:
-#: 뒤집은 이유는 대표님이 실물에서 본 것이다: "배경 좌우가 짤려서 글자가 양쪽
-#: 사이드가 안보여." 대표님 원본은 이미 유튜브에 올린 영상이라 **자막이 그림에
-#: 구워져 있고** 그 자막 띠가 1920픽셀 폭을 거의 다 쓴다. 9:16으로 잘라 채우면
-#: 가운데 607픽셀만 남아 구워진 자막이 양쪽에서 잘린다. 되돌려 `fit`을 쓰면
-#: 위아래가 검은 띠 68.3%다(2026-09-11 실측으로 이미 버린 값).
+#: 2026-09-12까지는 "제목 띠가 있는가"로 이분했다 -- 있으면 검정(`fit`), 없으면
+#: 흐린 배경(`blur`). 그런데 그 이분을 낳은 진짜 이유는 제목 띠 자체가 아니라
+#: **원본을 잘리지 않게 담을 때 남는 여백의 크기**였다:
 #:
-#: `blur`(화면 이름 `전체 담기`)는 원본 전체를 비율 그대로 담고 남는 자리를 같은
-#: 그림의 흐린 확대본으로 채운다 -- 잘리는 것도, 검은 띠도 없다.
-_VERTICAL_FILL_FIT = "blur"
-
-#: **제목 띠가 걸린 숏폼에서는 흐린 배경을 쓰지 않는다**(2026-09-12 실물 비교).
+#: - 숏폼 영상 띠(1.3:1)는 1920×1080 원본을 폭 그대로 담아도 남는 여백이
+#:   위아래 26.9%뿐이라, 검정으로 두어도 참고 숏폼 넷과 같은 모양이었다
+#:   (2026-09-12 대표님 실물 비교, `shorts_layout.py` 참고).
+#: - 일반 세로(9:16)는 같은 원본을 담으면 여백이 68.3%다(2026-09-11 실측) --
+#:   화면 절반 넘게 시커멓게 보여서, 남는 자리를 같은 그림의 흐린 확대본으로
+#:   채우는 `blur`를 대신 쓴다("배경 좌우가 짤려서 글자가 양쪽 사이드가 안보여"
+#:   문제도 함께 푼다 -- `blur`는 잘라내지 않는다).
 #:
-#: 위 `blur`가 필요했던 이유는 화면 전체를 채우려다 위아래 68%가 검은 띠가 되기
-#: 때문이었다. 숏폼 레이아웃(`shorts_layout.py`)에서는 그 이유가 사라진다 --
-#: 영상 띠를 1.3:1로 잡아 1920×1080 원본을 폭 그대로 담으므로 띠 안에서 남는
-#: 자리가 위아래 111픽셀씩뿐이다.
+#: 2026-09-17에 "제목 띠 유무"라는 이름 붙은 특례 대신 이 여백 비율 자체로
+#: 일반화한다 -- 그래야 숏폼도 일반 세로도 아닌 세 번째 화면비가 생겨도 새
+#: 이름을 만들지 않고 같은 잣대로 답한다.
 #:
-#: 대표님 실제 영상으로 둘 다 구워서 봤다. `blur`는 영상 위아래에 **흐린 띠
-#: 두 줄**이 생겨 결함처럼 보이고, `fit`은 검정이라 제목 띠·아래 검정과 이어져
-#: 참고 숏폼 넷과 같은 모양이 된다. 참고 넷도 전부 검정이었다.
-_SHORTS_LAYOUT_FILL_FIT = "fit"
+#: 정확한 경계를 실측한 적은 없다 -- 26.9%(검정이 자연스러웠다)와 68.3%(검정이
+#: 너무 컸다) 사이에서 고른 값이다. 화면 절반을 넘는 여백은 "의도한
+#: 레터박스"보다 "실수처럼 보이는 빈 공간"에 가깝다고 보고 반올림했다.
+_BLUR_PADDING_THRESHOLD = 0.5
+
+#: 여백 비율을 셈할 때 가정하는 원본 화면비. 이 파일이 이미 전제하는 값이다
+#: (대표님 원본이 1920×1080).
+_ASSUMED_SOURCE_ASPECT = 16 / 9
+
+#: 제목 띠가 없는 세로 변형본의 화면비(1080×1920). `box_aspect`를 안 받은
+#: 호출은 여기로 떨어진다 -- 지금까지의 기본 동작(과제 B)과 같다.
+_DEFAULT_VERTICAL_BOX_ASPECT = 1080 / 1920
 
 
-def _vertical_fill_fit(*, has_title_band: bool) -> str:
-    """세로 변형본의 화면 맞춤 기본값. **판단은 여기 한 곳이다.**"""
-    return _SHORTS_LAYOUT_FILL_FIT if has_title_band else _VERTICAL_FILL_FIT
+def _padding_fraction(*, box_aspect: float) -> float:
+    """원본(가정 16:9)을 이 화면비 상자에 자르지 않고 담을 때 버려지는 비율.
+
+    상자가 원본보다 좁으면(세로가 길면) 위아래가 남고, 상자가 원본보다 넓으면
+    좌우가 남는다 -- 어느 쪽이든 "잘리지 않고 담을 때 버려지는 비율"은 같은
+    식으로 잰다: `1 - 좁은 화면비/넓은 화면비`.
+    """
+    if box_aspect <= 0:
+        return 0.0
+    narrower, wider = sorted((box_aspect, _ASSUMED_SOURCE_ASPECT))
+    return 1.0 - narrower / wider
 
 
-def _filled_broll_controls(raw_controls: object, *, has_title_band: bool = False) -> dict[str, object]:
+def _vertical_fill_fit(*, box_aspect: float = _DEFAULT_VERTICAL_BOX_ASPECT) -> str:
+    """세로 변형본의 화면 맞춤 기본값. **판단은 여기 한 곳이다.**
+
+    여백이 크면(`_BLUR_PADDING_THRESHOLD`를 넘으면) 화면 절반 넘게 시커멓게
+    보이는 것을 피해 `blur`를 쓰고, 작으면 그대로 `fit`(검정)을 쓴다 -- 참고
+    숏폼 넷도 전부 검정이었다.
+    """
+    if _padding_fraction(box_aspect=box_aspect) > _BLUR_PADDING_THRESHOLD:
+        return "blur"
+    return "fit"
+
+
+def _video_box_aspect(*, width: int, height: int, title: ShortsTitle | None) -> float:
+    """원본을 담을 상자의 화면비.
+
+    제목 띠가 있으면 원본이 실제로 놓이는 자리는 캔버스 전체가 아니라
+    **영상 띠 안쪽**이다(`shorts_layout.shorts_geometry`) -- 그 계산을 다시
+    하지 않고 그대로 재사용한다. 제목 띠가 없으면 캔버스 전체가 상자다.
+    """
+    if title is None:
+        return width / height if height else _DEFAULT_VERTICAL_BOX_ASPECT
+    _, _, box_width, box_height = shorts_geometry(width=width, height=height, lines=title.lines).video_box
+    return box_width / box_height if box_height else _DEFAULT_VERTICAL_BOX_ASPECT
+
+
+def _filled_broll_controls(raw_controls: object, *, box_aspect: float = _DEFAULT_VERTICAL_BOX_ASPECT) -> dict[str, object]:
     """세로 변형본용으로 화면 맞춤만 고친 `media_controls` 사본.
 
     채우기 판단은 **여기 한 곳**이다. 값은 `_vertical_fill_fit`이 정하고, 왜 그
-    값인지는 그 위 두 상수의 주석에 있다.
+    값인지는 그 위 상수의 주석에 있다.
     """
     controls = dict(raw_controls) if isinstance(raw_controls, dict) else {}
-    controls["fit"] = _vertical_fill_fit(has_title_band=has_title_band)
+    controls["fit"] = _vertical_fill_fit(box_aspect=box_aspect)
     return controls
 
 
@@ -433,7 +473,7 @@ def _is_vertical_output(timeline: Mapping[str, object]) -> bool:
 
 
 def _fill_frame_for_vertical_session(
-    session: dict[str, object], *, has_title_band: bool = False
+    session: dict[str, object], *, box_aspect: float = _DEFAULT_VERTICAL_BOX_ASPECT
 ) -> dict[str, object]:
     """세로 변형본의 **세션 선택 b-roll**도 화면을 채우게 한다.
 
@@ -460,7 +500,7 @@ def _fill_frame_for_vertical_session(
         updated = dict(segment)
         override = updated.get("broll_override")
         if isinstance(override, dict):
-            updated["broll_override"] = {**override, "media_controls": _filled_broll_controls(override.get("media_controls"), has_title_band=has_title_band)}
+            updated["broll_override"] = {**override, "media_controls": _filled_broll_controls(override.get("media_controls"), box_aspect=box_aspect)}
         for key in ("media_windows", "media_window_basis"):
             windows = updated.get(key)
             if not isinstance(windows, list):
@@ -468,7 +508,7 @@ def _fill_frame_for_vertical_session(
             updated[key] = [
                 {**window, "broll_override": {
                     **window["broll_override"],
-                    "media_controls": _filled_broll_controls(window["broll_override"].get("media_controls"), has_title_band=has_title_band),
+                    "media_controls": _filled_broll_controls(window["broll_override"].get("media_controls"), box_aspect=box_aspect),
                 }}
                 if isinstance(window, dict) and isinstance(window.get("broll_override"), dict)
                 else window
@@ -479,7 +519,7 @@ def _fill_frame_for_vertical_session(
 
 
 def _fill_frame_for_vertical_variant(
-    raw_tracks: object, *, variant_kind: str, has_title_band: bool = False
+    raw_tracks: object, *, variant_kind: str, box_aspect: float = _DEFAULT_VERTICAL_BOX_ASPECT
 ) -> list[dict[str, object]]:
     """세로 변형본의 화면 클립은 **기본이 화면을 채워야 한다.**
 
@@ -538,7 +578,7 @@ def _fill_frame_for_vertical_variant(
         for clip in clips:
             if not isinstance(clip, dict):
                 continue
-            clip["media_controls"] = _filled_broll_controls(clip.get("media_controls"), has_title_band=has_title_band)
+            clip["media_controls"] = _filled_broll_controls(clip.get("media_controls"), box_aspect=box_aspect)
     return tracks
 
 
@@ -561,18 +601,18 @@ def build_variant_timeline_payload(
     이 저장소는 같은 함정에 전에도 걸렸다 -- 렌더 경로가 둘이라 필터를 한 곳만
     고쳤던 일이 있다. 그래서 두 입구가 이 함수를 부르게 묶는다.
     """
-    # **제목 띠 여부를 먼저 정한다.** 아래 두 곳이 같은 답을 써야 한다 -- 화면
-    # 클립의 맞춤 기본값(`_fill_frame_for_vertical_variant`)과 타임라인에 싣는
-    # `shorts_layout`이 갈리면, 흐린 배경으로 깐 화면에 검정을 전제한 띠가 얹힌다.
+    # **여백 상자의 화면비를 먼저 정한다.** 아래 두 곳이 같은 답을 써야 한다 --
+    # 화면 클립의 맞춤 기본값(`_fill_frame_for_vertical_variant`)과 타임라인에
+    # 싣는 `shorts_layout`이 갈리면, 흐린 배경으로 깐 화면에 검정을 전제한 띠가
+    # 얹힌다.
     layout = overrides.layout if overrides is not None else None
+    output_size = _VARIANT_OUTPUT_SIZES[variant_kind]
     # **렌더와 똑같은 잣대로 묻는다.** "칸이 있는가"가 아니라 "제목 띠가 그려지는가"다
     # (`shorts_title_from_override`). 껐을 때(`hidden`) 이 둘이 갈리면, 렌더는 화면
     # 전체에 담는데 맞춤은 검정 여백을 전제해 **위아래 68%가 검은 띠**가 된다 --
     # 과제 B가 없앤 바로 그 결함이 되돌아온다.
-    draws_title_band = (
-        variant_kind == "vertical_highlight"
-        and shorts_title_from_override(layout) is not None
-    )
+    title = shorts_title_from_override(layout) if variant_kind == "vertical_highlight" else None
+    box_aspect = _video_box_aspect(width=output_size["width"], height=output_size["height"], title=title)
     payload: dict[str, object] = {
         key: value
         for key, value in master_timeline.items()
@@ -580,7 +620,7 @@ def build_variant_timeline_payload(
     }
     payload.update(
         {
-            "output": dict(_VARIANT_OUTPUT_SIZES[variant_kind]),
+            "output": dict(output_size),
             "source_variant_id": derived.source_variant_id,
             "source_variant_revision": derived.source_variant_revision,
             "source_session_id": derived.source_session_id,
@@ -588,7 +628,7 @@ def build_variant_timeline_payload(
             "segments": list(derived.segments),
             "tracks": _fill_frame_for_vertical_variant(
                 master_timeline.get("tracks", []), variant_kind=variant_kind,
-                has_title_band=draws_title_band,
+                box_aspect=box_aspect,
             ),
         }
     )
@@ -623,15 +663,16 @@ def variant_render_session(
     )
     if projected is None or not _is_vertical_output(variant_timeline):
         return projected
-    # 제목 띠가 걸렸는지는 **타임라인에서** 읽는다. 렌더는 변형본을 안 들고 오고
-    # (`_is_vertical_output` 머리말), `build_variant_timeline_payload`가 그 값을
-    # 여기 실어 보낸다. 안 읽으면 화면 클립만 흐린 배경으로 남아 같은 숏폼 안에서
-    # 두 경로가 다른 모양이 된다.
-    return _fill_frame_for_vertical_session(
-        projected,
-        has_title_band=shorts_title_from_override(variant_timeline.get("shorts_layout"))
-        is not None,
-    )
+    # 제목 띠가 걸렸는지, 캔버스 크기가 얼마인지는 **타임라인에서** 읽는다. 렌더는
+    # 변형본을 안 들고 오고(`_is_vertical_output` 머리말), `build_variant_
+    # timeline_payload`가 그 값들을 여기 실어 보낸다. 안 읽으면 화면 클립만 흐린
+    # 배경으로 남아 같은 숏폼 안에서 두 경로가 다른 모양이 된다.
+    output = variant_timeline.get("output")
+    width = int(output["width"]) if isinstance(output, Mapping) else 1080
+    height = int(output["height"]) if isinstance(output, Mapping) else 1920
+    title = shorts_title_from_override(variant_timeline.get("shorts_layout"))
+    box_aspect = _video_box_aspect(width=width, height=height, title=title)
+    return _fill_frame_for_vertical_session(projected, box_aspect=box_aspect)
 
 
 def _projected_variant_session(

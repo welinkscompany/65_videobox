@@ -201,6 +201,65 @@ def test_the_session_chosen_broll_of_a_vertical_variant_keeps_the_sides() -> Non
     assert segment["media_windows"][0]["broll_override"]["media_controls"]["fit"] == FIT_KEEPS_EVERYTHING
 
 
+# --- 여백 크기 기준값으로 일반화 (2026-09-17) --------------------------------
+
+
+def test_padding_fraction_reproduces_the_two_measured_reference_points() -> None:
+    """이 판단을 낳은 실측 두 값이 계산식으로 정확히 재현되는지 지킨다.
+
+    문서로 남은 실측(2026-09-12): 숏폼 영상 띠(1.3:1)는 여백 26.9%, 일반
+    세로(9:16)는 68.3%다. 임의로 고른 반올림값이 아니라 "원본(16:9)을 이
+    화면비에 자르지 않고 담을 때 버려지는 비율"이라는 계산식이 그 실측과
+    맞는지 잠근다 -- 안 맞으면 기준값(threshold)이 엉뚱한 값과 비교하는
+    셈이 된다.
+    """
+    from videobox_core_engine.output_variants import _padding_fraction
+
+    assert _padding_fraction(box_aspect=1.3) == pytest.approx(0.269, abs=0.001)
+    assert _padding_fraction(box_aspect=1080 / 1920) == pytest.approx(0.683, abs=0.001)
+
+
+def test_vertical_fill_fit_now_answers_by_threshold_not_a_named_special_case() -> None:
+    """제목 띠 유무라는 이분법 대신 "여백이 절반을 넘는가"로 답한다.
+
+    숏폼(26.9% 여백)과 일반 세로(68.3% 여백)라는 이름을 몰라도, 그 사이
+    어딘가의 화면비가 새로 생기면 이 잣대가 이름표 없이도 알아서 답해야
+    한다 -- 그게 이번 일반화의 목적이다.
+    """
+    from videobox_core_engine.output_variants import _ASSUMED_SOURCE_ASPECT, _vertical_fill_fit
+
+    assert _vertical_fill_fit(box_aspect=1.3) == "fit"  # 26.9% 여백 -- 검정으로 충분
+    assert _vertical_fill_fit(box_aspect=1080 / 1920) == "blur"  # 68.3% 여백 -- 너무 크다
+
+    half_boundary_aspect = _ASSUMED_SOURCE_ASPECT / 2  # 여백이 정확히 50%가 되는 화면비
+    assert _vertical_fill_fit(box_aspect=half_boundary_aspect + 0.05) == "fit"
+    assert _vertical_fill_fit(box_aspect=half_boundary_aspect - 0.05) == "blur"
+
+
+def test_video_box_aspect_matches_the_shorts_video_band_when_a_title_is_present() -> None:
+    """제목 띠가 있으면 캔버스 전체가 아니라 **영상 띠 안쪽**의 화면비를 잰다.
+
+    `shorts_layout.shorts_geometry`가 이미 검증된 그 계산이다 -- 여기서
+    다시 계산하지 않고 그 결과를 재사용하는지를 지킨다(같은 로직 두 자리
+    함정을 피한다).
+    """
+    from videobox_core_engine.output_variants import _video_box_aspect
+    from videobox_core_engine.shorts_layout import ShortsTitle, shorts_geometry
+
+    title = ShortsTitle(lines=("첫 줄", "둘째 줄"))
+    expected = shorts_geometry(width=1080, height=1920, lines=title.lines)
+    expected_aspect = expected.video_box[2] / expected.video_box[3]
+
+    assert _video_box_aspect(width=1080, height=1920, title=title) == pytest.approx(expected_aspect)
+    assert expected_aspect == pytest.approx(1.3, abs=0.01)
+
+
+def test_video_box_aspect_falls_back_to_the_whole_canvas_when_there_is_no_title() -> None:
+    from videobox_core_engine.output_variants import _video_box_aspect
+
+    assert _video_box_aspect(width=1080, height=1920, title=None) == pytest.approx(1080 / 1920)
+
+
 # --- 엔진 위 층: API·미리보기 지문·캡컷 -------------------------------------
 
 
