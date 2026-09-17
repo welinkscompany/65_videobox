@@ -1,5 +1,9 @@
 # LM Studio 재부팅 뒤 실제 채팅이 전부 죽어 있던 것 + 애매한 확인 거짓 긍정, 둘 다 고침 (2026-09-17)
 
+**대체됨:** 같은 날 이어진 세션 `2026-09-17-vertical-fill-fit-generalized-
+to-padding-threshold.ko.md`가 세로 배경 채우기 일반화를 다뤘다. 최신
+인계는 그쪽을 읽을 것.
+
 앞 인계(`2026-09-13-conversation-prompt-sweep-and-error-leak-confirmed.ko.md`)가
 `task_77685434`로 큐에 올린 "애매한 확인 문장이 거짓 긍정한다"를 마무리하러
 들어왔다가, 그보다 훨씬 급한 **실제 서비스 전체 장애**를 발견해서 먼저 고쳤다.
