@@ -401,8 +401,30 @@ _VARIANT_OUTPUT_SIZES: dict[str, dict[str, int]] = {
 #: 같은 1920×1080으로 렌더됐고(완성본·가로·세로 md5가 전부 같았다),
 #: `output_mode`는 payload 쪽이 `save_timeline_run`의 인자를 덮어 늘 `review`로
 #: 저장됐다.
+#:
+#: `operator_guidance`·`_operator_guidance_reuse_key`가 여기 있는 이유는
+#: 2026-09-17 실물 재현(project-0907-b26195af) 때문이다 -- 대표님이 마스터의
+#: 검토 화면을 한 번이라도 열면 `save_operator_guidance`가 이 칸을 마스터
+#: 타임라인 JSON에 직접 박아 넣는다. 이 둘을 안 막으면 `build_variant_
+#: timeline_payload`가 매번 그 값을 변형본 payload로 그대로 베끼는데, 캐시된
+#: 변형본 타임라인은 만들어질 때 이 칸이 없었으므로 `variant_timeline_
+#: needs_rebuild`가 **영원히 참**이 된다 -- 입력이 하나도 안 바뀌어도 `가로·세로
+#: 출력 만들기`를 부를 때마다 새 timeline_id가 생기고, 렌더는 새 timeline마다
+#: 검토 승인을 처음부터 요구해서 대표님이 방금 승인해도 다음 재시도가 또
+#: 무효로 만들었다. 이 값은 애초에 마스터 자신의 검토 화면을 위한 것이라
+#: 변형본과는 무관하다.
 _MASTER_ONLY_TIMELINE_KEYS = frozenset(
-    {"timeline_id", "project_id", "file_uri", "created_at", "summary", "output", "output_mode"}
+    {
+        "timeline_id",
+        "project_id",
+        "file_uri",
+        "created_at",
+        "summary",
+        "output",
+        "output_mode",
+        "operator_guidance",
+        "_operator_guidance_reuse_key",
+    }
 )
 
 #: 세로 변형본 두 종류. 가로(`horizontal`)는 마스터와 캔버스 비율이 같으므로

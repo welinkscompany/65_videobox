@@ -305,6 +305,123 @@ def test_materialize_carries_current_approved_review_to_variant_timeline(tmp_pat
     assert review["source_variant_revision"] == variant["variant_revision"]
 
 
+def test_variant_render_review_approval_survives_retry_when_master_has_operator_guidance(
+    tmp_path: Path,
+) -> None:
+    """실물 재현(project 0907-b26195af, 2026-09-17): 마스터 타임라인의 검토 화면을
+    한 번이라도 열면 `operator_guidance`가 마스터 JSON에 그대로 박힌다
+    (`get_review_snapshot` -> `save_operator_guidance`). 그 뒤로는 `가로·세로 출력
+    만들기`(`/variant-renders`)를 부를 때마다 `_materialize_variant_for_output`이
+    입력이 전혀 안 바뀌었는데도 매번 새 timeline_id를 만들었다 --
+    `build_variant_timeline_payload`가 `operator_guidance`를 마스터에서 그대로
+    베끼는데(`_MASTER_ONLY_TIMELINE_KEYS`에 없어서), 캐시된 변형본 타임라인에는
+    그 칸이 없어 `variant_timeline_needs_rebuild`가 영원히 참이 됐다. 렌더는
+    새 timeline마다 검토 승인을 처음부터 요구하므로(`final_output_requires_
+    review_approval`), 대표님이 방금 승인해도 다음 재시도가 또 새 타임라인을
+    만들어 승인이 절대 못 따라잡았다.
+    """
+    app = _offline_app(tmp_path)
+    client = TestClient(app)
+    store = app.state.store
+    project = client.post("/api/projects", json={"name": "Operator guidance leak"}).json()
+    project_id = project["project_id"]
+    source = store.save_timeline_run(
+        project_id=project_id,
+        output_mode="review",
+        timeline_payload={"review_flags": [], "pending_recommendations": [], "tracks": [], "segments": []},
+    )
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id=source["timeline_id"],
+        session_payload={"segments": [{"segment_id": "seg-a", "text": "a"}], "history": []},
+    )
+    store.save_operator_guidance(
+        project_id=project_id,
+        timeline_id=source["timeline_id"],
+        operator_guidance={"summary": "ok", "action_items": [], "provider_trace": {}},
+    )
+
+    variant = client.get(
+        f"/api/projects/{project_id}/output-variants",
+        params={"session_id": session["session_id"]},
+    ).json()["variants"][0]
+    request_body = {"session_id": session["session_id"], "variant_ids": [variant["variant_id"]]}
+
+    first = client.post(f"/api/projects/{project_id}/variant-renders", json=request_body).json()
+    first_item = first["items"][0]
+
+    approve = client.post(
+        f"/api/projects/{project_id}/review-approvals/{first_item['timeline_job_id']}/approve"
+    )
+    assert approve.status_code == 202, approve.text
+
+    second = client.post(f"/api/projects/{project_id}/variant-renders", json=request_body).json()
+    second_item = second["items"][0]
+
+    assert second_item["timeline_id"] == first_item["timeline_id"], (
+        "입력이 안 바뀌었으면 변형본 타임라인을 재사용해야 한다 -- 안 그러면 "
+        "방금 승인한 것이 다음 재시도에서 다시 무효가 된다."
+    )
+    review = client.get(
+        f"/api/projects/{project_id}/review-approvals/timelines/{second_item['timeline_id']}"
+    ).json()
+    assert review["review_status"] == "approved"
+
+
+def test_variant_render_reopened_review_stays_blocked_across_reused_retries(tmp_path: Path) -> None:
+    """owner 게이트가 캐시 재사용으로 몰래 뚫리면 안 된다.
+
+    위 시험(`..._survives_retry_when_master_has_operator_guidance`)이 고친 캐시
+    재사용은 "승인이 이어져야 한다"는 쪽만 본다. 반대쪽도 지켜야 한다 -- 대표님이
+    `검토 다시 열기`로 승인을 일부러 되돌렸으면, 같은 timeline_id를 재사용하는
+    다음 재시도도 **다시 승인된 것처럼 보이면 안 된다.**
+    """
+    app = _offline_app(tmp_path)
+    client = TestClient(app)
+    store = app.state.store
+    project = client.post("/api/projects", json={"name": "Reopen stays blocked"}).json()
+    project_id = project["project_id"]
+    source = store.save_timeline_run(
+        project_id=project_id,
+        output_mode="review",
+        timeline_payload={"review_flags": [], "pending_recommendations": [], "tracks": [], "segments": []},
+    )
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id=source["timeline_id"],
+        session_payload={"segments": [{"segment_id": "seg-a", "text": "a"}], "history": []},
+    )
+    variant = client.get(
+        f"/api/projects/{project_id}/output-variants",
+        params={"session_id": session["session_id"]},
+    ).json()["variants"][0]
+    request_body = {"session_id": session["session_id"], "variant_ids": [variant["variant_id"]]}
+
+    first = client.post(f"/api/projects/{project_id}/variant-renders", json=request_body).json()
+    first_item = first["items"][0]
+    approved = client.post(
+        f"/api/projects/{project_id}/review-approvals/{first_item['timeline_job_id']}/approve"
+    )
+    assert approved.status_code == 202, approved.text
+
+    reopened = client.post(
+        f"/api/projects/{project_id}/review-approvals/{first_item['timeline_job_id']}/reopen"
+    )
+    assert reopened.status_code == 202, reopened.text
+    assert reopened.json()["review_status"] != "approved"
+
+    second = client.post(f"/api/projects/{project_id}/variant-renders", json=request_body).json()
+    second_item = second["items"][0]
+
+    assert second_item["timeline_id"] == first_item["timeline_id"]
+    review = client.get(
+        f"/api/projects/{project_id}/review-approvals/timelines/{second_item['timeline_id']}"
+    ).json()
+    assert review["review_status"] != "approved", (
+        "검토 다시 열기로 되돌린 승인이 캐시 재사용 때문에 되살아나면 안 된다."
+    )
+
+
 def test_materialize_stale_master_revision_fails_closed(tmp_path: Path) -> None:
     client, project_id, _ = _client(tmp_path)
     variant = client.get(f"/api/projects/{project_id}/output-variants").json()["variants"][0]

@@ -1,5 +1,7 @@
 # task_5d021de9 실제로 고침 -- 변형본 충돌 해결이 장면 스냅샷을 안 갱신하던 결함
 
+**대체됨:** `docs/handoffs/2026-09-17-variant-render-review-approval-operator-guidance-leak.ko.md`
+
 대표님이 "task_5d021de9 칩 눌러서 바로 시작해줘"라고 하셔서(칩은 못 누르니)
 이 세션에서 바로 이어받았다.
 
