@@ -391,6 +391,30 @@ class VariantAudioCorrectionParameters(_Parameters):
     fade_out_sec: float = Field(ge=0, le=10)
 
 
+class VariantConflictResolutionParameters(_Parameters):
+    """화면(`VariantConflictPanel`)에 이미 있는 변형본 충돌 풀기를 채팅에도 연다
+    (owner 승인 2026-09-18, task_99becf89).
+
+    `field`·`decision` 둘 다 **필수**다. 이 결정은 되돌릴 수 없다 -- 마스터를
+    새로 받아들이거나(`rebase_master`) 지금 걸린 값을 그대로 지킨다
+    (`keep_local`). 창작자의 말이 어느 쪽인지 애매하면 짐작해서 이 action을
+    만들지 말고 되물어야 한다(`yujin_local_conversation._YUJIN_SYSTEM_PROMPT`).
+
+    값은 단추 경로(`OutputVariantPatchRequest.patch.resolve_conflicts`)와 정확히
+    같다 -- `field`는 `VariantField`(엔진의 `output_variants._OVERRIDE_FIELDS |
+    _STRUCTURAL_FIELDS`), `decision`은 `keep_local`/`rebase_master`. 여기서
+    "지금 실제로 충돌 중인 필드인가"는 검증하지 않는다 -- 그건 채팅 컨텍스트가
+    아직 안 들고 있는 정보라(2026-09-18 시점), `apply_variant_patch`가 적용
+    직전에 `unknown_variant_conflict:{field}`로 최종 확인한다.
+    """
+
+    action: Literal["resolve_variant_conflict"]
+    field: Literal[
+        "crop", "focal", "caption", "safe_area", "audio", "layout", "story", "segment_order"
+    ]
+    decision: Literal["keep_local", "rebase_master"]
+
+
 class VariantShortsTitleParameters(_Parameters):
     """숏폼 **첫 화면 제목 띠**(`videobox_core_engine.shorts_layout`).
 
@@ -538,6 +562,7 @@ VariantParameters = Annotated[
     | VariantCaptionLayoutParameters
     | VariantSafeAreaParameters
     | VariantAudioCorrectionParameters
+    | VariantConflictResolutionParameters
     | VariantShortsTitleParameters
     | VariantSegmentSelectionParameters
     | VariantShortFormCreateParameters

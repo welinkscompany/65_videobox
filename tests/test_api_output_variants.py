@@ -720,6 +720,169 @@ def test_yujin_short_form_cut_applies_through_the_real_apply_route(tmp_path: Pat
     assert undone.json()["variant"]["selected_segment_ids"] == before
 
 
+def _save_variant_conflict_resolution_proposal(
+    app, project_id: str, session: dict, variant: dict, *, field: str, decision: str
+) -> str:
+    """화면의 `VariantConflictPanel`을 채팅으로 여는 제안을 유진이 실제로 돌려주는
+    모양 그대로 만들어 저장한다 (owner 승인 2026-09-18, task_99becf89)."""
+    import json as _json
+
+    from videobox_core_engine.yujin_creator_proposal_adapter import (
+        activate_yujin_media_projection,
+        parse_and_project_yujin_creator_output,
+    )
+    from videobox_domain_models.yujin_creator_context import YujinCreatorContext
+
+    store = app.state.store
+    asset_index_revision = int(store.get_asset_index_revision(project_id))
+    session_revision = int(session["session_revision"])
+    context = YujinCreatorContext.model_validate(
+        {
+            "schema_version": "videobox.yujin-context.v1",
+            "project_id": project_id,
+            "session_id": session["session_id"],
+            "session_revision": session_revision,
+            "asset_index_revision": asset_index_revision,
+            "timeline_id": session["timeline_id"],
+            "timeline_version": "v001",
+            "segment_summaries": (),
+            "media_candidates": (),
+            "timeline_summary": {
+                "duration_sec": 5.0,
+                "track_count": 1,
+                "clip_count": 2,
+                "gap_count": 0,
+            },
+            "supported_controls": ({"kind": "output_variant", "mode": "recommendation_only"},),
+            "current_surface": "output",
+            "selection_kind": "variant",
+            "master_session_id": session["session_id"],
+            "master_session_revision": session_revision,
+            "variant_id": str(variant["variant_id"]),
+            "variant_kind": variant["kind"],
+            "variant_revision": int(variant["variant_revision"]),
+        }
+    )
+    payload = {
+        "schema_version": "videobox.yujin-response.v1",
+        "reply_text": "충돌을 풀었어요.",
+        "proposal": {
+            "proposal_id": "proposal-resolve-conflict",
+            "base_revision": f"session:{session['session_id']}:revision:{session_revision}:assets:{asset_index_revision}",
+            "title": "변형본 충돌 풀기",
+            "rationale": "말씀하신 대로 풀었습니다.",
+            "variant_id": str(variant["variant_id"]),
+            "base_variant_revision": int(variant["variant_revision"]),
+            "operations": [
+                {
+                    "operation_id": "resolve-conflict",
+                    "kind": "output_variant",
+                    "target": {
+                        "variant_id": str(variant["variant_id"]),
+                        "track_id": "output-variant",
+                    },
+                    "parameters": {
+                        "action": "resolve_variant_conflict",
+                        "field": field,
+                        "decision": decision,
+                    },
+                    "requires_materialization": False,
+                    "preview_summary": "충돌 필드를 결정대로 풉니다",
+                }
+            ],
+        },
+    }
+    raw = (
+        "충돌을 풀었어요.\n"
+        "```videobox-yujin-response\n"
+        f"{_json.dumps(payload, ensure_ascii=False)}\n"
+        "```"
+    )
+    projection = parse_and_project_yujin_creator_output(
+        raw,
+        context,
+        revision=1,
+        trusted_project_id=project_id,
+        trusted_run_id="run-resolve-conflict",
+    )
+    assert projection.proposal is not None, projection.validation_outcome
+    projection = activate_yujin_media_projection(
+        store=store,
+        project_id=project_id,
+        context=context,
+        projection=projection,
+    )
+    proposal = projection.proposal
+    assert proposal is not None
+    assert proposal.status == "ready", proposal.diff.get("proposal_mode")
+    store.save_director_proposal(project_id, proposal)
+    return proposal.proposal_id
+
+
+def test_yujin_resolves_a_vertical_full_story_conflict_through_chat_and_unblocks_materialize(
+    tmp_path: Path,
+) -> None:
+    """`VariantConflictPanel`의 '마스터 기준 다시 맞추기'를 **채팅으로** 눌러도
+    같은 결과가 나와야 한다 (owner 승인 2026-09-18, task_99becf89).
+
+    단추 경로(`test_resolving_a_vertical_full_story_conflict_unblocks_materialize`)가
+    2026-09-17에 겪은 것과 같은 함정이 채팅 경로(`director/proposals/.../batch-apply`)
+    에도 있을 수 있다 -- `current_master_segment_ids`를 안 넘기면 충돌 딱지만
+    지워지고 렌더는 여전히 막힌다. 이 시험이 그 배선을 실물로 잰다.
+    """
+    client, project_id, session = _client(tmp_path)
+    app = client.app
+    variants = client.get(f"/api/projects/{project_id}/output-variants").json()["variants"]
+    vertical = next(item for item in variants if item["kind"] == "vertical_full")
+
+    bumped = app.state.store.update_editing_session(
+        project_id=project_id,
+        session_id=session["session_id"],
+        session_payload={
+            "segments": [
+                {"segment_id": "seg-a", "text": "a"},
+                {"segment_id": "seg-new", "text": "new"},
+                {"segment_id": "seg-b", "text": "b"},
+            ],
+            "history": [],
+        },
+    )
+    assert bumped["session_revision"] == 2
+
+    rebased = client.post(
+        f"/api/projects/{project_id}/output-variants/{vertical['variant_id']}/rebase",
+        json={"new_master_revision": 2, "changed_fields": ["story"]},
+    ).json()["variant"]
+    assert rebased["conflicts"][0]["field"] == "story"
+
+    proposal_id = _save_variant_conflict_resolution_proposal(
+        app, project_id, {**session, "session_revision": 2}, rebased,
+        field="story", decision="rebase_master",
+    )
+    candidate_id = app.state.store.get_director_proposal(
+        project_id=project_id, proposal_id=proposal_id
+    ).candidates[0].candidate_id
+
+    response = client.post(
+        f"/api/projects/{project_id}/director/proposals/{proposal_id}/batch-apply",
+        json={"candidate_ids": [candidate_id], "expected_revision": 2},
+    )
+
+    assert response.status_code == 200, response.text
+    resolved_variant = response.json()["variant"]
+    assert resolved_variant["conflicts"] == []
+    # **이 줄이 2026-09-17에 단추 경로에서 빠져 있던 자리다.** 빠지면 딱지만
+    # 지워지고 마스터 장면 스냅샷은 옛날 것이라 materialize가 여전히 막힌다.
+    assert resolved_variant["master_segment_ids"] == ["seg-a", "seg-new", "seg-b"]
+
+    materialized = client.post(
+        f"/api/projects/{project_id}/output-variants/{vertical['variant_id']}/materialize",
+        json={"expected_master_session_revision": 2},
+    )
+    assert materialized.status_code == 201, materialized.text
+    assert materialized.json()["materialization"]["source_session_revision"] == 2
+
+
 # --- 숏폼 장면 고르기: 자막 글자 수가 아니라 유진의 판단 -----------------------
 #
 # 가짜 모델은 `tests/test_api_caption_translation.py`와 같은 틀이다 -- 진짜

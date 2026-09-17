@@ -337,6 +337,96 @@ def _variant_crop_candidate():
     return projection.proposal.candidates[0]
 
 
+def _variant_conflict_resolution_candidate(*, field: str, decision: str):
+    """화면의 `VariantConflictPanel`을 채팅으로 여는 후보 하나를 만든다
+    (owner 승인 2026-09-18, task_99becf89)."""
+    from videobox_core_engine.yujin_creator_proposal_adapter import (
+        parse_and_project_yujin_creator_output,
+    )
+
+    payload = json.loads(
+        _short_form_raw(["segment-1"])
+        .split("```videobox-yujin-response\n", 1)[1]
+        .rsplit("\n```", 1)[0]
+    )
+    payload["proposal"]["operations"][0]["operation_id"] = "resolve-conflict"
+    payload["proposal"]["operations"][0]["parameters"] = {
+        "action": "resolve_variant_conflict",
+        "field": field,
+        "decision": decision,
+    }
+    # `reply_text`와 보이는 앞부분이 정확히 같아야 한다 -- 다르면
+    # `parse_and_project_yujin_creator_output`이 `_invalid()`로 떨어진다.
+    payload["reply_text"] = "충돌을 풀었어요."
+    raw = (
+        "충돌을 풀었어요.\n"
+        "```videobox-yujin-response\n"
+        f"{json.dumps(payload, ensure_ascii=False)}\n"
+        "```"
+    )
+    projection = parse_and_project_yujin_creator_output(
+        raw,
+        _short_form_context(),
+        revision=1,
+        trusted_project_id="project-1",
+        trusted_run_id="run-conflict",
+    )
+    assert projection.proposal is not None, projection.validation_outcome
+    return projection.proposal.candidates[0]
+
+
+def test_resolve_variant_conflict_action_becomes_a_resolve_conflicts_patch() -> None:
+    """채팅의 `resolve_variant_conflict`는 `overrides`가 아니라 화면의 단추
+    (`patch: {"resolve_conflicts": {field: decision}}`)와 **정확히 같은 자리**로
+    간다 -- 이름을 갈아 끼우면 화면과 채팅이 서로 다른 결과를 만든다."""
+    from videobox_core_engine.yujin_creator_proposal_adapter import (
+        variant_patch_from_yujin_candidate,
+    )
+
+    patch = variant_patch_from_yujin_candidate(
+        _variant_conflict_resolution_candidate(field="crop", decision="keep_local")
+    )
+
+    assert patch == {"resolve_conflicts": {"crop": "keep_local"}}
+
+
+def test_resolve_variant_conflict_merges_with_other_shape_adjustments() -> None:
+    """"crop은 마스터로 맞추고 focal도 다시 잡아줘"처럼 한 메시지에 충돌 풀기와
+    모양 조정이 섞여도 같은 patch 하나로 합친다."""
+    from videobox_core_engine.yujin_creator_proposal_adapter import (
+        merged_variant_patch_from_yujin_candidates,
+    )
+
+    merged = merged_variant_patch_from_yujin_candidates(
+        [
+            _variant_crop_candidate(),
+            _variant_conflict_resolution_candidate(field="story", decision="rebase_master"),
+        ]
+    )
+
+    assert merged["resolve_conflicts"] == {"story": "rebase_master"}
+    assert merged["overrides"]["crop"] == {
+        "x": 0.1,
+        "y": 0.0,
+        "width": 0.8,
+        "height": 1.0,
+    }
+
+
+def test_resolve_variant_conflict_alone_does_not_carry_an_empty_overrides_key() -> None:
+    """충돌 풀기만 있을 때는 `overrides` 자리를 아예 안 보낸다 -- 장면만 고를 때와
+    같은 규칙이다(`test_short_form_scene_selection_becomes_a_selected_segment_ids_patch`)."""
+    from videobox_core_engine.yujin_creator_proposal_adapter import (
+        merged_variant_patch_from_yujin_candidates,
+    )
+
+    merged = merged_variant_patch_from_yujin_candidates(
+        [_variant_conflict_resolution_candidate(field="focal", decision="keep_local")]
+    )
+
+    assert merged == {"resolve_conflicts": {"focal": "keep_local"}}
+
+
 def test_exact_trailing_frame_projects_existing_candidate_only_dto() -> None:
     from videobox_core_engine.yujin_creator_proposal_adapter import (
         derive_yujin_persisted_proposal_id,

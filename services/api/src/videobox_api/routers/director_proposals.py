@@ -38,6 +38,7 @@ from videobox_core_engine.output_variants import (
     UNFOLD_INDEPENDENCE_RULE,
     apply_variant_patch,
     output_variant_from_row,
+    segment_ids_from_master,
 )
 from videobox_api.short_form_scenes import (
     created_short_form_variant,
@@ -1229,10 +1230,26 @@ def build_director_proposals_router(
                     # 모양 조정(`overrides`)과 숏폼 장면 고르기(`selected_segment_ids`)를
                     # **한 patch로** 합친다. 전에는 `overrides`만 합쳐서, 장면을
                     # 골라 줘도 어디에도 닿지 않았다.
+                    merged_patch = merged_variant_patch_from_yujin_candidates(selected)
+                    # `vertical_full`이 `story`/`segment_order` 충돌을 `rebase_master`로
+                    # 풀 때만 마스터 장면 목록을 읽는다 -- 단추 경로
+                    # (`routers/output_variants.py`의 `patch_variant`)와 같은 이유다.
+                    # 여기서 빼먹으면 채팅으로 푼 충돌 딱지는 지워지는데 렌더는
+                    # 여전히 `vertical_full_segment_order_or_membership_changed`로
+                    # 막힌다(2026-09-17에 단추 경로에서 실제로 겪은 결함과 같은 종류).
+                    current_master_segment_ids = None
+                    if current.kind == "vertical_full" and "resolve_conflicts" in merged_patch:
+                        master_session = store.get_editing_session(
+                            project_id=project_id, session_id=current.source_session_id
+                        )
+                        current_master_segment_ids = segment_ids_from_master(
+                            master_session.get("segments", [])
+                        )
                     updated = apply_variant_patch(
                         current,
-                        merged_variant_patch_from_yujin_candidates(selected),
+                        merged_patch,
                         expected_variant_revision=expected_variant_revision,
+                        current_master_segment_ids=current_master_segment_ids,
                     )
                 variant = store.apply_director_variant_proposal_transaction(
                     project_id=project_id,

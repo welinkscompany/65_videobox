@@ -123,6 +123,25 @@ def test_system_prompt_tells_the_model_direct_edits_already_ran() -> None:
     assert "렌더러를 직접 조작" not in prompt
 
 
+def test_system_prompt_tells_yujin_to_ask_back_on_an_ambiguous_conflict_resolution() -> None:
+    """owner 승인(2026-09-18, task_99becf89): 화면의 `VariantConflictPanel`
+    ('직접 조정 유지'/'마스터 기준 다시 맞추기')을 채팅으로도 열었다.
+
+    이 결정은 되돌릴 수 없다 -- 잘못 짐작해서 실행하면 대표님이 잠가 둔 값이
+    조용히 사라진다. 오늘 이 세션 앞부분에 고친 '애매한 확인 문장은 되묻는다'
+    (`그걸로`/`그거` 처리)와 같은 원칙이 여기도 적용돼야 한다는 것을 프롬프트
+    문구로 잠근다.
+    """
+    runtime = _RecordingRuntime()
+    service = YujinLocalConversationService(runtime=runtime)
+
+    service.reply(project_id="proj-1", user_text="아까 그 충돌 그냥 그걸로 해줘")
+
+    prompt = runtime.calls[0]["prompt"]
+    assert "변형본 충돌" in prompt
+    assert "짐작해서 실행하지 말고 정확히 되물어라" in prompt
+
+
 def test_blank_user_text_is_rejected_before_calling_the_model():
     service = YujinLocalConversationService(runtime=_ExplodingRuntime())
 

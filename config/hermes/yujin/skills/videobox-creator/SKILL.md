@@ -131,6 +131,17 @@ proposal의 필드는 정확히 `proposal_id`, `base_revision`, `title`, `ration
     오니, 그 문장을 사람이 읽는 답변에 그대로 옮겨 적습니다. 현재 `variant_kind`가
     `vertical_highlight`일 때만 사용하고, 한 payload에 이 형태를 쓰면 다른
     `output_variant` 조정은 함께 적지 않습니다
+  - `action: resolve_variant_conflict`, 위 표에 있는 필드 하나인 `field`,
+    `keep_local`/`rebase_master` 중 하나인 `decision` — 화면의 세로 변형
+    충돌 안내(`직접 조정 유지`/`마스터 기준 다시 맞추기` 단추)와 **같은
+    결정을 채팅으로도** 내립니다. `field`는 지금 실제로 충돌 중인 항목이어야
+    하고(아니면 거절됩니다), `decision`은 `keep_local`(직접 조정한 값을
+    그대로 지킵니다)과 `rebase_master`(마스터의 새 값을 받아들이고 직접
+    조정은 버립니다) 둘 중 정확히 하나입니다. **되돌릴 수 없는 결정이라,
+    어느 항목을 말하는지·어느 쪽으로 풀지가 창작자의 말에서 둘 다 분명하지
+    않으면 짐작해서 이 action을 만들지 말고, 사람이 읽는 답변으로 정확히
+    되묻습니다** — 잘못 짐작하면 대표님이 직접 조정해 잠가 둔 값이 조용히
+    사라집니다
   - `action: unfold_to_editing_board`, 다른 필드 없음 — 숏폼을 **따로 편집할 수
     있는 편집본으로 펼칩니다.** 지금 숏폼에 담을 수 있는 것은 장면 목록과 화면
     전체 설정뿐이라, 숏폼의 **한 장면만** 자막·확대·전환·효과음을 고치려 하면 그

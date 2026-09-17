@@ -95,6 +95,18 @@ def variant_patch_from_yujin_candidate(candidate: DirectorCandidate) -> dict[str
         if any(not isinstance(item, str) or not item.strip() for item in segment_ids):
             raise ValueError("variant_segment_ids_invalid")
         return {"selected_segment_ids": list(segment_ids)}
+    if action == "resolve_variant_conflict":
+        # **충돌 풀기도 `overrides`가 아니라 다른 자리로 간다.** 화면의
+        # `VariantConflictPanel`(`patch: {"resolve_conflicts": {field: decision}}`)과
+        # 정확히 같은 모양이어야 `apply_variant_patch`가 같은 길로 받는다 --
+        # 이름을 갈아 끼우면 화면과 채팅이 서로 다른 결과를 만든다.
+        field = parameters.get("field")
+        decision = parameters.get("decision")
+        if not isinstance(field, str) or not field.strip():
+            raise ValueError("variant_conflict_field_missing")
+        if decision not in {"keep_local", "rebase_master"}:
+            raise ValueError("variant_conflict_decision_invalid")
+        return {"resolve_conflicts": {field: decision}}
     field_by_action = {
         "set_crop": "crop",
         "set_focal": "focal",
@@ -134,6 +146,7 @@ def merged_variant_patch_from_yujin_candidates(
     조용히 하나를 버리면 대표님이 못 본 결과가 저장된다.
     """
     overrides: dict[str, object] = {}
+    resolve_conflicts: dict[str, object] = {}
     selected: list[str] | None = None
     for candidate in candidates:
         patch = variant_patch_from_yujin_candidate(candidate)
@@ -142,10 +155,17 @@ def merged_variant_patch_from_yujin_candidates(
                 raise ValueError("variant_segment_selection_must_be_single")
             selected = list(patch["selected_segment_ids"])  # type: ignore[arg-type]
             continue
+        if "resolve_conflicts" in patch:
+            # **필드별로 덮어쓴다.** "crop은 마스터로, focal은 그대로 둬"처럼 한
+            # 메시지에 여러 필드 결정이 섞여도 `overrides`와 같은 규칙으로 합친다.
+            resolve_conflicts.update(dict(patch["resolve_conflicts"]))  # type: ignore[arg-type]
+            continue
         overrides.update(dict(patch["overrides"]))  # type: ignore[arg-type]
     merged: dict[str, object] = {}
-    if overrides or selected is None:
+    if overrides or (selected is None and not resolve_conflicts):
         merged["overrides"] = overrides
+    if resolve_conflicts:
+        merged["resolve_conflicts"] = resolve_conflicts
     if selected is not None:
         merged["selected_segment_ids"] = selected
     return merged
