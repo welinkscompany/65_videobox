@@ -24,7 +24,13 @@ from videobox_provider_interfaces.llm import (
 # 그 순간 실제 화면 채팅이 전부 "invalid_json"으로 죽었다(json.loads가
 # "<think>...")로 시작하는 문자열을 못 읽는다). LM Studio 설정에 기대는
 # 대신 여기서 직접 걷어내 그 설정과 무관하게 항상 통하게 한다.
-_REASONING_BLOCK_PATTERN = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
+#
+# **문자열 맨 앞에 붙은 블록만** 지운다(`^`로 고정). 아무 데나 있는
+# `<think>...</think>`를 다 지우면, 답변 텍스트 자체가 정당하게 그 낱말을
+# 담고 있는 드문 경우(예: 창작자가 태그 이름을 물어봐서 유진이 인용하는
+# 경우) JSON 값 안쪽을 잘라내 오히려 망가뜨릴 수 있다. 실제 관찰된 누출은
+# 전부 맨 앞이었으므로 이 좁힘으로 충분하다.
+_REASONING_BLOCK_PATTERN = re.compile(r"^\s*<think>.*?</think>", re.IGNORECASE | re.DOTALL)
 
 
 def _strip_reasoning_block(text: str) -> str:

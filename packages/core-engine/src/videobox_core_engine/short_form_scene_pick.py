@@ -80,6 +80,16 @@ llm 이 구분 하도록 생각하면서 만들어야지."
 짜기 응답의 첫 칸이 `thinking`이고, 그 다음이 후보들이다. 대가는 출력 토큰이고
 이득은 후보를 짜기 전에 무엇이 사람을 멈추게 하는지 먼저 쓰게 되는 것이다.
 
+**정정(2026-09-17).** 이 "낼 수 없다"는 절대 보장이 아니었다 -- 컴퓨터
+재부팅 뒤 LM Studio를 CLI로 다시 올리니 **스키마를 줘도** `<think>`가
+새어 나왔고, 그 상태에서 실제 화면 채팅이 전부 `invalid_json`으로 죽는
+것을 curl로 확인했다([[videobox-lm-studio-think-leak-broke-all-chat]]).
+`packages/provider-interfaces/.../local_qwen.py`의
+`_strip_reasoning_block()`이 이제 그 경우를 방어하므로(이 모듈이 부르는
+`runtime.generate_structured`도 같은 경로를 탄다) 실제로 죽지는 않지만,
+위 문단의 "낼 수 없다"를 설계 전제로 다시 쓰지 마라 -- 로드 방식에 따라
+달라진다.
+
 ## 유진이 대답을 못 하면
 
 **조용히 글자 수 세기로 내려가지 않는다.** `judged_by="caption_density"`와 사유를

@@ -82,3 +82,19 @@ def test_an_unclosed_think_tag_still_fails_clearly_instead_of_silently_guessing(
         provider.complete_structured(_request())
 
     assert exc_info.value.error_code == "invalid_json"
+
+
+def test_a_think_tag_that_is_not_at_the_start_is_left_alone() -> None:
+    """코드리뷰에서 잡은 결함: 아무 데나 있는 <think>...</think>를 다 지우면,
+
+    답변 텍스트가 정당하게 그 낱말을 담고 있는 드문 경우(창작자가 태그
+    이름을 물어봐서 유진이 인용하는 등) JSON 값 안쪽이 잘려 나가 오히려
+    망가진다. 실제 관찰된 누출은 항상 문자열 맨 앞이었으므로, 맨 앞이
+    아닌 경우는 손대지 않아야 한다.
+    """
+    raw_content = '{"reply": "이 대화에서 <think>와 </think>라는 태그를 봤어요."}'
+    provider = LocalQwenStructuredProvider(transport=_FakeTransport(raw_content))
+
+    response = provider.complete_structured(_request())
+
+    assert response.output_data == {"reply": "이 대화에서 <think>와 </think>라는 태그를 봤어요."}
