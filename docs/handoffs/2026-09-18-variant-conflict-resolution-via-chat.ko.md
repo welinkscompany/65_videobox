@@ -145,5 +145,6 @@ keep_local → unlock → override 제거)로 되돌렸다.
 
 ## 커밋·푸시
 
-커밋 예정, 전체 pytest는 백그라운드에서 계속 돌고 있어 결과를 턴 종료
-보고에 반영한다.
+커밋 완료(`f22e42700`). 코디네이터가 이어받아 전체 backend pytest를
+독립적으로 새로 단독 실행했다 -- **5143 passed, 56 skipped, 1 xfailed,
+실패 0건**(41분 53초). 회귀 없음. fast-forward 확인 후 push 완료.
