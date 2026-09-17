@@ -302,6 +302,65 @@ def test_materialization_rejects_unresolved_master_conflicts() -> None:
         materialize_variant(rebased, _master_segments())
 
 
+def test_rebasing_a_vertical_full_story_conflict_refreshes_its_segment_snapshot() -> None:
+    """`마스터 기준 다시 맞추기`는 충돌 딱지만 지우고 장면 스냅샷은 그대로 두면 안 된다.
+
+    2026-09-17 실물 렌더 확인 중 발견: 화면에서 이 버튼을 누르면 `conflicts`는
+    비지만 `master_segment_ids`는 그대로라, `materialize_variant`가 곧바로
+    `vertical_full_segment_order_or_membership_changed`로 다시 막았다. 버튼
+    이름대로 **지금 마스터를 새 기준으로 받아들여야** 한다.
+    """
+    rebased = rebase_variant(
+        _variant("vertical_full"),
+        new_master_revision=8,
+        changed_fields=["story"],
+    )
+    assert rebased.conflicts
+
+    new_master_segments = [
+        {"segment_id": "seg-a", "story": "hook"},
+        {"segment_id": "seg-new", "story": "extra"},
+        {"segment_id": "seg-b", "story": "proof"},
+        {"segment_id": "seg-c", "story": "close"},
+    ]
+
+    resolved = apply_variant_patch(
+        rebased,
+        {"resolve_conflicts": {"story": "rebase_master"}},
+        expected_variant_revision=rebased.variant_revision,
+        current_master_segment_ids=[str(item["segment_id"]) for item in new_master_segments],
+    )
+
+    assert resolved.conflicts == ()
+    assert resolved.master_segment_ids == ("seg-a", "seg-new", "seg-b", "seg-c")
+    materialized = materialize_variant(resolved, new_master_segments)
+    assert [item["segment_id"] for item in materialized.segments] == [
+        "seg-a",
+        "seg-new",
+        "seg-b",
+        "seg-c",
+    ]
+
+
+def test_keeping_local_on_a_vertical_full_story_conflict_leaves_the_snapshot_untouched() -> None:
+    """`직접 조정 유지`(keep_local)는 마스터를 안 받으니 스냅샷도 그대로 둔다."""
+    rebased = rebase_variant(
+        _variant("vertical_full"),
+        new_master_revision=8,
+        changed_fields=["story"],
+    )
+
+    resolved = apply_variant_patch(
+        rebased,
+        {"resolve_conflicts": {"story": "keep_local"}},
+        expected_variant_revision=rebased.variant_revision,
+        current_master_segment_ids=["seg-a", "seg-new", "seg-b", "seg-c"],
+    )
+
+    assert resolved.conflicts == ()
+    assert resolved.master_segment_ids == tuple(_variant("vertical_full").master_segment_ids or ())
+
+
 def _timed_master_segments() -> list[dict[str, object]]:
     """장면 셋, 마지막 장면 앞에 **일부러 둔 1초 빈 구간**."""
     return [

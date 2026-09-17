@@ -149,6 +149,69 @@ def test_patch_and_rebase_return_revisioned_variant_conflicts(tmp_path: Path) ->
     assert resolved.json()["variant"]["locks"][0]["field"] == "crop"
 
 
+def test_resolving_a_vertical_full_story_conflict_unblocks_materialize(tmp_path: Path) -> None:
+    """화면의 `마스터 기준 다시 맞추기`가 실제로 렌더를 다시 뚫어야 한다.
+
+    2026-09-17 실물 렌더 확인 중 발견: `resolve_conflicts`로 충돌 딱지를
+    지운 뒤에도 `materialize`가 `vertical_full_segment_order_or_membership_
+    changed`로 다시 막혔다 -- 장면 스냅샷(`master_segment_ids`)이 안
+    갱신됐기 때문이다. `[[videobox-vertical-fill-fit-generalized-to-
+    padding-threshold]]`류 결함이 아니라, 변형본 충돌 해결 배선 자체의
+    결함이었다.
+    """
+    client, project_id, session = _client(tmp_path)
+    app = client.app
+    variants = client.get(f"/api/projects/{project_id}/output-variants").json()["variants"]
+    vertical = next(item for item in variants if item["kind"] == "vertical_full")
+
+    # 마스터에 장면을 하나 더해 리비전을 올린다 -- "마스터가 바뀌었다".
+    bumped = app.state.store.update_editing_session(
+        project_id=project_id,
+        session_id=session["session_id"],
+        session_payload={
+            "segments": [
+                {"segment_id": "seg-a", "text": "a"},
+                {"segment_id": "seg-new", "text": "new"},
+                {"segment_id": "seg-b", "text": "b"},
+            ],
+            "history": [],
+        },
+    )
+    assert bumped["session_revision"] == 2
+
+    rebased = client.post(
+        f"/api/projects/{project_id}/output-variants/{vertical['variant_id']}/rebase",
+        json={"new_master_revision": 2, "changed_fields": ["story"]},
+    ).json()["variant"]
+    assert rebased["conflicts"][0]["field"] == "story"
+
+    # 아직 풀기 전: 옛 장면 스냅샷이라 곧바로 막혀야 한다.
+    blocked = client.post(
+        f"/api/projects/{project_id}/output-variants/{vertical['variant_id']}/materialize",
+        json={"expected_master_session_revision": 2},
+    )
+    assert blocked.status_code >= 400
+
+    resolved = client.patch(
+        f"/api/projects/{project_id}/output-variants/{vertical['variant_id']}",
+        json={
+            "expected_variant_revision": rebased["variant_revision"],
+            "patch": {"resolve_conflicts": {"story": "rebase_master"}},
+        },
+    )
+    assert resolved.status_code == 200, resolved.text
+    resolved_variant = resolved.json()["variant"]
+    assert resolved_variant["conflicts"] == []
+    assert resolved_variant["master_segment_ids"] == ["seg-a", "seg-new", "seg-b"]
+
+    materialized = client.post(
+        f"/api/projects/{project_id}/output-variants/{vertical['variant_id']}/materialize",
+        json={"expected_master_session_revision": 2},
+    )
+    assert materialized.status_code == 201, materialized.text
+    assert materialized.json()["materialization"]["source_session_revision"] == 2
+
+
 def test_materialize_writes_derived_timeline_with_full_identity(tmp_path: Path) -> None:
     client, project_id, session = _client(tmp_path)
     variant = client.get(f"/api/projects/{project_id}/output-variants").json()["variants"][0]

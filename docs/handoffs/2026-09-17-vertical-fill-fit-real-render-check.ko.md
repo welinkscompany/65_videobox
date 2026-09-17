@@ -1,5 +1,7 @@
 # task_acfd8147 실물 렌더 확인 -- 숏폼은 확인됨, 일반 세로는 인프라 문제로 막힘
 
+**대체됨:** `docs/handoffs/2026-09-17-variant-conflict-snapshot-fix.ko.md`
+
 이 세션은 코드를 바꾸지 않았다. `2026-09-17-vertical-fill-fit-generalized-
 to-padding-threshold.ko.md`가 큐에 올린 `task_acfd8147`(세로 배경 채우기
 일반화 뒤 실제 렌더로 눈으로 확인)만 이어서 했다.

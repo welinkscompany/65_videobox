@@ -68,6 +68,23 @@ def _segment_id(segment: Mapping[str, object] | object) -> str:
     return value
 
 
+def segment_ids_from_master(segments: Sequence[Mapping[str, object] | object]) -> tuple[str, ...]:
+    """마스터 장면 목록에서 순서대로 `segment_id`만 뽑는다. 자리·시간 없는
+    fixture도 있어 조용히 건너뛴다(자리 없는 행에 자리를 지어내지 않는다).
+
+    저장소 쪽(`ensure_output_variants`, 최초 스냅샷)과 API 쪽(변형본 충돌을
+    `rebase_master`로 풀 때 새 스냅샷)이 같은 추출을 따로 들고 있으면 한쪽만
+    고쳐지는 함정에 걸린다(`build_variant_timeline_payload` 머리말과 같은
+    이유) -- 그래서 한 곳에 둔다.
+    """
+    ids: list[str] = []
+    for segment in segments:
+        value = segment.get("segment_id") if isinstance(segment, Mapping) else getattr(segment, "segment_id", None)
+        if isinstance(value, str) and value.strip():
+            ids.append(value)
+    return tuple(ids)
+
+
 def _copy_segments(segments: Sequence[Mapping[str, object] | object]) -> tuple[dict[str, object], ...]:
     copied: list[dict[str, object]] = []
     for segment in segments:
@@ -104,8 +121,18 @@ def apply_variant_patch(
     patch: Mapping[str, object],
     *,
     expected_variant_revision: int | None = None,
+    current_master_segment_ids: Sequence[str] | None = None,
 ) -> OutputVariant:
-    """Apply only render overrides and, for highlight, segment selection/order."""
+    """Apply only render overrides and, for highlight, segment selection/order.
+
+    `current_master_segment_ids`는 순수 함수 경계를 지키려고 호출자(store를
+    아는 라우터)가 직접 읽어서 넘긴다 -- 이 함수 안에서는 저장소를 보지 않는다.
+    `vertical_full`이 `story`/`segment_order` 충돌을 `rebase_master`로 풀 때만
+    쓴다: 그 결정은 "지금 마스터를 새 기준으로 받아들인다"는 뜻인데,
+    `master_segment_ids` 스냅샷을 그대로 두면 `materialize_variant`가 곧바로
+    `vertical_full_segment_order_or_membership_changed`로 다시 막는다(2026-09-17
+    실물 렌더 확인 중 발견 -- 충돌 딱지는 지워졌는데 렌더는 여전히 막혀 있었다).
+    """
 
     if not isinstance(patch, Mapping):
         raise VariantInvariantError("patch_must_be_mapping")
@@ -157,6 +184,7 @@ def apply_variant_patch(
     resolution = patch.get("resolve_conflicts", {})
     if not isinstance(resolution, Mapping):
         raise VariantInvariantError("resolve_conflicts_must_be_mapping")
+    master_segment_ids = variant.master_segment_ids
     for field, decision in resolution.items():
         if field not in conflicts_by_field:
             raise VariantInvariantError(f"unknown_variant_conflict:{field}")
@@ -165,12 +193,19 @@ def apply_variant_patch(
         conflicts_by_field.pop(field, None)
         if decision == "rebase_master":
             locks_by_field.pop(field, None)
+            if (
+                field in _STRUCTURAL_FIELDS
+                and variant.kind == "vertical_full"
+                and current_master_segment_ids is not None
+            ):
+                master_segment_ids = tuple(current_master_segment_ids)
 
     changed = (
         overrides != variant.overrides
         or tuple(locks_by_field.values()) != variant.locks
         or selected != variant.selected_segment_ids
         or tuple(conflicts_by_field.values()) != variant.conflicts
+        or master_segment_ids != variant.master_segment_ids
     )
     if not changed:
         return variant
@@ -179,6 +214,7 @@ def apply_variant_patch(
             "overrides": overrides,
             "locks": tuple(locks_by_field.values()),
             "conflicts": tuple(conflicts_by_field.values()),
+            "master_segment_ids": master_segment_ids,
             "selected_segment_ids": selected,
             "variant_revision": variant.variant_revision + 1,
         }

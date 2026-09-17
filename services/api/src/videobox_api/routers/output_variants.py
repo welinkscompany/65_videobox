@@ -27,6 +27,7 @@ from videobox_core_engine.output_variants import (
     materialize_variant,
     output_variant_from_row,
     rebase_variant,
+    segment_ids_from_master,
     variant_timeline_needs_rebuild,
 )
 from videobox_domain_models.output_variants import OutputVariant
@@ -271,10 +272,23 @@ def build_output_variants_router(
     ) -> dict[str, object]:
         try:
             current = store.get_output_variant(project_id=project_id, variant_id=variant_id)
+            domain = _domain_variant(current)
+            # `vertical_full`이 `story`/`segment_order` 충돌을 `rebase_master`로
+            # 풀 때만 마스터 장면 목록을 읽는다 -- 그 결정이 "지금 마스터를 새
+            # 기준으로 받아들인다"는 뜻인데, 스냅샷(`master_segment_ids`)을
+            # 안 갱신하면 충돌 딱지만 지워지고 렌더는 여전히 막힌다(2026-09-17
+            # 실물 렌더 확인 중 발견).
+            current_master_segment_ids = None
+            if domain.kind == "vertical_full" and "resolve_conflicts" in request.patch:
+                session = store.get_editing_session(
+                    project_id=project_id, session_id=domain.source_session_id
+                )
+                current_master_segment_ids = segment_ids_from_master(session.get("segments", []))
             updated = apply_variant_patch(
-                _domain_variant(current),
+                domain,
                 request.patch,
                 expected_variant_revision=request.expected_variant_revision,
+                current_master_segment_ids=current_master_segment_ids,
             )
             return {
                 "variant": store.update_output_variant(
