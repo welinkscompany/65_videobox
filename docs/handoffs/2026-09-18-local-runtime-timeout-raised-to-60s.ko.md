@@ -1,5 +1,7 @@
 # task_c68ba644 -- 유진 채팅 30초 타임아웃을 60초로 올렸다, 실물 확인까지 봤다
 
+**대체됨:** `docs/handoffs/2026-09-18-broll-thumbnail-404-fixed.ko.md`가 최신이다.
+
 owner 승인(2026-09-18, "진행해줘, 자율모드로") 위에서, `2026-09-18-variant-conflict-
 resolution-via-chat.ko.md`가 넘긴 백로그 1번(로컬 구조화 LLM 호출 타임아웃 30초가
 실사용에 너무 짧다)을 고쳤다.
