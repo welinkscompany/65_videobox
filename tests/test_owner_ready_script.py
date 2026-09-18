@@ -23,7 +23,6 @@ SCRIPT = ROOT / "scripts" / "owner-ready.ps1"
 SMOKE_SCRIPTS = (
     "smoke-hermes-yujin-creator-flow.ps1",
     "smoke-hermes-yujin-chat.ps1",
-    "smoke-hermes-yujin-mem0.ps1",
     "verify-hermes-yujin-plan-state.ps1",
     "verify-hermes-yujin-profile.ps1",
     "verify-hermes-yujin-runtime.ps1",
@@ -41,10 +40,6 @@ SMOKE_MARKERS = {
         "HERMES_YUJIN_CANARY_NON_LIVE network_calls=0 proposal_calls=0 "
         "provider_body_recorded=false"
     ),
-    "smoke-hermes-yujin-mem0.ps1": (
-        "HERMES_YUJIN_MEM0_NON_LIVE network_calls=0 provider_calls=0 "
-        "credentials_printed=false"
-    ),
     "verify-hermes-yujin-plan-state.ps1": (
         "Hermes Yujin plan state verified: 20 unique master task IDs; "
         "all 20 occur exactly once across four children; statuses and progress agree."
@@ -53,15 +48,14 @@ SMOKE_MARKERS = {
         "Hermes Yujin profile ownership and secret-free contents verified."
     ),
     "verify-hermes-yujin-runtime.ps1": (
-        "Hermes Yujin D2 static topology verified: exact chat, gateway, and "
-        "optional memory adapter boundaries."
+        "Hermes Yujin A1 static topology verified: exact chat and gateway "
+        "boundaries (no external memory adapter)."
     ),
 }
 
 PUBLIC_MARKERS = (
     "creator_non_live_pass",
     "chat_non_live_zero_calls",
-    "mem0_non_live_zero_calls",
     "plan_state_verified",
     "profile_static_verified",
     "runtime_static_verified",
@@ -75,7 +69,6 @@ REQUIRED_CREDENTIAL_KEYS = (
     "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64",
     "VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64",
     "VIDEOBOX_HERMES_CAPABILITY_KEY_ID",
-    "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN",
 )
 
 
@@ -1005,17 +998,16 @@ def test_smoke_runs_exact_static_non_live_scripts_and_writes_sanitized_receipt(t
     assert [row["id"] for row in payload["checks"]] == [
         "creator_flow_non_live",
         "chat_non_live",
-        "mem0_non_live",
         "plan_state",
         "profile_static",
         "runtime_static",
     ]
     calls = fixture["smoke_log"].read_text(encoding="utf-8-sig").splitlines()
-    assert len(calls) == 6
+    assert len(calls) == 5
     assert [line.split()[0] for line in calls] == list(SMOKE_SCRIPTS)
     assert all("live" not in line.lower() for line in calls)
     assert all("static=true" in line for line in calls[-2:])
-    assert all("static=false" in line for line in calls[:4])
+    assert all("static=false" in line for line in calls[:3])
     assert all(line.endswith(" args=") for line in calls)
     serialized_calls = "\n".join(calls).lower()
     for forbidden in (
@@ -1068,7 +1060,6 @@ def test_smoke_runs_exact_static_non_live_scripts_and_writes_sanitized_receipt(t
     )
     assert [row["marker"] for row in receipt["checks"]] == list(PUBLIC_MARKERS)
     assert [row["mode"] for row in receipt["checks"]] == [
-        "non_live",
         "non_live",
         "non_live",
         "non_live",
@@ -1639,7 +1630,7 @@ def test_smoke_fails_closed_on_invalid_exact_marker_and_continues_all_gates(
     assert [row["id"] for row in payload["checks"] if row["status"] == "fail"] == [
         "chat_non_live"
     ]
-    assert len(fixture["smoke_log"].read_text(encoding="utf-8-sig").splitlines()) == 6
+    assert len(fixture["smoke_log"].read_text(encoding="utf-8-sig").splitlines()) == 5
     receipt = json.loads(next(fixture["receipt_root"].glob("*.json")).read_text(encoding="utf-8"))
     failed = [row for row in receipt["checks"] if row["status"] == "fail"]
     assert len(failed) == 1
@@ -1731,7 +1722,7 @@ def test_smoke_missing_child_has_no_sha_and_remaining_gates_continue(tmp_path: P
     assert [row["id"] for row in payload["checks"] if row["status"] == "fail"] == [
         "creator_flow_non_live"
     ]
-    assert len(fixture["smoke_log"].read_text(encoding="utf-8-sig").splitlines()) == 5
+    assert len(fixture["smoke_log"].read_text(encoding="utf-8-sig").splitlines()) == 4
     receipt = json.loads(next(fixture["receipt_root"].glob("*.json")).read_text(encoding="utf-8"))
     assert receipt["checks"][0]["script_sha256"] == "unavailable"
     assert all(row["status"] == "pass" for row in receipt["checks"][1:])
@@ -1764,7 +1755,7 @@ def test_smoke_rejects_a_child_not_unchanged_from_head_and_continues_all_gates(
     assert [row["id"] for row in payload["checks"] if row["status"] == "fail"] == [
         "chat_non_live"
     ]
-    assert len(fixture["smoke_log"].read_text(encoding="utf-8-sig").splitlines()) == 6
+    assert len(fixture["smoke_log"].read_text(encoding="utf-8-sig").splitlines()) == 5
     receipt_text = next(fixture["receipt_root"].glob("*.json")).read_text(encoding="utf-8")
     receipt = json.loads(receipt_text)
     assert receipt["checks"][1]["status"] == "fail"
@@ -1798,7 +1789,7 @@ def test_smoke_rejects_a_child_that_mutates_itself_during_execution(tmp_path: Pa
     assert [row["id"] for row in payload["checks"] if row["status"] == "fail"] == [
         "chat_non_live"
     ]
-    assert len(fixture["smoke_log"].read_text(encoding="utf-8-sig").splitlines()) == 6
+    assert len(fixture["smoke_log"].read_text(encoding="utf-8-sig").splitlines()) == 5
     assert hashlib.sha256(child_path.read_bytes()).hexdigest() != start_sha
     receipt_text = next(fixture["receipt_root"].glob("*.json")).read_text(encoding="utf-8")
     receipt = json.loads(receipt_text)
@@ -1823,7 +1814,7 @@ def test_smoke_rejects_head_change_during_execution_and_keeps_start_commit(tmp_p
     payload = _payload(result)
     assert result.returncode == 1
     assert payload["readiness_status"] == "not_ready"
-    assert len(fixture["smoke_log"].read_text(encoding="utf-8-sig").splitlines()) == 6
+    assert len(fixture["smoke_log"].read_text(encoding="utf-8-sig").splitlines()) == 5
     receipt_text = next(fixture["receipt_root"].glob("*.json")).read_text(encoding="utf-8")
     receipt = json.loads(receipt_text)
     assert receipt["commit"] == "deadbeef00000000000000000000000000000000"
@@ -1928,13 +1919,13 @@ def test_smoke_continues_after_one_failure_and_records_only_bounded_results(tmp_
     payload = _payload(result)
     assert result.returncode == 1
     assert payload["overall_status"] == "fail"
-    assert len(payload["checks"]) == 6
+    assert len(payload["checks"]) == 5
     failed = [row for row in payload["checks"] if row["status"] == "fail"]
     assert [row["id"] for row in failed] == ["chat_non_live"]
-    assert len(fixture["smoke_log"].read_text(encoding="utf-8-sig").splitlines()) == 6
+    assert len(fixture["smoke_log"].read_text(encoding="utf-8-sig").splitlines()) == 5
     receipt = json.loads(next(fixture["receipt_root"].glob("*.json")).read_text(encoding="utf-8"))
     assert receipt["readiness_status"] == "not_ready"
-    assert len(receipt["checks"]) == 6
+    assert len(receipt["checks"]) == 5
     assert "leak-from-child" not in json.dumps(receipt)
 
 

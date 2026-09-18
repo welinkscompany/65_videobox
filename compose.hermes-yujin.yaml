@@ -43,14 +43,12 @@ services:
       VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN: ${VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN:?set in .env.container}
       VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64: ${VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64:?set in .env.container}
       VIDEOBOX_HERMES_CAPABILITY_KEY_ID: ${VIDEOBOX_HERMES_CAPABILITY_KEY_ID:?set in .env.container}
-      HERMES_MEMORY_ADAPTER_URL: http://videobox-hermes-memory-adapter:8082
-      VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN: ${VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN:?set in .env.container}
     depends_on:
       videobox-hermes-yujin:
         condition: service_healthy
       videobox-workspace:
         condition: service_healthy
-    networks: [videobox-agent-gateway-api-network, videobox-agent-gateway-network, videobox-hermes-memory-network]
+    networks: [videobox-agent-gateway-api-network, videobox-agent-gateway-network]
     user: "10001:10001"
     read_only: true
     tmpfs: [/tmp]
@@ -61,52 +59,6 @@ services:
     cpus: 0.5
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health', timeout=3).read()"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-    logging:
-      driver: local
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  videobox-hermes-memory-adapter:
-    profiles: [hermes-yujin]
-    build:
-      context: .
-      dockerfile: docker/hermes-memory-adapter.Dockerfile
-    environment:
-      MEM0_API_KEY: ${MEM0_API_KEY:-}
-      VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN: ${VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN:?set in .env.container}
-      # 기억을 이 컴퓨터 안에서만 돌린다. 기억 생성·검색을 로컬 모델이 맡고
-      # 벡터 저장소는 파일 경로 방식이라 서버가 따로 없다. MEM0_API_KEY 가
-      # 채워져 있으면 그쪽(호스팅)이 우선한다.
-      VIDEOBOX_MEM0_MODE: ${VIDEOBOX_MEM0_MODE:-local}
-      VIDEOBOX_MEM0_LOCAL_BASE_URL: ${VIDEOBOX_MEM0_LOCAL_BASE_URL:-http://host.docker.internal:1234/v1}
-      # 모델 이름의 SSOT는 `.env.container`의 VIDEOBOX_LOCAL_MODEL_NAME 하나다
-      # (2026-09-11). 기억 추출 전용 값을 따로 주고 싶으면 VIDEOBOX_MEM0_LLM_MODEL을
-      # 직접 채운다 -- 그게 없으면 SSOT를 보고, 그것도 없으면 커밋된 리터럴로
-      # 떨어진다. `scripts/set-local-model.ps1`이 셋째 자리(커밋 리터럴)까지
-      # 한 번에 맞춘다.
-      VIDEOBOX_MEM0_LLM_MODEL: ${VIDEOBOX_MEM0_LLM_MODEL:-${VIDEOBOX_LOCAL_MODEL_NAME:-qwen/qwen3.8-27b}}
-      VIDEOBOX_MEM0_EMBEDDER_MODEL: ${VIDEOBOX_MEM0_EMBEDDER_MODEL:-text-embedding-bge-m3}
-      # 차원이 틀리면 저장소가 조용히 어긋난다. bge-m3 는 1024다.
-      VIDEOBOX_MEM0_EMBEDDING_DIMS: ${VIDEOBOX_MEM0_EMBEDDING_DIMS:-1024}
-      VIDEOBOX_MEM0_STORE_PATH: ${VIDEOBOX_MEM0_STORE_PATH:-/var/lib/videobox-mem0/qdrant}
-    volumes:
-      # 기억이 재시작을 넘겨 살아남아야 한다. tmpfs 면 매번 사라진다.
-      - videobox_mem0_store:/var/lib/videobox-mem0
-    networks: [videobox-hermes-memory-network, videobox-hermes-provider-egress]
-    user: "10000:10000"
-    read_only: true
-    tmpfs: [/tmp]
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    pids_limit: 64
-    mem_limit: 256m
-    cpus: 0.5
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health', timeout=3).read()"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -165,14 +117,8 @@ services:
         max-size: "10m"
         max-file: "3"
 
-volumes:
-  # 자체 호스팅 Mem0 의 벡터 저장소. 이 컴퓨터 안에만 있다.
-  videobox_mem0_store:
-
 networks:
   videobox-agent-gateway-api-network:
     internal: true
   videobox-agent-gateway-network:
-    internal: true
-  videobox-hermes-memory-network:
     internal: true

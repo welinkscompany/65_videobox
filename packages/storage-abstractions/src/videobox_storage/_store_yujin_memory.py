@@ -1267,11 +1267,18 @@ class YujinMemoryMixin:
 
         `list_director_messages`(위)는 표시용이라 `message_order`를 안 준다 --
         사서는 워터마크를 전진시키려면 그 값이 꼭 있어야 해서 따로 둔다.
+
+        `client_message_id`도 함께 준다 -- 사서(`memory_librarian.py`)가 화면
+        채팅이 아닌 dev 검증 호출(`live-check-*`, `memcheck-*` 같은 사람이
+        읽을 수 있는 고정 문구)을 걸러내는 데 쓴다(2026-09-18 owner 지시,
+        실제 운영 Postgres에서 이런 문구가 실제 owner 프로젝트와 섞여
+        있는 것을 확인했다).
         """
         rows = self._fetchall(
             project_id,
             """
-            SELECT message_id, role, text, message_order, created_at
+            SELECT message_id, role, text, message_order, created_at,
+                   client_message_id
             FROM director_messages
             WHERE project_id = ? AND conversation_id = ? AND message_order > ?
             ORDER BY message_order
@@ -1279,6 +1286,62 @@ class YujinMemoryMixin:
             (project_id, conversation_id, after_message_order),
         )
         return [dict(row) for row in rows]
+
+    def find_stored_yujin_memory_ref(
+        self, *, project_id: str, category: str, proposed_text: str
+    ) -> str | None:
+        """이미 저장된 정확히 같은 문구가 있으면 그 memory_ref, 없으면 `None`.
+
+        mem0를 쓸 때 같은 문장이 9번 중복 저장되던 결함
+        (`docs/mem0-memory-backup-2026-09-10.ko.md`)을 로컬로 그대로
+        옮긴다 -- **정확히 같은 문장인지만** 본다(뜻 기반 유사도 아님),
+        이 저장소가 기억 판단에서 항상 쓰는 원칙과 같다.
+        """
+        row = self._fetchone(
+            project_id,
+            """
+            SELECT provider_memory_ref FROM yujin_memory_candidates
+            WHERE project_id = ? AND category = ? AND proposed_text = ?
+              AND status = 'approved' AND storage_status = 'stored'
+              AND provider_memory_ref IS NOT NULL
+            ORDER BY created_at LIMIT 1
+            """,
+            (project_id, category, proposed_text),
+        )
+        return str(row["provider_memory_ref"]) if row is not None else None
+
+    def list_memory_librarian_watermarks(self) -> list[dict[str, Any]]:
+        """모든 프로젝트·대화의 사서 워터마크. 기동 시 따라잡기용.
+
+        **워터마크 행이 있다는 것 자체가 owner가 그 프로젝트에서 사서를
+        최소 한 번 `run_memory_librarian.py`로 직접 돌렸다는 뜻이다.** 이
+        저장소 Postgres에는 `live-check-*` 같은 시험용 대화가 실제 owner
+        프로젝트와 같은 테이블에 섞여 있어(2026-09-18 실측), 기동 시 자동
+        따라잡기가 사람이 한 번도 보지 않은 프로젝트까지 훑으면 그 시험
+        데이터가 "owner 취향"으로 승격될 위험이 있다. 그래서 자동 따라잡기는
+        이 목록에 있는 (project_id, conversation_id)만 다시 본다 -- 새
+        프로젝트를 스스로 찾아내지 않는다.
+
+        `LocalProjectStore`는 프로젝트마다 SQLite 파일이 따로다(`list_projects`가
+        디렉터리를 훑어야 하는 이유와 같다) -- 그래서 한 번의 전역 SQL이
+        아니라 `list_projects()`가 돌려준 각 프로젝트를 순서대로 훑는다.
+        """
+        watermarks: list[dict[str, Any]] = []
+        for project in self.list_projects(include_archived=True):
+            project_id = str(project["project_id"])
+            rows = self._fetchall(
+                project_id,
+                """
+                SELECT project_id, conversation_id, last_message_order,
+                       last_run_status, last_run_at, last_candidates_created
+                FROM yujin_memory_librarian_watermark
+                WHERE project_id = ?
+                ORDER BY last_run_at
+                """,
+                (project_id,),
+            )
+            watermarks.extend(dict(row) for row in rows)
+        return watermarks
 
     def get_memory_librarian_watermark(
         self, *, project_id: str, conversation_id: str

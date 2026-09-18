@@ -183,19 +183,6 @@ class _Gateway:
             yield event
 
 
-class _MemorySearchGateway(_Gateway):
-    def __init__(self, *, search_delay: float = 0) -> None:
-        super().__init__()
-        self.search_delay = search_delay
-        self.search_requests = []
-
-    async def search_memory(self, request):
-        self.search_requests.append(request)
-        if self.search_delay:
-            await asyncio.sleep(self.search_delay)
-        return {"memories": []}
-
-
 def _memory_test_context(**kwargs) -> YujinCreatorContext:
     return YujinCreatorContext.model_validate(
         {
@@ -237,15 +224,25 @@ def _retrieval_row(project_id: str) -> dict[str, str]:
     }
 
 
-def test_memory_search_runs_once_only_after_new_owned_durable_dispatch(
+def test_memory_lookup_runs_once_only_after_new_owned_durable_dispatch(
     tmp_path: Path,
 ) -> None:
+    """Mem0 제거 뒤(2026-09-18) 기억 조회는 게이트웨이 검색이 아니라 로컬
+    저장소 조회다(`YujinMemoryService.retrieve_approved_memories`). 이
+    시험은 여전히 "새로 owner가 시작한 dispatch에서만, 딱 한 번" 계약을
+    지킨다 -- replay·위조 재생·기억 만들기 요청 자체는 조회를 다시
+    부르지 않는다."""
     store, project_id, session_id = _scope(tmp_path)
-    store.list_yujin_memory_retrieval_rows = (
-        lambda **_: [_retrieval_row(project_id)]
-    )
-    gateway = _MemorySearchGateway()
-    memory_service = YujinMemoryService(store=store, gateway=gateway)
+    lookup_calls: list[dict] = []
+    original_rows = [_retrieval_row(project_id)]
+
+    def counted_lookup(**kwargs):
+        lookup_calls.append(kwargs)
+        return list(original_rows)
+
+    store.list_yujin_memory_retrieval_rows = counted_lookup
+    gateway = _Gateway()
+    memory_service = YujinMemoryService(store=store)
     service = HermesRunService(
         store=store,
         gateway_client=gateway,
@@ -282,46 +279,8 @@ def test_memory_search_runs_once_only_after_new_owned_durable_dispatch(
 
     asyncio.run(scenario())
 
-    assert len(gateway.search_requests) == 1
-    assert gateway.search_requests[0].limit == 5
+    assert len(lookup_calls) == 1
     assert gateway.calls == 2
-
-
-def test_memory_search_timeout_does_not_block_run_or_manual_fallback(
-    tmp_path: Path,
-) -> None:
-    store, project_id, session_id = _scope(tmp_path)
-    store.list_yujin_memory_retrieval_rows = (
-        lambda **_: [_retrieval_row(project_id)]
-    )
-    gateway = _MemorySearchGateway(search_delay=1)
-    memory_service = YujinMemoryService(store=store, gateway=gateway)
-    service = HermesRunService(
-        store=store,
-        gateway_client=gateway,
-        context_builder=_memory_test_context,
-        memory_service=memory_service,
-    )
-
-    async def scenario() -> float:
-        started = asyncio.get_running_loop().time()
-        run = await service.create_run(
-            project_id=project_id,
-            session_id=session_id,
-            conversation_id="conv",
-            client_message_id="timeout-dispatch",
-            text="편집 템포를 추천해 줘",
-        )
-        elapsed = asyncio.get_running_loop().time() - started
-        await asyncio.wait_for(run.task, timeout=1)
-        await service.shutdown()
-        return elapsed
-
-    elapsed = asyncio.run(scenario())
-
-    assert elapsed < 0.9
-    assert len(gateway.search_requests) == 1
-    assert gateway.calls == 1
 
 
 class _BlockingGateway:

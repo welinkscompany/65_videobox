@@ -3,16 +3,17 @@
 유진 에이전트를 켜는 데 필요한 비밀값을 이 컴퓨터에서 만들어 .env.container 에 채운다.
 
 .DESCRIPTION
-compose.hermes-yujin.yaml 이 요구하는 값 중 이 컴퓨터에서 만들 수 있는 것은 전부 다음 6가지다.
+compose.hermes-yujin.yaml 이 요구하는 값 중 이 컴퓨터에서 만들 수 있는 것은 전부 다음 5가지다.
 
   VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64   게이트웨이가 권한을 서명하는 개인키
   VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64    작업 서비스가 서명을 확인하는 공개키
   VIDEOBOX_HERMES_CAPABILITY_KEY_ID            그 키쌍의 이름
   VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN         작업 서비스 → 게이트웨이 호출 암호
-  VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN         게이트웨이 → 기억 어댑터 호출 암호
   HERMES_YUJIN_GATEWAY_USERNAME / _PASSWORD / _PASSWORD_HASH   게이트웨이 → 유진 로그인
 
-MEM0_API_KEY 는 외부 계정 값이라 여기서 만들 수 없다. 없으면 유진은 로컬 기억만 쓴다.
+유진의 승인된 기억은 2026-09-18부터 Mem0 없이 로컬 Postgres에만 저장된다
+(`docs/decisions/2026-09-18-mem0-removed-native-memory-librarian.ko.md`) --
+이 스크립트가 만들던 기억 어댑터 암호·외부 API 키는 더 이상 필요 없다.
 
 값은 이 컴퓨터에서만 만들어지고 화면에 찍지 않는다. 비밀번호 해시는 유진 이미지 안에서
 Hermes 자신의 해시 함수로 계산하므로, 평문 비밀번호는 파일 밖으로 나가지 않는다.
@@ -76,7 +77,6 @@ PRIVATE_KEY = "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64"
 PUBLIC_KEY = "VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64"
 KEY_ID = "VIDEOBOX_HERMES_CAPABILITY_KEY_ID"
 GATEWAY_TOKEN = "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN"
-ADAPTER_TOKEN = "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN"
 GATEWAY_USERNAME = "HERMES_YUJIN_GATEWAY_USERNAME"
 GATEWAY_PASSWORD = "HERMES_YUJIN_GATEWAY_PASSWORD"
 GATEWAY_PASSWORD_HASH = "HERMES_YUJIN_GATEWAY_PASSWORD_HASH"
@@ -86,7 +86,6 @@ LOCAL_KEYS = (
     PUBLIC_KEY,
     KEY_ID,
     GATEWAY_TOKEN,
-    ADAPTER_TOKEN,
     GATEWAY_USERNAME,
     GATEWAY_PASSWORD,
 )
@@ -132,7 +131,7 @@ def looks_real(name, value):
             return len(base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))) == 32
         except Exception:
             return False
-    if name in (GATEWAY_TOKEN, ADAPTER_TOKEN):
+    if name == GATEWAY_TOKEN:
         # 게이트웨이 클라이언트가 32바이트 이상과 서로 다른 문자 8종을 요구한다.
         stripped = value == value.strip()
         return stripped and len(value.encode("utf-8")) >= 32 and len(set(value)) >= 8
@@ -173,7 +172,6 @@ if stage == "local":
         PUBLIC_KEY: encode(raw_public),
         KEY_ID: "videobox-yujin-" + secrets.token_hex(8),
         GATEWAY_TOKEN: secrets.token_urlsafe(48),
-        ADAPTER_TOKEN: secrets.token_urlsafe(48),
         GATEWAY_USERNAME: "videobox-gateway",
         GATEWAY_PASSWORD: secrets.token_urlsafe(32),
     }
@@ -249,4 +247,4 @@ try {
 }
 
 Write-Host "유진 비밀값을 이 컴퓨터에서 새로 만들어 $EnvFile 에 넣었습니다."
-Write-Host "값은 화면에 표시하지 않습니다. MEM0_API_KEY 는 외부 계정 값이라 직접 넣어야 합니다."
+Write-Host "값은 화면에 표시하지 않습니다."

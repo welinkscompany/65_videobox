@@ -1,3 +1,5 @@
+**대체됨:** `docs/handoffs/2026-09-18-mem0-removed-native-memory-librarian.ko.md`
+
 # 2026-09-10 진단서 E2E 항목(FIX-01·FIX-02·INVEST-02) 전부 닫음
 
 owner 승인 위임: `docs/system-audit-2026-09-10-claude-remediation.ko.md`가

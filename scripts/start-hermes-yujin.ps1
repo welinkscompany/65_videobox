@@ -26,7 +26,6 @@ $credentialNames = @(
     "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64"
     "VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64"
     "VIDEOBOX_HERMES_CAPABILITY_KEY_ID"
-    "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN"
 )
 
 if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) {
@@ -186,8 +185,6 @@ $configResult = Invoke-CapturedDocker `
         "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64"
         "VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64"
         "VIDEOBOX_HERMES_CAPABILITY_KEY_ID"
-        "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN"
-        "MEM0_API_KEY"
         "MISSING"
     )
 if ($configResult.ExitCode -ne 0) {
@@ -203,26 +200,22 @@ catch {
 $gateway = $rendered.services.'videobox-agent-gateway'
 $hermes = $rendered.services.'videobox-hermes-yujin'
 $workspace = $rendered.services.'videobox-workspace'
-$memoryAdapter = $rendered.services.'videobox-hermes-memory-adapter'
 if (
     $null -eq $gateway -or
     $null -eq $hermes -or
-    $null -eq $workspace -or
-    $null -eq $memoryAdapter
+    $null -eq $workspace
 ) {
     throw "Container configuration validation is incomplete."
 }
 
 $gatewayEnvironmentNames = @($gateway.environment.PSObject.Properties.Name | Sort-Object)
 $expectedGatewayEnvironmentNames = @(
-    "HERMES_MEMORY_ADAPTER_URL"
     "HERMES_YUJIN_GATEWAY_PASSWORD"
     "HERMES_YUJIN_GATEWAY_USERNAME"
     "HERMES_YUJIN_URL"
     "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN"
     "VIDEOBOX_HERMES_CAPABILITY_KEY_ID"
     "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64"
-    "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN"
 )
 if (($gatewayEnvironmentNames -join "|") -cne ($expectedGatewayEnvironmentNames -join "|")) {
     throw "Agent gateway environment contract is invalid."
@@ -241,27 +234,6 @@ $expectedHermesEnvironmentNames = @(
 )
 if (($hermesEnvironmentNames -join "|") -cne ($expectedHermesEnvironmentNames -join "|")) {
     throw "Hermes environment contract is invalid."
-}
-$memoryAdapterEnvironmentNames = @(
-    $memoryAdapter.environment.PSObject.Properties.Name | Sort-Object
-)
-# VIDEOBOX_MEM0_* 는 자체 호스팅 기억 설정이다. 전부 이 컴퓨터를 가리키는
-# 값이고 비밀이 아니다. 정렬된 이름 목록이라 알파벳 순서를 지킨다.
-$expectedMemoryAdapterEnvironmentNames = @(
-    "MEM0_API_KEY"
-    "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN"
-    "VIDEOBOX_MEM0_EMBEDDER_MODEL"
-    "VIDEOBOX_MEM0_EMBEDDING_DIMS"
-    "VIDEOBOX_MEM0_LLM_MODEL"
-    "VIDEOBOX_MEM0_LOCAL_BASE_URL"
-    "VIDEOBOX_MEM0_MODE"
-    "VIDEOBOX_MEM0_STORE_PATH"
-)
-if (
-    ($memoryAdapterEnvironmentNames -join "|") -cne
-    ($expectedMemoryAdapterEnvironmentNames -join "|")
-) {
-    throw "Hermes memory adapter environment contract is invalid."
 }
 
 $gatewayUsername = Assert-ResolvedCredential `
@@ -291,10 +263,6 @@ $gatewayCapabilityKeyId = Assert-ResolvedCredential `
 $workspaceCapabilityKeyId = Assert-ResolvedCredential `
     "VIDEOBOX_HERMES_CAPABILITY_KEY_ID" `
     $workspace.environment.VIDEOBOX_HERMES_CAPABILITY_KEY_ID
-$memoryAdapterToken = Assert-ResolvedCredential `
-    "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN" `
-    $memoryAdapter.environment.VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN
-$memoryApiKey = [string]$memoryAdapter.environment.MEM0_API_KEY
 if ($gatewayPassword.Length -lt 12) {
     throw "Resolved container credential 'HERMES_YUJIN_GATEWAY_PASSWORD' is invalid."
 }
@@ -304,13 +272,6 @@ if (
     $gatewayServiceToken -match '(?i)changeme|replace_me|placeholder'
 ) {
     throw "Resolved container credential 'VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN' is invalid."
-}
-if (
-    $memoryAdapterToken.Length -lt 32 -or
-    @($memoryAdapterToken.ToCharArray() | Select-Object -Unique).Count -lt 8 -or
-    $memoryAdapterToken -match '(?i)changeme|replace_me|placeholder'
-) {
-    throw "Resolved container credential 'VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN' is invalid."
 }
 if (
     $gatewayCapabilityKeyId -cne $workspaceCapabilityKeyId -or
@@ -331,14 +292,6 @@ if ($gateway.environment.HERMES_YUJIN_URL -cne "http://videobox-hermes-yujin:912
     throw "Agent gateway Hermes URL is invalid."
 }
 if (
-    $gateway.environment.HERMES_MEMORY_ADAPTER_URL -cne
-    "http://videobox-hermes-memory-adapter:8082" -or
-    $gateway.environment.VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN -cne
-    $memoryAdapterToken
-) {
-    throw "Hermes memory adapter gateway configuration is invalid."
-}
-if (
     $workspace.environment.VIDEOBOX_AGENT_GATEWAY_URL -cne
     "http://videobox-agent-gateway:8081" -or
     $workspace.environment.VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN -cne
@@ -350,19 +303,6 @@ foreach ($name in @($workspace.environment.PSObject.Properties.Name)) {
     if ($name -match '^HERMES(?:_YUJIN|_DASHBOARD)') {
         throw "Workspace received a forbidden Hermes credential."
     }
-}
-if (
-    $null -ne $workspace.environment.PSObject.Properties["MEM0_API_KEY"] -or
-    $null -ne $workspace.environment.PSObject.Properties[
-        "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN"
-    ] -or
-    $null -ne $hermes.environment.PSObject.Properties["MEM0_API_KEY"] -or
-    $null -ne $hermes.environment.PSObject.Properties[
-        "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN"
-    ] -or
-    $null -ne $gateway.environment.PSObject.Properties["MEM0_API_KEY"]
-) {
-    throw "Hermes memory credential ownership is invalid."
 }
 if (
     $null -ne $gateway.environment.PSObject.Properties[
@@ -435,32 +375,6 @@ if (
     )
 ) {
     throw "Runtime startup requires the canonical mounted Yujin profile source."
-}
-
-if ([string]::IsNullOrWhiteSpace($memoryApiKey)) {
-    try {
-        $memoryDisableResult = Invoke-CapturedDocker -DockerArguments @(
-            "compose"
-            "-f", $composeFile
-            "-f", $overlayFile
-            "--profile", "hermes-yujin"
-            "--env-file", $resolvedEnvFile
-            "stop"
-            "videobox-hermes-memory-adapter"
-        )
-    }
-    catch {
-        throw (
-            "Memory storage disable failed; " +
-            "existing chat services were left unchanged."
-        )
-    }
-    if ($memoryDisableResult.ExitCode -ne 0) {
-        throw (
-            "Memory storage disable failed; " +
-            "existing chat services were left unchanged."
-        )
-    }
 }
 
 function Invoke-TargetedComposeUp {
@@ -758,49 +672,6 @@ catch {
         $persistentProfileState + " " +
         $safeRerunRecovery
     )
-}
-
-if ([string]::IsNullOrWhiteSpace($memoryApiKey)) {
-    Write-Output (
-        "Memory storage is disabled; interactive Yujin chat remains available."
-    )
-}
-else {
-    try {
-        Invoke-TargetedComposeUp `
-            -ServiceName "videobox-hermes-memory-adapter" `
-            -FailureMessage "Optional Hermes memory adapter startup failed." `
-            -AdditionalArguments @("--force-recreate", "--wait")
-    }
-    catch {
-        Write-Warning (
-            "Optional Hermes memory adapter startup failed; " +
-            "chat remains available."
-        )
-        $memoryStopSucceeded = $false
-        try {
-            $memoryStopResult = Invoke-CapturedDocker -DockerArguments @(
-                "compose"
-                "-f", $composeFile
-                "-f", $overlayFile
-                "--profile", "hermes-yujin"
-                "--env-file", $resolvedEnvFile
-                "stop"
-                "videobox-hermes-memory-adapter"
-            )
-            $memoryStopSucceeded = $memoryStopResult.ExitCode -eq 0
-        }
-        catch {
-            $memoryStopSucceeded = $false
-        }
-        if (-not $memoryStopSucceeded) {
-            Write-Warning (
-                "Optional Hermes memory adapter startup failed; " +
-                "stale memory adapter could not be stopped; " +
-                "chat remains available."
-            )
-        }
-    }
 }
 
 Write-Output (

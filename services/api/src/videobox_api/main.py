@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from typing import Any
 import asyncio
 import base64
@@ -670,6 +671,91 @@ async def _prune_hermes_run_events(app: FastAPI) -> None:
         )
 
 
+#: owner 확정 지침(2026-09-18): VideoBox 컨테이너는 재시작 정책도, 크론도
+#: 없다(`docker inspect`로 직접 확인) -- owner가 `owner-ready.ps1`로 켜고
+#: 끄는 온디맨드 실행이다. 그래서 고정 시각 스케줄이 아니라 **기동마다
+#: 워터마크를 보고, 이만큼 지났으면 그 자리에서 한 번 따라잡는다.**
+MEMORY_LIBRARIAN_STALE_AFTER_SECONDS = 20 * 3600
+#: 매 바퀴 워터마크를 다시 읽지 않는다 -- 대부분의 바퀴는 아무것도 밀려
+#: 있지 않으므로, DB를 계속 두드리는 대신 이 간격으로만 확인한다.
+MEMORY_LIBRARIAN_CHECK_INTERVAL_SECONDS = 3600.0
+
+
+def _memory_librarian_watermark_is_stale(
+    watermark: dict[str, Any], *, now: datetime
+) -> bool:
+    raw = watermark.get("last_run_at")
+    if not raw:
+        return True
+    try:
+        last_run_at = datetime.fromisoformat(str(raw))
+    except ValueError:
+        return True
+    if last_run_at.tzinfo is None:
+        last_run_at = last_run_at.replace(tzinfo=timezone.utc)
+    return (now - last_run_at) >= timedelta(
+        seconds=MEMORY_LIBRARIAN_STALE_AFTER_SECONDS
+    )
+
+
+def _catch_up_memory_librarian(app: FastAPI) -> None:
+    """기억 사서가 밀린 프로젝트만 골라 그 자리에서 따라잡는다.
+
+    **워터마크 행이 있는 (project_id, conversation_id)만** 본다 -- owner가
+    `scripts/run_memory_librarian.py`로 그 프로젝트에서 사서를 최소 한 번
+    직접 돌렸다는 뜻이다. 새 프로젝트를 스스로 찾아 나서지 않는다
+    (`list_projects()`를 쓰지 않는다). 이 저장소 Postgres에는
+    `live-check-*` 같은 dev 검증 대화가 실제 owner 프로젝트와 같은
+    테이블에 섞여 있어(2026-09-18 실측), 사람이 한 번도 보지 않은
+    프로젝트까지 자동으로 훑으면 그 시험 데이터가 "owner 취향"으로
+    승격될 위험이 있다 -- 이 게이트가 그걸 막는다.
+    """
+    from videobox_core_engine.memory_librarian import (
+        distill_conversation_memories,
+    )
+
+    store: LocalProjectStore = app.state.store
+    try:
+        watermarks = store.list_memory_librarian_watermarks()
+    except Exception:
+        _LOGGER.warning(
+            "사서 워터마크를 읽지 못해 이번 바퀴는 건너뜁니다.",
+            exc_info=True,
+        )
+        return
+    now = datetime.now(timezone.utc)
+    stale = [
+        watermark
+        for watermark in watermarks
+        if _memory_librarian_watermark_is_stale(watermark, now=now)
+    ]
+    if not stale:
+        return
+    runtime = app.state.memory_librarian_runtime_service
+    for watermark in stale:
+        project_id = str(watermark["project_id"])
+        conversation_id = str(watermark["conversation_id"])
+        try:
+            distill_conversation_memories(
+                store,
+                project_id=project_id,
+                conversation_id=conversation_id,
+                runtime=runtime,
+                as_of=now,
+            )
+        except Exception:
+            # 유진의 두뇌(로컬 모델)가 꺼져 있어도 흔한 일이다 -- 다음
+            # 바퀴에 다시 시도한다. 워터마크는 실패 시 전진하지 않는다
+            # (`memory_librarian.py`가 보장한다).
+            _LOGGER.warning(
+                "사서가 프로젝트 %s 대화 %s를 정리하지 못했습니다. "
+                "다음 바퀴에 다시 시도합니다.",
+                project_id,
+                conversation_id,
+                exc_info=True,
+            )
+
+
 @asynccontextmanager
 async def _media_analysis_lifespan(app: FastAPI):
     """Run recovery and durable retry polling outside request/startup hot paths."""
@@ -705,10 +791,17 @@ async def _media_analysis_lifespan(app: FastAPI):
         loop_clock = asyncio.get_running_loop()
         next_prune_at = 0.0
         next_index_at = 0.0
+        next_memory_librarian_at = 0.0
         while not stop_event.is_set():
             try:
                 await _recover_hermes_runs(app)
                 await _poll_media_analysis(app, recover_running=first)
+                if loop_clock.time() >= next_memory_librarian_at:
+                    next_memory_librarian_at = (
+                        loop_clock.time()
+                        + MEMORY_LIBRARIAN_CHECK_INTERVAL_SECONDS
+                    )
+                    await asyncio.to_thread(_catch_up_memory_librarian, app)
                 if loop_clock.time() >= next_index_at:
                     # Booked before the call, same as the prune below: a
                     # failing pass must not turn into a per-second retry.
@@ -1193,6 +1286,22 @@ def create_app(
             local_http_client=urlopen,
         )
     )
+    # 기억 사서(memory_librarian) 전용 런타임. 인포그래픽과 같은 이유로
+    # 공용 런타임(30~60초)을 못 쓴다 -- 대화 하나 전체를 한 번에 증류하는
+    # 프롬프트가 한 턴 채팅보다 훨씬 길다(`scripts/run_memory_librarian.py`가
+    # 이미 120초로 재서 올려 둔 값과 같다). 여기서도 처음 부를 때만 짓는다 --
+    # 대부분의 기동에서는 워터마크가 하나도 안 밀려 있어 한 번도 안 불린다.
+    memory_librarian_runtime_service = _LazyLocalRuntime(
+        build=lambda: build_local_only_runtime_service(
+            store=store,
+            local_runtime_config=replace(
+                resolved_local_runtime_config,
+                timeout_seconds=120.0,
+            ),
+            local_http_client=urlopen,
+        )
+    )
+    app.state.memory_librarian_runtime_service = memory_librarian_runtime_service
     app.state.build_local_only_runtime_service = build_local_only_runtime_service
     app.state.local_only_runtime_service_factory = runtime_service_factory
     app.state.local_http_client = urlopen
@@ -1342,10 +1451,7 @@ def create_app(
         if agent_gateway_http_client_factory is not None:
             client_kwargs["http_client_factory"] = agent_gateway_http_client_factory
         agent_gateway_client = AgentGatewayClient(**client_kwargs)
-        app.state.yujin_memory_service = YujinMemoryService(
-            store=store,
-            gateway=agent_gateway_client,
-        )
+        app.state.yujin_memory_service = YujinMemoryService(store=store)
         app.state.hermes_run_service = HermesRunService(
             store=store,
             gateway_client=agent_gateway_client,
@@ -1354,10 +1460,7 @@ def create_app(
         )
     else:
         app.state.hermes_run_service = None
-        app.state.yujin_memory_service = YujinMemoryService(
-            store=store,
-            gateway=None,
-        )
+        app.state.yujin_memory_service = YujinMemoryService(store=store)
     app.state.hermes_operational_status = HermesOperationalStatusService(
         agent_gateway_client,
         admission_ready=capability_verifier is not None,

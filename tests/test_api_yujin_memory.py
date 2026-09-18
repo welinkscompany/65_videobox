@@ -7,7 +7,6 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
-from videobox_agent_gateway.memory_gateway import MemoryWriteOutcome
 
 
 def _append_completed_api_source(
@@ -336,9 +335,6 @@ def test_list_filters_current_conversation_before_limit_and_restores_storage(
             base, json=_payload(conversation_id, first["message_id"])
         ).json()
         client.post(f"{base}/{current['candidate_id']}/approve")
-        app.state.yujin_memory_service._gateway = SimpleNamespace(
-            add_approved_memory=lambda _request: None
-        )
         claim_token = "claim-" + "a" * 64
         app.state.store.claim_yujin_memory_store(
             project_id=project_id,
@@ -758,22 +754,9 @@ def test_unknown_store_errors_are_fixed_and_never_echoed(
 def test_store_requires_explicit_request_and_returns_no_provider_reference(
     tmp_path: Path,
 ) -> None:
-    calls = []
-
-    class Gateway:
-        async def add_approved_memory(self, request):
-            calls.append(request)
-            return MemoryWriteOutcome(
-                status="stored", memory_ref="provider-private"
-            )
-
-        async def reconcile_memory(self, request):
-            raise AssertionError("first store must add")
-
     app = create_app(projects_root=tmp_path)
     with TestClient(app) as client:
         project_id, _, conversation_id, first, _ = _seed(app, client)
-        app.state.yujin_memory_service._gateway = Gateway()
         base = f"/api/projects/{project_id}/director/memory-candidates"
         created = client.post(
             base, json=_payload(conversation_id, first["message_id"])
@@ -790,7 +773,6 @@ def test_store_requires_explicit_request_and_returns_no_provider_reference(
         )
 
     assert approved.status_code == 200
-    assert len(calls) == 1
     assert missing_request.status_code == 422
     assert stored.status_code == 200
     assert stored.json() == {
@@ -799,7 +781,10 @@ def test_store_requires_explicit_request_and_returns_no_provider_reference(
         "storage_status": "stored",
         "retryable": False,
     }
-    assert "provider-private" not in stored.text
+    # 로컬 memory_ref(`local-...`)도 승인 큐가 owner에게 돌려주는 응답에는
+    # 안 실린다 -- 화면은 상태만 본다.
+    assert "local-" not in stored.text
+    assert "memory_ref" not in stored.text
 
 
 def test_store_failure_is_fixed_and_never_echoes_internal_error(
@@ -836,25 +821,9 @@ def test_store_failure_is_fixed_and_never_echoes_internal_error(
 def test_delete_uses_candidate_handle_only_and_hides_private_mapping(
     tmp_path: Path,
 ) -> None:
-    delete_calls = []
-
-    class Gateway:
-        async def add_approved_memory(self, _request):
-            return MemoryWriteOutcome(
-                status="stored", memory_ref="provider-private"
-            )
-
-        async def reconcile_memory(self, _request):
-            raise AssertionError("first store must add")
-
-        async def delete_memory(self, request):
-            delete_calls.append(request)
-            return {"deleted": True}
-
     app = create_app(projects_root=tmp_path)
     with TestClient(app) as client:
         project_id, _, conversation_id, first, _ = _seed(app, client)
-        app.state.yujin_memory_service._gateway = Gateway()
         base = f"/api/projects/{project_id}/director/memory-candidates"
         created = client.post(
             base, json=_payload(conversation_id, first["message_id"])
@@ -877,10 +846,7 @@ def test_delete_uses_candidate_handle_only_and_hides_private_mapping(
         "storage_status": "deleted",
         "retryable": False,
     }
-    assert len(delete_calls) == 1
-    assert delete_calls[0].memory_ref == "provider-private"
-    assert delete_calls[0].allow_absent is False
-    assert "provider-private" not in deleted.text
+    assert "local-" not in deleted.text
     assert "external_ref" not in deleted.text
 
     rejected_restore = client.post(
@@ -896,31 +862,14 @@ def test_delete_uses_candidate_handle_only_and_hides_private_mapping(
     }
     assert repeated_delete.status_code == 200
     assert repeated_delete.json() == deleted.json()
-    assert len(delete_calls) == 1
 
 
 def test_delete_retries_after_local_finalize_failure(
     tmp_path: Path, monkeypatch
 ) -> None:
-    delete_calls = []
-
-    class Gateway:
-        async def add_approved_memory(self, _request):
-            return MemoryWriteOutcome(
-                status="stored", memory_ref="provider-private"
-            )
-
-        async def reconcile_memory(self, _request):
-            raise AssertionError("first store must add")
-
-        async def delete_memory(self, request):
-            delete_calls.append(request)
-            return {"deleted": True}
-
     app = create_app(projects_root=tmp_path)
     with TestClient(app, raise_server_exceptions=False) as client:
         project_id, _, conversation_id, first, _ = _seed(app, client)
-        app.state.yujin_memory_service._gateway = Gateway()
         base = f"/api/projects/{project_id}/director/memory-candidates"
         created = client.post(
             base, json=_payload(conversation_id, first["message_id"])
@@ -951,5 +900,3 @@ def test_delete_retries_after_local_finalize_failure(
     assert retried.status_code == 200
     assert retried.json()["storage_status"] == "deleted"
     assert repeated.json() == retried.json()
-    assert len(delete_calls) == 2
-    assert [call.allow_absent for call in delete_calls] == [False, True]

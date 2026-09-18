@@ -3,27 +3,23 @@ from __future__ import annotations
 import inspect
 
 from videobox_api import yujin_memory_service
-from videobox_api.routers import yujin_memory
 
 
-def test_switched_off_and_failed_do_not_share_one_word() -> None:
-    """유진의 기억 저장이 503 `memory_save_unavailable`로 막혔고 화면은 `기억을
-    저장하지 못했어요`라고 했다. 실제로는 **기능이 켜져 있지 않았다** --
-    workspace 컨테이너에 게이트웨이 주소가 실리지 않은 상태였다
-    (`owner-ready.ps1 -WithYujinMemory`로만 실린다).
-
-    고장과 꺼짐은 owner가 할 일이 다르다. 하나는 다시 눌러 보는 것이고 하나는
-    켜는 것이다. 한 문장으로 말하면 owner는 켜면 되는 일을 안 되는 일로 안다.
+def test_memory_is_always_configured_now_that_mem0_is_gone() -> None:
+    """옛 이름은 `test_switched_off_and_failed_do_not_share_one_word` --
+    게이트웨이(외부 provider)가 아예 안 실려서 "꺼짐"과 "고장"이 헷갈리던
+    상태를 검증했었다. 2026-09-18에 Mem0를 걷어내며 `YujinMemoryService`가
+    더 이상 게이트웨이를 갖지 않는다 -- 저장은 항상 로컬이라 "꺼져 있다"는
+    상태 자체가 없어졌다(`docs/decisions/2026-09-18-mem0-removed-native-memory-librarian.ko.md`).
+    그 사실을 소스로 고정한다: `self._gateway` 개념이 없고, `store_candidate`/
+    `delete_candidate_memory`는 로컬 쓰기 실패(`memory_store_unavailable`/
+    `memory_delete_unavailable`)만 던진다.
     """
     source = inspect.getsource(yujin_memory_service.YujinMemoryService)
-    for guard in ("if self._gateway is None:",):
-        assert guard in source
-    # 게이트웨이가 아예 없을 때만 쓰는 이름. 호출이 실패한 경우와 겹치면 안 된다.
-    assert source.count('MemoryStoreUnavailable("memory_not_configured")') == 2
-    assert 'MemoryStoreUnavailable("memory_store_unavailable")' not in source.split("if self._gateway is None:")[1].split("\n")[1]
-
-    router_source = inspect.getsource(yujin_memory)
-    assert '"memory_not_configured"' in router_source
+    assert "self._gateway" not in source
+    assert "memory_not_configured" not in source
+    assert "memory_store_unavailable" in source
+    assert "memory_delete_unavailable" in source
 
 
 def test_the_screen_says_it_is_switched_off_rather_than_broken() -> None:

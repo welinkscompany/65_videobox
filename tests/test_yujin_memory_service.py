@@ -1,10 +1,18 @@
+"""유진의 승인된 기억을 로컬에서만 저장·삭제한다 (2026-09-18, Mem0 제거).
+
+옛 파일은 mem0 게이트웨이의 네트워크 실패 모양(event_pending/ambiguous/
+reconcile)을 재는 시험으로 가득했다. 로컬 DB 쓰기는 성공 아니면 예외뿐이라
+그 상태들은 이제 "게이트웨이가 뭐라고 답했는가"가 아니라 "로컬 쓰기 자체가
+실패했는가"에서만 나온다 -- 그 경계를 다시 잰다. 승인 큐의 claim/finalize
+동시성 계약은 그대로라 그 부분 시험은 옛 것과 같은 시나리오를 쓴다.
+"""
+
 from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from videobox_agent_gateway.memory_gateway import MemoryWriteOutcome
 from videobox_api.yujin_memory_service import (
     MemoryStoreUnavailable,
     YujinMemoryService,
@@ -12,29 +20,38 @@ from videobox_api.yujin_memory_service import (
 from videobox_storage.local_project_store import LocalProjectStore
 
 
-def _approved_candidate(store: LocalProjectStore) -> tuple[str, str]:
-    project = store.bootstrap_project("memory")
+def _approved_candidate(
+    store: LocalProjectStore,
+    *,
+    project_id: str | None = None,
+    category: str = "pacing",
+    proposed_text: str = "빠른 컷을 선호합니다.",
+    conversation_id: str = "conversation-memory",
+    client_request_id: str = "request-memory",
+) -> tuple[str, str]:
+    if project_id is None:
+        project_id = store.bootstrap_project("memory").project_id
     session = store.save_editing_session(
-        project_id=project.project_id,
+        project_id=project_id,
         timeline_id="timeline",
         session_payload={"segments": [], "history": []},
     )
     conversation = store.create_director_conversation(
-        project_id=project.project_id,
+        project_id=project_id,
         session_id=session["session_id"],
-        conversation_id="conversation-memory",
+        conversation_id=conversation_id,
     )
     run = store.begin_director_hermes_run(
-        project_id=project.project_id,
+        project_id=project_id,
         session_id=session["session_id"],
         conversation_id=conversation["conversation_id"],
-        client_message_id="memory-service-source",
+        client_message_id="memory-service-source-" + conversation_id,
         user_text="영상 템포를 조금 빠르게 해줘.",
         expected_session_revision=session["session_revision"],
         expected_asset_index_revision=0,
     )
     assert store.complete_director_hermes_run(
-        project_id=project.project_id,
+        project_id=project_id,
         run_id=run["run_id"],
         owner_token=run["owner_token"],
         status="completed",
@@ -43,53 +60,32 @@ def _approved_candidate(store: LocalProjectStore) -> tuple[str, str]:
         retryable=False,
     )
     message = store.list_director_messages(
-        project_id=project.project_id,
+        project_id=project_id,
         conversation_id=conversation["conversation_id"],
     )[0]
     candidate = store.create_yujin_memory_candidate(
-        project_id=project.project_id,
+        project_id=project_id,
         conversation_id=conversation["conversation_id"],
-        client_request_id="request-memory",
+        client_request_id=client_request_id,
         source_message_ids=(message["message_id"],),
         memory_scope="creator",
-        category="pacing",
-        proposed_text="빠른 컷을 선호합니다.",
+        category=category,
+        proposed_text=proposed_text,
     )
     store.transition_yujin_memory_candidate(
-        project_id=project.project_id,
+        project_id=project_id,
         candidate_id=candidate["candidate_id"],
         action="approve",
     )
-    return project.project_id, candidate["candidate_id"]
+    return project_id, candidate["candidate_id"]
 
 
-class _Gateway:
-    def __init__(self, outcomes: list[MemoryWriteOutcome]) -> None:
-        self.outcomes = outcomes
-        self.add_calls = []
-        self.reconcile_calls = []
-        self.delete_calls = []
-
-    async def add_approved_memory(self, request):
-        self.add_calls.append(request)
-        return self.outcomes.pop(0)
-
-    async def reconcile_memory(self, request):
-        self.reconcile_calls.append(request)
-        return self.outcomes.pop(0)
-
-    async def delete_memory(self, request):
-        self.delete_calls.append(request)
-        return {"deleted": True}
-
-
-def test_explicit_store_calls_add_once_and_replay_is_local(tmp_path: Path) -> None:
+def test_store_candidate_is_idempotent_and_carries_no_gateway(
+    tmp_path: Path,
+) -> None:
     store = LocalProjectStore(tmp_path)
     project_id, candidate_id = _approved_candidate(store)
-    gateway = _Gateway(
-        [MemoryWriteOutcome(status="stored", memory_ref="memory-private")]
-    )
-    service = YujinMemoryService(store=store, gateway=gateway)
+    service = YujinMemoryService(store=store)
 
     first = asyncio.run(
         service.store_candidate(
@@ -113,60 +109,55 @@ def test_explicit_store_calls_add_once_and_replay_is_local(tmp_path: Path) -> No
         "storage_status": "stored",
         "retryable": False,
     }
-    assert "memory_ref" not in first
-    assert len(gateway.add_calls) == 1
-    assert gateway.reconcile_calls == []
-    request = gateway.add_calls[0]
-    assert request.text == "빠른 컷을 선호합니다."
-    assert request.external_ref.startswith("ext-")
-    assert request.operation_id.startswith("op-")
-    assert not hasattr(request, "project_id")
-
-
-def test_event_replay_reconciles_without_second_add(tmp_path: Path) -> None:
-    store = LocalProjectStore(tmp_path)
-    project_id, candidate_id = _approved_candidate(store)
-    gateway = _Gateway(
-        [
-            MemoryWriteOutcome(
-                status="event_pending",
-                event_ref="event-private",
-            ),
-            MemoryWriteOutcome(
-                status="stored",
-                memory_ref="memory-private",
-            ),
-        ]
+    mapping = store.get_yujin_memory_private_mapping(
+        project_id=project_id, candidate_id=candidate_id
     )
-    service = YujinMemoryService(store=store, gateway=gateway)
-
-    pending = asyncio.run(
-        service.store_candidate(
-            project_id=project_id,
-            candidate_id=candidate_id,
-            client_request_id="store-request-1",
-        )
-    )
-    settled = asyncio.run(
-        service.store_candidate(
-            project_id=project_id,
-            candidate_id=candidate_id,
-            client_request_id="store-request-2",
-        )
-    )
-
-    assert pending["storage_status"] == "event_pending"
-    assert pending["status"] == "approved"
-    assert settled["storage_status"] == "stored"
-    assert settled["status"] == "approved"
-    assert len(gateway.add_calls) == 1
-    assert len(gateway.reconcile_calls) == 1
-    assert not hasattr(gateway.reconcile_calls[0], "project_id")
+    assert mapping["memory_ref"].startswith("local-")
 
 
-def test_pending_candidate_cannot_store_and_gateway_call_is_zero(
+def test_duplicate_exact_text_reuses_the_same_memory_ref(
     tmp_path: Path,
 ) -> None:
+    """mem0 시절 같은 문장이 9번 중복 저장되던 결함을 로컬로 고정 방지한다."""
+    store = LocalProjectStore(tmp_path)
+    project_id, first_candidate = _approved_candidate(
+        store,
+        conversation_id="conversation-a",
+        client_request_id="request-a",
+    )
+    _, second_candidate = _approved_candidate(
+        store,
+        project_id=project_id,
+        conversation_id="conversation-b",
+        client_request_id="request-b",
+    )
+    service = YujinMemoryService(store=store)
+
+    asyncio.run(
+        service.store_candidate(
+            project_id=project_id,
+            candidate_id=first_candidate,
+            client_request_id="store-a",
+        )
+    )
+    asyncio.run(
+        service.store_candidate(
+            project_id=project_id,
+            candidate_id=second_candidate,
+            client_request_id="store-b",
+        )
+    )
+
+    first_mapping = store.get_yujin_memory_private_mapping(
+        project_id=project_id, candidate_id=first_candidate
+    )
+    second_mapping = store.get_yujin_memory_private_mapping(
+        project_id=project_id, candidate_id=second_candidate
+    )
+    assert first_mapping["memory_ref"] == second_mapping["memory_ref"]
+
+
+def test_pending_candidate_cannot_store(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project_id, candidate_id = _approved_candidate(store)
     connection = store._connection(project_id)
@@ -179,8 +170,7 @@ def test_pending_candidate_cannot_store_and_gateway_call_is_zero(
         connection.commit()
     finally:
         connection.close()
-    gateway = _Gateway([])
-    service = YujinMemoryService(store=store, gateway=gateway)
+    service = YujinMemoryService(store=store)
 
     try:
         asyncio.run(
@@ -195,13 +185,8 @@ def test_pending_candidate_cannot_store_and_gateway_call_is_zero(
     else:
         raise AssertionError("pending candidate store must fail")
 
-    assert gateway.add_calls == []
-    assert gateway.reconcile_calls == []
 
-
-def test_stale_started_claim_reconciles_without_blind_add(
-    tmp_path: Path,
-) -> None:
+def test_stale_started_claim_recovers_on_retry(tmp_path: Path) -> None:
     now = [datetime(2026, 7, 30, 8, tzinfo=UTC)]
     store = LocalProjectStore(tmp_path, now=lambda: now[0])
     project_id, candidate_id = _approved_candidate(store)
@@ -217,10 +202,7 @@ def test_stale_started_claim_reconciles_without_blind_add(
         claim_token="claim-" + "a" * 64,
     )
     now[0] += timedelta(seconds=61)
-    gateway = _Gateway(
-        [MemoryWriteOutcome(status="stored", memory_ref="memory-private")]
-    )
-    service = YujinMemoryService(store=store, gateway=gateway)
+    service = YujinMemoryService(store=store)
 
     settled = asyncio.run(
         service.store_candidate(
@@ -231,190 +213,14 @@ def test_stale_started_claim_reconciles_without_blind_add(
     )
 
     assert settled["storage_status"] == "stored"
-    assert gateway.add_calls == []
-    assert len(gateway.reconcile_calls) == 1
-    assert gateway.reconcile_calls[0].event_ref is None
 
 
-def test_provider_success_then_local_finalize_failure_replays_without_add(
+def test_local_write_failure_marks_ambiguous_and_retry_recovers(
     tmp_path: Path, monkeypatch
 ) -> None:
     store = LocalProjectStore(tmp_path)
     project_id, candidate_id = _approved_candidate(store)
-    gateway = _Gateway(
-        [MemoryWriteOutcome(status="stored", memory_ref="memory-private")]
-    )
-    service = YujinMemoryService(store=store, gateway=gateway)
-    original = store.finalize_yujin_memory_store
-    failures = 0
-
-    def fail_once(**kwargs):
-        nonlocal failures
-        failures += 1
-        if failures == 1:
-            raise RuntimeError("local settle unavailable")
-        return original(**kwargs)
-
-    monkeypatch.setattr(store, "finalize_yujin_memory_store", fail_once)
-    try:
-        asyncio.run(
-            service.store_candidate(
-                project_id=project_id,
-                candidate_id=candidate_id,
-                client_request_id="store-request-1",
-            )
-        )
-    except RuntimeError:
-        pass
-    else:
-        raise AssertionError("first local finalize should fail")
-
-    settled = asyncio.run(
-        service.store_candidate(
-            project_id=project_id,
-            candidate_id=candidate_id,
-            client_request_id="store-request-2",
-        )
-    )
-    assert settled["storage_status"] == "stored"
-    assert len(gateway.add_calls) == 1
-    assert gateway.reconcile_calls == []
-
-
-def test_proven_failed_write_allows_one_explicit_new_add(
-    tmp_path: Path,
-) -> None:
-    store = LocalProjectStore(tmp_path)
-    project_id, candidate_id = _approved_candidate(store)
-    gateway = _Gateway(
-        [
-            MemoryWriteOutcome(status="failed_retryable"),
-            MemoryWriteOutcome(
-                status="stored", memory_ref="memory-private"
-            ),
-        ]
-    )
-    service = YujinMemoryService(store=store, gateway=gateway)
-
-    failed = asyncio.run(
-        service.store_candidate(
-            project_id=project_id,
-            candidate_id=candidate_id,
-            client_request_id="store-request-1",
-        )
-    )
-    settled = asyncio.run(
-        service.store_candidate(
-            project_id=project_id,
-            candidate_id=candidate_id,
-            client_request_id="store-request-2",
-        )
-    )
-
-    assert failed["storage_status"] == "failed_retryable"
-    assert failed["retryable"] is True
-    assert settled["storage_status"] == "stored"
-    assert len(gateway.add_calls) == 2
-    assert gateway.reconcile_calls == []
-
-
-def test_ambiguous_write_reconciles_and_never_blind_adds(
-    tmp_path: Path,
-) -> None:
-    store = LocalProjectStore(tmp_path)
-    project_id, candidate_id = _approved_candidate(store)
-    gateway = _Gateway(
-        [
-            MemoryWriteOutcome(status="ambiguous"),
-            MemoryWriteOutcome(status="ambiguous"),
-        ]
-    )
-    service = YujinMemoryService(store=store, gateway=gateway)
-
-    first = asyncio.run(
-        service.store_candidate(
-            project_id=project_id,
-            candidate_id=candidate_id,
-            client_request_id="store-request-1",
-        )
-    )
-    second = asyncio.run(
-        service.store_candidate(
-            project_id=project_id,
-            candidate_id=candidate_id,
-            client_request_id="store-request-2",
-        )
-    )
-
-    assert first["storage_status"] == "ambiguous"
-    assert second["storage_status"] == "ambiguous"
-    assert len(gateway.add_calls) == 1
-    assert len(gateway.reconcile_calls) == 1
-
-
-def test_two_concurrent_store_requests_keep_add_count_one(
-    tmp_path: Path,
-) -> None:
-    store = LocalProjectStore(tmp_path)
-    project_id, candidate_id = _approved_candidate(store)
-
-    class SlowGateway(_Gateway):
-        async def add_approved_memory(self, request):
-            self.add_calls.append(request)
-            await asyncio.sleep(0.05)
-            return self.outcomes.pop(0)
-
-    gateway = SlowGateway(
-        [MemoryWriteOutcome(status="stored", memory_ref="memory-private")]
-    )
-    service = YujinMemoryService(store=store, gateway=gateway)
-
-    async def run_both():
-        return await asyncio.gather(
-            service.store_candidate(
-                project_id=project_id,
-                candidate_id=candidate_id,
-                client_request_id="store-concurrent-1",
-            ),
-            service.store_candidate(
-                project_id=project_id,
-                candidate_id=candidate_id,
-                client_request_id="store-concurrent-2",
-            ),
-            return_exceptions=True,
-        )
-
-    results = asyncio.run(run_both())
-
-    assert len(gateway.add_calls) == 1
-    assert any(
-        isinstance(result, dict)
-        and result["storage_status"] == "stored"
-        for result in results
-    )
-    assert any(
-        isinstance(result, ValueError)
-        and str(result) == "memory_candidate_store_in_progress"
-        for result in results
-    )
-
-
-def test_provider_success_then_private_record_failure_reconciles_without_add(
-    tmp_path: Path, monkeypatch
-) -> None:
-    store = LocalProjectStore(tmp_path)
-    project_id, candidate_id = _approved_candidate(store)
-    gateway = _Gateway(
-        [
-            MemoryWriteOutcome(
-                status="stored", memory_ref="memory-private"
-            ),
-            MemoryWriteOutcome(
-                status="stored", memory_ref="memory-private"
-            ),
-        ]
-    )
-    service = YujinMemoryService(store=store, gateway=gateway)
+    service = YujinMemoryService(store=store)
     original = store.record_yujin_memory_provider_outcome
     failures = 0
 
@@ -422,12 +228,10 @@ def test_provider_success_then_private_record_failure_reconciles_without_add(
         nonlocal failures
         failures += 1
         if failures == 1:
-            raise RuntimeError("private record unavailable")
+            raise RuntimeError("local write unavailable")
         return original(**kwargs)
 
-    monkeypatch.setattr(
-        store, "record_yujin_memory_provider_outcome", fail_once
-    )
+    monkeypatch.setattr(store, "record_yujin_memory_provider_outcome", fail_once)
     try:
         asyncio.run(
             service.store_candidate(
@@ -436,10 +240,16 @@ def test_provider_success_then_private_record_failure_reconciles_without_add(
                 client_request_id="store-request-1",
             )
         )
-    except Exception:
-        pass
+    except MemoryStoreUnavailable as error:
+        assert str(error) == "memory_store_unavailable"
     else:
-        raise AssertionError("first local record should fail")
+        raise AssertionError("first local write should fail")
+
+    state = store.get_yujin_memory_store_state(
+        project_id=project_id, candidate_id=candidate_id
+    )
+    assert state["storage_status"] == "ambiguous"
+    assert state["retryable"] is True
 
     settled = asyncio.run(
         service.store_candidate(
@@ -448,26 +258,49 @@ def test_provider_success_then_private_record_failure_reconciles_without_add(
             client_request_id="store-request-2",
         )
     )
-
     assert settled["storage_status"] == "stored"
-    assert len(gateway.add_calls) == 1
-    assert len(gateway.reconcile_calls) == 1
 
 
-def test_operation_audit_is_monotonic_and_body_free(tmp_path: Path) -> None:
+def test_second_caller_hits_in_progress_while_first_claim_is_open(
+    tmp_path: Path,
+) -> None:
+    """저장소 계층의 claim 충돌 보장이 서비스 계층을 그대로 통과한다.
+
+    로컬 쓰기는 네트워크 I/O가 없어 `asyncio.gather`로는 더 이상 진짜
+    경합을 재현하지 못한다(옛 시험은 가짜 게이트웨이의 `asyncio.sleep`이
+    만드는 양보 지점에 의존했다). 그래서 두 번째 요청이 claim을 이미
+    쥔 상태에서 도착하는 상황을 직접 만든다.
+    """
     store = LocalProjectStore(tmp_path)
     project_id, candidate_id = _approved_candidate(store)
-    gateway = _Gateway(
-        [
-            MemoryWriteOutcome(
-                status="event_pending", event_ref="event-private"
-            ),
-            MemoryWriteOutcome(
-                status="stored", memory_ref="memory-private"
-            ),
-        ]
+    store.claim_yujin_memory_store(
+        project_id=project_id,
+        candidate_id=candidate_id,
+        client_request_id="store-concurrent-1",
+        claim_token="claim-" + "b" * 64,
     )
-    service = YujinMemoryService(store=store, gateway=gateway)
+    service = YujinMemoryService(store=store)
+
+    try:
+        asyncio.run(
+            service.store_candidate(
+                project_id=project_id,
+                candidate_id=candidate_id,
+                client_request_id="store-concurrent-2",
+            )
+        )
+    except ValueError as error:
+        assert str(error) == "memory_candidate_store_in_progress"
+    else:
+        raise AssertionError("open claim must block a second caller")
+
+
+def test_operation_audit_records_local_write_and_stays_body_free(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project_id, candidate_id = _approved_candidate(store)
+    service = YujinMemoryService(store=store)
 
     asyncio.run(
         service.store_candidate(
@@ -476,16 +309,8 @@ def test_operation_audit_is_monotonic_and_body_free(tmp_path: Path) -> None:
             client_request_id="store-request-1",
         )
     )
-    asyncio.run(
-        service.store_candidate(
-            project_id=project_id,
-            candidate_id=candidate_id,
-            client_request_id="store-request-2",
-        )
-    )
     audit = store.list_yujin_memory_operation_audit(
-        project_id=project_id,
-        candidate_id=candidate_id,
+        project_id=project_id, candidate_id=candidate_id
     )
 
     assert [item["event_order"] for item in audit] == list(
@@ -496,349 +321,18 @@ def test_operation_audit_is_monotonic_and_body_free(tmp_path: Path) -> None:
     ] == [
         ("claim", "claimed"),
         ("call_started", "claimed"),
-        ("outcome", "event_pending"),
-        ("claim", "claimed"),
-        ("call_started", "claimed"),
         ("outcome", "claimed"),
         ("finalize", "stored"),
     ]
     assert all(
-        set(item)
-        == {
-            "operation_audit_id",
-            "candidate_id",
-            "project_id",
-            "event_order",
-            "action",
-            "storage_status",
-            "occurred_at",
-        }
-        for item in audit
-    )
-    assert all(
-        "빠른 컷" not in str(item)
-        and "event-private" not in str(item)
-        and "memory-private" not in str(item)
-        for item in audit
+        "빠른 컷" not in str(item) for item in audit
     )
 
 
-def test_same_store_request_replays_local_state_without_gateway_call(
-    tmp_path: Path,
-) -> None:
-    for outcome in (
-        MemoryWriteOutcome(
-            status="event_pending", event_ref="event-private"
-        ),
-        MemoryWriteOutcome(status="ambiguous"),
-        MemoryWriteOutcome(status="failed_retryable"),
-    ):
-        store = LocalProjectStore(tmp_path / outcome.status)
-        project_id, candidate_id = _approved_candidate(store)
-        gateway = _Gateway([outcome])
-        service = YujinMemoryService(store=store, gateway=gateway)
-        first = asyncio.run(
-            service.store_candidate(
-                project_id=project_id,
-                candidate_id=candidate_id,
-                client_request_id="same-store-request",
-            )
-        )
-        repeated = asyncio.run(
-            service.store_candidate(
-                project_id=project_id,
-                candidate_id=candidate_id,
-                client_request_id="same-store-request",
-            )
-        )
-
-        assert repeated == first
-        assert len(gateway.add_calls) == 1
-        assert gateway.reconcile_calls == []
-
-
-def test_stored_same_request_finalizes_locally_after_crash(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_deleted_candidate_cannot_be_stored_again(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project_id, candidate_id = _approved_candidate(store)
-    gateway = _Gateway(
-        [MemoryWriteOutcome(status="stored", memory_ref="memory-private")]
-    )
-    service = YujinMemoryService(store=store, gateway=gateway)
-    original = store.finalize_yujin_memory_store
-    monkeypatch.setattr(
-        store,
-        "finalize_yujin_memory_store",
-        lambda **_kwargs: (_ for _ in ()).throw(
-            RuntimeError("crash before finalize")
-        ),
-    )
-    try:
-        asyncio.run(
-            service.store_candidate(
-                project_id=project_id,
-                candidate_id=candidate_id,
-                client_request_id="same-store-request",
-            )
-        )
-    except RuntimeError:
-        pass
-    monkeypatch.setattr(store, "finalize_yujin_memory_store", original)
-
-    settled = asyncio.run(
-        service.store_candidate(
-            project_id=project_id,
-            candidate_id=candidate_id,
-            client_request_id="same-store-request",
-        )
-    )
-
-    assert settled["storage_status"] == "stored"
-    assert len(gateway.add_calls) == 1
-
-
-def test_stored_replay_works_without_gateway_and_pending_fails_consent_first(
-    tmp_path: Path,
-) -> None:
-    store = LocalProjectStore(tmp_path)
-    project_id, candidate_id = _approved_candidate(store)
-    gateway = _Gateway(
-        [MemoryWriteOutcome(status="stored", memory_ref="memory-private")]
-    )
-    asyncio.run(
-        YujinMemoryService(store=store, gateway=gateway).store_candidate(
-            project_id=project_id,
-            candidate_id=candidate_id,
-            client_request_id="store-request-1",
-        )
-    )
-    without_gateway = YujinMemoryService(store=store, gateway=None)
-    replay = asyncio.run(
-        without_gateway.store_candidate(
-            project_id=project_id,
-            candidate_id=candidate_id,
-            client_request_id="store-request-1",
-        )
-    )
-    assert replay["storage_status"] == "stored"
-
-    pending_store = LocalProjectStore(tmp_path / "pending")
-    pending_project, pending_candidate = _approved_candidate(pending_store)
-    connection = pending_store._connection(pending_project)
-    try:
-        connection.execute(
-            "UPDATE yujin_memory_candidates SET status = 'pending' "
-            "WHERE project_id = ? AND candidate_id = ?",
-            (pending_project, pending_candidate),
-        )
-        connection.commit()
-    finally:
-        connection.close()
-    try:
-        asyncio.run(
-            YujinMemoryService(
-                store=pending_store, gateway=None
-            ).store_candidate(
-                project_id=pending_project,
-                candidate_id=pending_candidate,
-                client_request_id="store-request-1",
-            )
-        )
-    except ValueError as error:
-        assert str(error) == "memory_candidate_not_approved"
-    else:
-        raise AssertionError("pending consent must fail before gateway")
-
-
-def test_server_owned_delete_resolves_private_mapping_and_preserves_on_failure(
-    tmp_path: Path,
-) -> None:
-    store = LocalProjectStore(tmp_path)
-    project_id, candidate_id = _approved_candidate(store)
-    gateway = _Gateway(
-        [MemoryWriteOutcome(status="stored", memory_ref="memory-private")]
-    )
-    service = YujinMemoryService(store=store, gateway=gateway)
-    asyncio.run(
-        service.store_candidate(
-            project_id=project_id,
-            candidate_id=candidate_id,
-            client_request_id="store-request-1",
-        )
-    )
-    deleted = asyncio.run(
-        service.delete_candidate_memory(
-            project_id=project_id,
-            candidate_id=candidate_id,
-        )
-    )
-
-    assert deleted["storage_status"] == "deleted"
-    assert len(gateway.delete_calls) == 1
-    assert gateway.delete_calls[0].memory_ref == "memory-private"
-    assert gateway.delete_calls[0].allow_absent is False
-    assert not hasattr(gateway.delete_calls[0], "project_id")
-
-    failed_store = LocalProjectStore(tmp_path / "failed-delete")
-    failed_project_id, failed_candidate_id = _approved_candidate(failed_store)
-    failed_gateway = _Gateway(
-        [MemoryWriteOutcome(status="stored", memory_ref="keep-private")]
-    )
-    failed_service = YujinMemoryService(
-        store=failed_store, gateway=failed_gateway
-    )
-    asyncio.run(
-        failed_service.store_candidate(
-            project_id=failed_project_id,
-            candidate_id=failed_candidate_id,
-            client_request_id="store-request-1",
-        )
-    )
-
-    async def fail_delete(_request):
-        raise RuntimeError("private provider failure")
-
-    failed_gateway.delete_memory = fail_delete
-    try:
-        asyncio.run(
-            failed_service.delete_candidate_memory(
-                project_id=failed_project_id,
-                candidate_id=failed_candidate_id,
-            )
-        )
-    except MemoryStoreUnavailable as error:
-        assert str(error) == "memory_delete_unavailable"
-    else:
-        raise AssertionError("failed provider delete must fail closed")
-
-    mapping = failed_store.get_yujin_memory_private_mapping(
-        project_id=failed_project_id,
-        candidate_id=failed_candidate_id,
-    )
-    assert mapping["memory_ref"] == "keep-private"
-    assert failed_store.get_yujin_memory_store_state(
-        project_id=failed_project_id,
-        candidate_id=failed_candidate_id,
-    )["storage_status"] == "stored"
-
-
-def test_delete_retries_after_provider_success_and_local_finalize_crash(
-    tmp_path: Path, monkeypatch
-) -> None:
-    store = LocalProjectStore(tmp_path)
-    project_id, candidate_id = _approved_candidate(store)
-
-    class Gateway(_Gateway):
-        async def delete_memory(self, request):
-            self.delete_calls.append(request)
-            return {"deleted": True}
-
-    gateway = Gateway(
-        [MemoryWriteOutcome(status="stored", memory_ref="memory-private")]
-    )
-    service = YujinMemoryService(store=store, gateway=gateway)
-    asyncio.run(
-        service.store_candidate(
-            project_id=project_id,
-            candidate_id=candidate_id,
-            client_request_id="store-request-1",
-        )
-    )
-    original = store.mark_yujin_memory_deleted
-    monkeypatch.setattr(
-        store,
-        "mark_yujin_memory_deleted",
-        lambda **_kwargs: (_ for _ in ()).throw(
-            RuntimeError("crash after provider delete")
-        ),
-    )
-    try:
-        asyncio.run(
-            service.delete_candidate_memory(
-                project_id=project_id,
-                candidate_id=candidate_id,
-            )
-        )
-    except MemoryStoreUnavailable as error:
-        assert str(error) == "memory_delete_unavailable"
-    else:
-        raise AssertionError("local finalize crash must be normalized")
-    monkeypatch.setattr(store, "mark_yujin_memory_deleted", original)
-
-    retried = asyncio.run(
-        service.delete_candidate_memory(
-            project_id=project_id,
-            candidate_id=candidate_id,
-        )
-    )
-    repeated = asyncio.run(
-        service.delete_candidate_memory(
-            project_id=project_id,
-            candidate_id=candidate_id,
-        )
-    )
-
-    assert retried == repeated
-    assert retried["storage_status"] == "deleted"
-    assert len(gateway.delete_calls) == 2
-    assert [call.allow_absent for call in gateway.delete_calls] == [
-        False,
-        True,
-    ]
-
-
-def test_delete_without_gateway_adds_no_durable_call_marker(
-    tmp_path: Path,
-) -> None:
-    store = LocalProjectStore(tmp_path)
-    project_id, candidate_id = _approved_candidate(store)
-    gateway = _Gateway(
-        [MemoryWriteOutcome(status="stored", memory_ref="memory-private")]
-    )
-    asyncio.run(
-        YujinMemoryService(store=store, gateway=gateway).store_candidate(
-            project_id=project_id,
-            candidate_id=candidate_id,
-            client_request_id="store-request-1",
-        )
-    )
-    before = store.list_yujin_memory_operation_audit(
-        project_id=project_id,
-        candidate_id=candidate_id,
-    )
-
-    try:
-        asyncio.run(
-            YujinMemoryService(
-                store=store, gateway=None
-            ).delete_candidate_memory(
-                project_id=project_id,
-                candidate_id=candidate_id,
-            )
-        )
-    except MemoryStoreUnavailable as error:
-        # 게이트웨이가 아예 없는 것은 "지우다 실패"가 아니라 "켜져 있지 않음"이다.
-        # 화면이 `켜 주세요`와 `다시 눌러 주세요`를 갈라 말하려고 이름을 나눴다.
-        assert str(error) == "memory_not_configured"
-    else:
-        raise AssertionError("missing gateway must fail closed")
-
-    assert store.list_yujin_memory_operation_audit(
-        project_id=project_id,
-        candidate_id=candidate_id,
-    ) == before
-
-
-def test_deleted_candidate_cannot_be_stored_again(
-    tmp_path: Path,
-) -> None:
-    store = LocalProjectStore(tmp_path)
-    project_id, candidate_id = _approved_candidate(store)
-    gateway = _Gateway(
-        [MemoryWriteOutcome(status="stored", memory_ref="memory-private")]
-    )
-    service = YujinMemoryService(store=store, gateway=gateway)
+    service = YujinMemoryService(store=store)
     asyncio.run(
         service.store_candidate(
             project_id=project_id,
@@ -848,8 +342,7 @@ def test_deleted_candidate_cannot_be_stored_again(
     )
     asyncio.run(
         service.delete_candidate_memory(
-            project_id=project_id,
-            candidate_id=candidate_id,
+            project_id=project_id, candidate_id=candidate_id
         )
     )
 
@@ -865,4 +358,47 @@ def test_deleted_candidate_cannot_be_stored_again(
         assert str(error) == "memory_candidate_deleted"
     else:
         raise AssertionError("deleted candidate must be terminal")
-    assert len(gateway.add_calls) == 1
+
+
+def test_delete_candidate_memory_is_idempotent(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project_id, candidate_id = _approved_candidate(store)
+    service = YujinMemoryService(store=store)
+    asyncio.run(
+        service.store_candidate(
+            project_id=project_id,
+            candidate_id=candidate_id,
+            client_request_id="store-request-1",
+        )
+    )
+
+    first = asyncio.run(
+        service.delete_candidate_memory(
+            project_id=project_id, candidate_id=candidate_id
+        )
+    )
+    second = asyncio.run(
+        service.delete_candidate_memory(
+            project_id=project_id, candidate_id=candidate_id
+        )
+    )
+
+    assert first["storage_status"] == "deleted"
+    assert second["storage_status"] == "deleted"
+
+
+def test_delete_before_store_fails_not_stored(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project_id, candidate_id = _approved_candidate(store)
+    service = YujinMemoryService(store=store)
+
+    try:
+        asyncio.run(
+            service.delete_candidate_memory(
+                project_id=project_id, candidate_id=candidate_id
+            )
+        )
+    except ValueError as error:
+        assert str(error) == "memory_candidate_not_stored"
+    else:
+        raise AssertionError("delete before store must fail")

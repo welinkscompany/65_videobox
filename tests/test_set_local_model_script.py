@@ -36,10 +36,8 @@ RELATIVE_FILES = (
     # 그 모델을 삭제한 뒤에는 **없는 모델**을 가리키게 됐다.
     "compose.yaml",
     "config/hermes/yujin/config.yaml",
-    "services/agent-gateway/src/videobox_agent_gateway/hermes_memory_adapter.py",
     "tests/test_hermes_yujin_compose_contract.py",
     "tests/test_hermes_yujin_profile_distribution.py",
-    "tests/test_start_hermes_yujin_script.py",
 )
 
 
@@ -226,15 +224,6 @@ def test_changes_every_file_it_claims_to_when_the_model_is_loaded(
     env_text = _read(repository, ".env.container")
     assert f"VIDEOBOX_LOCAL_MODEL_NAME={new_model}" in env_text
 
-    nested_default = (
-        "${VIDEOBOX_MEM0_LLM_MODEL:-${VIDEOBOX_LOCAL_MODEL_NAME:-"
-        + new_model
-        + "}}"
-    )
-
-    compose_text = _read(repository, "compose.hermes-yujin.yaml")
-    assert nested_default in compose_text
-
     # `compose.yaml`의 커밋된 기본값. 새로 받은 환경은 `.env.container`가 없어
     # **이 값으로 뜬다** -- 여기만 안 바뀌면 유진이 없는 모델을 부른다.
     main_compose_text = _read(repository, "compose.yaml")
@@ -243,27 +232,15 @@ def test_changes_every_file_it_claims_to_when_the_model_is_loaded(
     yujin_config_text = _read(repository, "config/hermes/yujin/config.yaml")
     assert f"name: {new_model}" in yujin_config_text
 
-    adapter_text = _read(
-        repository,
-        "services/agent-gateway/src/videobox_agent_gateway/hermes_memory_adapter.py",
-    )
-    assert f'_LOCAL_MEM0_LLM_MODEL = "{new_model}"' in adapter_text
-
     compose_contract_text = _read(
         repository, "tests/test_hermes_yujin_compose_contract.py"
     )
-    assert nested_default in compose_contract_text
     assert f'"name": "{new_model}"' in compose_contract_text
 
     profile_distribution_text = _read(
         repository, "tests/test_hermes_yujin_profile_distribution.py"
     )
     assert f'"name": "{new_model}"' in profile_distribution_text
-
-    start_script_test_text = _read(
-        repository, "tests/test_start_hermes_yujin_script.py"
-    )
-    assert f'"VIDEOBOX_MEM0_LLM_MODEL": "{new_model}",' in start_script_test_text
 
 
 def test_creates_the_env_key_when_it_is_entirely_missing(tmp_path: Path) -> None:

@@ -2,8 +2,10 @@
 
 `docs/handoffs/2026-09-08-hermes-egress-and-multitrack-plans.ko.md`에서 이어지는
 작업. **owner 승인 큐(`create_yujin_memory_candidate`)를 그대로 거친다** --
-사서가 mem0에 직접 쓰지 않는다. CLAUDE.md §6("승인 저장한 기억 문구만
-mem0로 나간다")을 우회하는 새 경로를 만들지 않기 위해서다.
+사서가 로컬 저장소에 직접 쓰지 않는다. CLAUDE.md §6("owner가 승인한 것만
+저장된다")을 우회하는 새 경로를 만들지 않기 위해서다. 2026-09-18에 저장
+자체가 Mem0에서 로컬 전용으로 바뀌었지만(`docs/decisions/2026-09-18-mem0-removed-native-memory-librarian.ko.md`)
+이 승인 계약은 그대로다.
 
 **대화 하나 단위로 돈다.** `create_yujin_memory_candidate`가 `source_message_ids`를
 같은 대화 안에서만 검증하기 때문이다 -- 여러 대화를 가로질러 한 후보를
@@ -27,6 +29,32 @@ from videobox_core_engine.memory_librarian_boilerplate import (
 from videobox_provider_interfaces.llm import LLMTaskType
 
 MAX_USER_PARAGRAPH_CHARS = 800
+
+#: dev/QA 검증 호출이 쓰는, 사람이 읽을 수 있는 고정 접두사. 실제 owner
+#: 채팅(화면 `HomeYujinChat`/`ProjectTitleDialog`가 `crypto.randomUUID()`로
+#: 만드는 `client_message_id`)은 이런 문구를 쓰지 않는다. 2026-09-18에
+#: 운영 Postgres를 직접 읽어 확인했다 -- `live-check-002`,
+#: `memcheck-1786171467-a`, `localcheck-1`, `screen-1786176408-a` 같은
+#: client_message_id가 실제 owner 프로젝트(`b-roll-smoke-test`)의 대화와
+#: 같은 테이블에 섞여 있었다. UUID 형식만 허용하는 화이트리스트는 시도하지
+#: 않는다 -- 실제 owner의 가장 오래된 프로젝트(`project-318cc020`)조차
+#: `msg-<hex>` 형식을 썼다(예전 화면 버전의 흔적으로 보임), 그러니 형식
+#: 하나로 진짜/가짜를 가를 수 없다. 대신 dev 검증 스크립트가 실제로 쓰는
+#: 사람이 붙인 이름을 막는다.
+_DEV_CHECK_CLIENT_MESSAGE_ID_PREFIXES = (
+    "live-check-",
+    "final-check-",
+    "memcheck-",
+    "localcheck-",
+    "screen-",
+)
+
+
+def _looks_like_dev_check_message(client_message_id: object) -> bool:
+    if not isinstance(client_message_id, str):
+        return False
+    return client_message_id.startswith(_DEV_CHECK_CLIENT_MESSAGE_ID_PREFIXES)
+
 
 _DISTILL_RESPONSE_SCHEMA = {
     "type": "object",
@@ -154,7 +182,9 @@ def distill_conversation_memories(
     kept_texts = {p.text.strip() for p in kept}
     new_user_messages = [
         m for m in new_messages
-        if m["role"] == "user" and str(m["text"]).strip() in kept_texts
+        if m["role"] == "user"
+        and str(m["text"]).strip() in kept_texts
+        and not _looks_like_dev_check_message(m.get("client_message_id"))
     ]
 
     if not new_user_messages:

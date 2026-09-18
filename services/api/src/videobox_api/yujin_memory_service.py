@@ -1,15 +1,40 @@
-"""Explicit-store coordinator for approved Yujin memory candidates."""
+"""유진의 승인된 기억 -- 저장·조회·삭제를 전부 로컬에서 처리한다.
+
+**2026-09-18에 Mem0(외부 provider)를 걷어내고 이 파일로 바꿨다.** 이전에는
+`store_candidate`/`retrieve_approved_memories`/`delete_candidate_memory`가
+`agent-gateway`를 거쳐 `hermes-memory-adapter` 컨테이너의 Mem0로 나갔다.
+owner가 실측한 사용량(2026-09-18, Postgres 직접 조회) -- 5주 넘게 서로 다른
+기억 **3개**만 승인됐고, 그중 하나는 저장 전 중복 확인이 없어 **9번** 중복
+저장됐다(`docs/mem0-memory-backup-2026-09-10.ko.md`) -- 이 Mem0 경로가
+"쓰지도 않고 정리도 안 된다"는 owner 판단을 뒷받침한다. 설계 근거는
+`docs/decisions/2026-09-18-mem0-removed-native-memory-librarian.ko.md`.
+
+**승인 큐 자체는 그대로다.** `yujin_memory_candidates`의 승인 상태 기계
+(`_store_yujin_memory.py`의 claim → 결과 기록 → finalize)는 원래 "믿을 수
+없는 외부 provider에 멱등하게 쓴다"는 목적으로 만들어졌지만, 그 상태 이름
+(`event_pending`/`ambiguous`/`retryable`)이 Mem0 전용이 아니라 일반적인
+"멱등 쓰기" 개념이라 그대로 재사용한다 -- 로컬 DB 쓰기는 성공 아니면 예외뿐이라
+실제로는 `stored`로만 끝나지만, 스키마·감사 로그·CLAUDE.md §6이 요구하는
+"owner가 승인한 것만 저장된다"는 계약은 한 글자도 안 바뀐다.
+
+**저장 = 기존 값 그대로 두고 memory_ref만 로컬로 계산한다.** 같은 문장이
+이미 저장돼 있으면(project_id+category+proposed_text 완전 일치) 그
+memory_ref를 재사용한다(mem0의 9번 중복 결함을 로컬로 고정 방지) --
+`_store_yujin_memory.find_stored_yujin_memory_ref`.
+
+**조회 = Mem0의 뜻 기반 검색 대신 로컬 순위 매기기.** 외부 검색이 없으니
+CLAUDE.md §6의 "게이트웨이가 돌려준 것 중 로컬과 정확히 일치하는 것만
+채택한다"는 대조는 더 이상 실행 가능한 코드 경로가 없다 -- 반환값이
+`self._store`가 준 행에서만 나오므로 그 원칙이 **구조적으로** 지켜진다.
+그 취지를 지키는 시험은 `tests/test_yujin_memory_retrieval.py`에 남긴다.
+"""
 
 from __future__ import annotations
 
-import logging
-
-import asyncio
 import hashlib
+import logging
 import uuid
-from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
 from videobox_domain_models.yujin_creator_context import (
     UserApprovedPreference,
 )
@@ -17,80 +42,35 @@ from videobox_core_engine.yujin_memory_policy import (
     is_yujin_memory_retrieval_query_safe,
 )
 
-
-_RETRIEVAL_TIMEOUT_SECONDS = 0.75
 _RETRIEVAL_LIMIT = 5
 _RETRIEVAL_TEXT_BUDGET = 1400
 _MEMORY_CREATE_ACTION = "기억 후보 만들기"
+
+#: 승인 큐가 실제로 만드는 카테고리 5종(`yujin_memory_policy.py`와 같은 집합).
+#: 로컬 행의 category가 이 밖의 값이면 스키마가 어긋난 것이라 읽지 못한
+#: 줄로 취급한다 -- 조용히 통과시키면 화면에 처음 보는 분류가 나온다.
+_ALLOWED_CATEGORIES = frozenset({"pacing", "caption", "audio", "tone", "workflow"})
+
+# 카테고리별로 이 낱말이 질의에 있으면 그 카테고리 기억을 더 위로 올린다.
+# 유진의 기억 후보는 5개 고정 카테고리뿐이라 이 정도 낱말 대조로 충분하다 --
+# 임베딩·LLM 호출은 매 채팅 턴마다 도는 hot path라 넣지 않는다
+# (`docs/development-fast-path.ko.md` §10.6).
+_CATEGORY_QUERY_HINTS: dict[str, tuple[str, ...]] = {
+    "pacing": ("컷", "템포", "편집속도", "전환", "박자", "pacing"),
+    "caption": ("자막", "글자", "폰트", "줄바꿈", "caption"),
+    "audio": ("음악", "소리", "효과음", "볼륨", "음량", "배경음", "audio"),
+    "tone": ("분위기", "톤", "느낌", "무드", "tone"),
+    "workflow": ("작업", "순서", "방식", "루틴", "workflow"),
+}
 
 
 class MemoryStoreUnavailable(RuntimeError):
     pass
 
 
-class ApprovedMemoryStoreRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
-
-    text: str = Field(min_length=1, max_length=280)
-    category: Literal["pacing", "caption", "audio", "tone", "workflow"]
-    external_ref: str = Field(pattern=r"^ext-[0-9a-f]{64}$")
-    operation_id: str = Field(pattern=r"^op-[0-9a-f]{64}$")
-
-
-class MemoryReconcileRequest(ApprovedMemoryStoreRequest):
-    event_ref: str | None = Field(default=None, min_length=1, max_length=256)
-
-
-class GatewayMemoryWriteOutcome(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    status: Literal[
-        "stored", "event_pending", "failed_retryable", "ambiguous"
-    ]
-    memory_ref: str | None = None
-    event_ref: str | None = None
-
-
-class GatewayMemorySearchRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
-
-    query: str = Field(min_length=1, max_length=280)
-    limit: int = Field(ge=1, le=5, strict=True)
-
-
-class GatewayRetrievedMemory(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
-
-    memory_ref: str = Field(min_length=1, max_length=256)
-    text: str = Field(min_length=1, max_length=280)
-    category: Literal["pacing", "caption", "audio", "tone", "workflow"]
-    external_ref: str = Field(pattern=r"^ext-[0-9a-f]{64}$")
-
-
-class GatewayMemorySearchResult(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
-
-    memories: tuple[GatewayRetrievedMemory, ...] = Field(max_length=5)
-
-
-class GatewayMemoryDeleteRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
-
-    memory_ref: str = Field(min_length=1, max_length=256)
-    external_ref: str = Field(pattern=r"^ext-[0-9a-f]{64}$")
-    allow_absent: bool
-
-
-class GatewayMemoryDeleteResult(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
-
-    deleted: Literal[True]
-
-
 class YujinMemoryService:
-    def __init__(self, *, store, gateway) -> None:
+    def __init__(self, *, store) -> None:
         self._store = store
-        self._gateway = gateway
 
     def _public(self, *, project_id: str, candidate_id: str) -> dict:
         return self._store.get_yujin_memory_store_state(
@@ -131,90 +111,55 @@ class YujinMemoryService:
         bounded_query = query.strip()[:280]
         if not bounded_query:
             return ()
-        rows: list[dict] = []
-        result: GatewayMemorySearchResult | None = None
         try:
-            # 이 안에서 실패하는 모든 것(DB 읽기든 게이트웨이 호출이든)은
-            # 같은 하나의 예산 안에서 끝나야 한다 -- 둘로 쪼개면 최악의 경우
-            # 지연이 두 배가 된다.
-            async with asyncio.timeout(_RETRIEVAL_TIMEOUT_SECONDS):
-                rows = await asyncio.to_thread(
-                    self._store.list_yujin_memory_retrieval_rows,
-                    project_id=project_id,
-                    conversation_id=conversation_id,
-                )
-                local = self._eligible_local_memories(
-                    rows,
-                    project_id=project_id,
-                    conversation_id=conversation_id,
-                )
-                if not local:
-                    return ()
-                # 게이트웨이가 아예 없으면(설정 안 됨) 순위를 매길 검색 자체가
-                # 없다. 예전엔 여기서 빈 결과를 돌려줘 owner가 기억을 승인해
-                # 뒀어도 유진이 처음 만난 사람처럼 대화했다 -- 로컬 원본은 늘
-                # 그대로 있으니, 뜻으로 고르지 못할 뿐 **아예 안 꺼내는 것보다는
-                # 낫다**는 owner 판단(2026-08-31)으로 이 폴백을 넣는다. 순위는
-                # 저장 순서(`list_yujin_memory_retrieval_rows`가 이미 정렬해
-                # 준 순서)를 그대로 쓴다 -- 뜻 기반 순위가 아니라는 것을 스스로
-                # 부풀리지 않는다.
-                if self._gateway is not None:
-                    raw = await self._gateway.search_memory(
-                        GatewayMemorySearchRequest(
-                            query=bounded_query,
-                            limit=_RETRIEVAL_LIMIT,
-                        )
-                    )
-                    payload = (
-                        raw.model_dump(mode="python")
-                        if hasattr(raw, "model_dump")
-                        else raw
-                    )
-                    if (
-                        isinstance(payload, dict)
-                        and isinstance(payload.get("memories"), list)
-                    ):
-                        payload = {
-                            **payload,
-                            "memories": tuple(payload["memories"]),
-                        }
-                    result = GatewayMemorySearchResult.model_validate(payload)
-        except asyncio.CancelledError:
-            raise
+            rows = self._store.list_yujin_memory_retrieval_rows(
+                project_id=project_id,
+                conversation_id=conversation_id,
+            )
         except Exception:
-            # 조회 실패와 "기억이 원래 없음"이 화면에서 똑같이 보인다. 로컬
-            # 원본은 있으니(위에서 `local`이 비었으면 이미 돌아갔다) 저장
-            # 순서 폴백으로 내려간다 -- 위 주석과 같은 이유.
+            # 로컬 DB 읽기 실패다 -- 외부 provider가 없으니 폴백할 다른
+            # 원본이 없다. 조용히 비우는 대신 로그를 남기고 빈 결과를 준다.
             _LOGGER.warning(
-                "유진 기억 조회가 실패해 저장 순서 폴백으로 돌려줍니다 (project=%s, conversation=%s).",
+                "유진 기억 조회가 실패했습니다 (project=%s, conversation=%s).",
                 project_id,
                 conversation_id,
                 exc_info=True,
             )
-            return self._cap_preferences(self._local_fallback_order(rows))
-
-        if result is None:
-            return self._cap_preferences(self._local_fallback_order(rows))
-
-        matched: dict[tuple[str, str], UserApprovedPreference] = {}
-        for item in result.memories:
-            exact = (
-                item.memory_ref,
-                item.external_ref,
-                item.text,
-                item.category,
-            )
-            if exact not in local:
-                continue
-            public_key = (item.category, item.text)
-            matched[public_key] = UserApprovedPreference(
-                kind="user_approved_preference",
-                category=item.category,
-                text=item.text,
-            )
-        return self._cap_preferences(
-            matched[key] for key in sorted(matched)
+            return ()
+        local = self._eligible_local_memories(
+            rows, project_id=project_id, conversation_id=conversation_id
         )
+        if not local:
+            return ()
+        ranked = sorted(
+            local,
+            key=lambda item: (
+                -self._relevance_score(
+                    category=item[0], text=item[1], query=bounded_query
+                ),
+                item[0],
+                item[1],
+            ),
+        )
+        return self._cap_preferences(
+            UserApprovedPreference(
+                kind="user_approved_preference", category=category, text=text
+            )
+            for category, text in ranked
+        )
+
+    @staticmethod
+    def _relevance_score(*, category: str, text: str, query: str) -> int:
+        score = 0
+        for hint in _CATEGORY_QUERY_HINTS.get(category, ()):
+            if hint in query:
+                score += 2
+        haystack = f"{category} {text}"
+        for token in query.replace(",", " ").split():
+            token = token.strip("?!.~()[]{}\"'")
+            if len(token) >= 2 and token in haystack:
+                score += 1
+        return score
 
     @staticmethod
     def _cap_preferences(
@@ -233,53 +178,25 @@ class YujinMemoryService:
         return tuple(output)
 
     @staticmethod
-    def _local_fallback_order(rows):
-        """뜻 기반 순위가 없을 때 쓸 순서.
-
-        `list_yujin_memory_retrieval_rows`가 이미 project_id로 걸러서(SQL의
-        `WHERE project_id = ?`) `category, proposed_text, candidate_id` 순으로
-        정렬해 돌려준다 -- 새 검색을 또 만들지 않고 그 순서를 그대로 쓴다.
-        승인·저장 상태 확인은 `_eligible_local_memories`와 같은 기준이다(한쪽만
-        확인이 아니라 저장 폴백에서도 owner가 승인한 것만 나가야 한다).
-        """
-        for row in rows if isinstance(rows, (list, tuple)) else ():
-            if not isinstance(row, dict):
-                continue
-            if row.get("status") != "approved" or row.get("storage_status") != "stored":
-                continue
-            try:
-                text = str(row["text"])
-                category = row["category"]
-            except (KeyError, TypeError):
-                continue
-            yield UserApprovedPreference(
-                kind="user_approved_preference",
-                category=category,
-                text=text,
-            )
-
-    @staticmethod
     def _eligible_local_memories(
         rows,
         *,
         project_id: str,
         conversation_id: str,
-    ) -> set[tuple[str, str, str, str]]:
-        eligible: set[tuple[str, str, str, str]] = set()
-        # 읽지 못한 줄은 조회가 성공한 뒤에 빠지므로 위의 조회 실패 기록이
-        # 이 경우를 볼 수 없다. 스키마가 한 칸만 어긋나도 기억이 전부 사라지고
-        # 화면에는 "기억이 원래 없음"과 똑같이 보인다.
+    ) -> set[tuple[str, str]]:
+        """(category, text) 중 이 프로젝트가 승인·저장까지 마친 것만.
+
+        `list_yujin_memory_retrieval_rows`가 이미 project_id로 걸러서
+        돌려준다 -- 여기서는 승인·저장 상태만 다시 확인한다(대조 원칙,
+        CLAUDE.md §6). 반환값이 `rows`에 없던 것을 절대 만들어내지 않는다는
+        것이 이 함수의 전체 계약이다 -- 로컬이 유일한 원본이므로.
+        """
+        eligible: set[tuple[str, str]] = set()
         unreadable: list[str] = []
         first_error: Exception | None = None
         for row in rows if isinstance(rows, (list, tuple)) else ():
             if not isinstance(row, dict):
                 continue
-            # 소속·승인 확인을 먼저 한다. 걸러 낼 줄까지 "읽지 못했다"고
-            # 세면 기록이 시끄러워진다. 두 조건을 모두 통과해야 채택되는
-            # 것은 그대로다.
-            # 대화는 가리지 않는다 -- 기억은 대화보다 오래 산다. 프로젝트와
-            # 승인·저장 상태는 그대로 본다: 이 대조가 게이트웨이가 돌려준 항목
-            # 중 owner가 실제로 승인한 것만 채택하게 만드는 문이다(CLAUDE.md §6).
             if (
                 row.get("project_id") != project_id
                 or row.get("status") != "approved"
@@ -287,27 +204,17 @@ class YujinMemoryService:
             ):
                 continue
             try:
-                parsed = GatewayRetrievedMemory(
-                    memory_ref=row["memory_ref"],
-                    external_ref=row["external_ref"],
-                    text=row["text"],
-                    category=row["category"],
-                )
+                category = str(row["category"])
+                text = str(row["text"])
+                if not text or category not in _ALLOWED_CATEGORIES:
+                    raise ValueError("memory_row_schema_drifted")
             except Exception as exc:  # noqa: BLE001 - 한 줄이 나머지를 막지 않는다
                 unreadable.append(str(row.get("memory_ref") or "(이름 없음)"))
                 if first_error is None:
                     first_error = exc
                 continue
-            eligible.add(
-                (
-                    parsed.memory_ref,
-                    parsed.external_ref,
-                    parsed.text,
-                    parsed.category,
-                )
-            )
+            eligible.add((category, text))
         if unreadable:
-            # 대화마다 지나는 길이라 줄마다 찍지 않고 한 번에 모아 남긴다.
             _LOGGER.warning(
                 "승인된 기억 %d개를 읽지 못해 후보에서 뺐습니다 "
                 "(project=%s, conversation=%s, 기억=%s).",
@@ -335,10 +242,6 @@ class YujinMemoryService:
             return current
         if current["storage_status"] == "deleted":
             raise ValueError("memory_candidate_deleted")
-        # 켜져 있지 않은 것과 부르다 실패한 것은 owner가 할 일이 다르다.
-        # 하나는 켜는 일이고 하나는 다시 눌러 보는 일이다 -- 이름을 나눈다.
-        if self._gateway is None:
-            raise MemoryStoreUnavailable("memory_not_configured")
         claim_token = "claim-" + hashlib.sha256(uuid.uuid4().bytes).hexdigest()
         claim = self._store.claim_yujin_memory_store(
             project_id=project_id,
@@ -359,42 +262,31 @@ class YujinMemoryService:
                 project_id=project_id, candidate_id=candidate_id
             )
 
-        request_data = {
-            "text": claim["text"],
-            "category": claim["category"],
-            "external_ref": claim["external_ref"],
-            "operation_id": claim["operation_id"],
-        }
-        parsed = None
+        # `claim["action"]`이 "add"든 "reconcile"이든 이제는 같다 -- 외부
+        # provider가 없으니 "다시 맞춰 본다"는 개념 자체가 없다. 로컬 쓰기는
+        # 성공 아니면 예외뿐이다.
         try:
             self._store.mark_yujin_memory_store_call_started(
                 project_id=project_id,
                 candidate_id=candidate_id,
                 claim_token=claim_token,
             )
-            if claim["action"] == "reconcile":
-                outcome = await self._gateway.reconcile_memory(
-                    MemoryReconcileRequest(
-                        **request_data,
-                        event_ref=claim["event_ref"],
-                    )
-                )
-            else:
-                outcome = await self._gateway.add_approved_memory(
-                    ApprovedMemoryStoreRequest(**request_data)
-                )
-            parsed = GatewayMemoryWriteOutcome.model_validate(
-                outcome.model_dump()
-                if hasattr(outcome, "model_dump")
-                else outcome
+            memory_ref = self._store.find_stored_yujin_memory_ref(
+                project_id=project_id,
+                category=claim["category"],
+                proposed_text=claim["text"],
             )
+            if memory_ref is None:
+                memory_ref = "local-" + hashlib.sha256(
+                    claim["external_ref"].encode("utf-8")
+                ).hexdigest()
             self._store.record_yujin_memory_provider_outcome(
                 project_id=project_id,
                 candidate_id=candidate_id,
                 claim_token=claim_token,
-                status=parsed.status,
-                memory_ref=parsed.memory_ref,
-                event_ref=parsed.event_ref,
+                status="stored",
+                memory_ref=memory_ref,
+                event_ref=None,
             )
         except Exception as error:
             self._store.release_yujin_memory_store_claim(
@@ -402,19 +294,16 @@ class YujinMemoryService:
                 candidate_id=candidate_id,
                 claim_token=claim_token,
                 storage_status="ambiguous",
-                event_ref=(
-                    parsed.event_ref if parsed is not None else None
-                ),
+                event_ref=None,
             )
             raise MemoryStoreUnavailable(
                 "memory_store_unavailable"
             ) from error
 
-        if parsed.status == "stored":
-            self._store.finalize_yujin_memory_store(
-                project_id=project_id,
-                candidate_id=candidate_id,
-            )
+        self._store.finalize_yujin_memory_store(
+            project_id=project_id,
+            candidate_id=candidate_id,
+        )
         return self._public(
             project_id=project_id, candidate_id=candidate_id
         )
@@ -427,39 +316,13 @@ class YujinMemoryService:
         )
         if current["storage_status"] == "deleted":
             return current
-        mapping = self._store.get_yujin_memory_private_mapping(
-            project_id=project_id,
-            candidate_id=candidate_id,
-        )
-        # 위와 같은 이유로 같은 이름을 쓴다.
-        if self._gateway is None:
-            raise MemoryStoreUnavailable("memory_not_configured")
         try:
-            delete_state = (
-                self._store.mark_yujin_memory_delete_call_started(
-                    project_id=project_id,
-                    candidate_id=candidate_id,
-                )
+            self._store.mark_yujin_memory_delete_call_started(
+                project_id=project_id,
+                candidate_id=candidate_id,
             )
         except (KeyError, ValueError):
             raise
-        except Exception as error:
-            raise MemoryStoreUnavailable(
-                "memory_delete_unavailable"
-            ) from error
-        try:
-            result = await self._gateway.delete_memory(
-                GatewayMemoryDeleteRequest(
-                    memory_ref=delete_state["memory_ref"],
-                    external_ref=delete_state["external_ref"],
-                    allow_absent=delete_state["allow_absent"],
-                )
-            )
-            GatewayMemoryDeleteResult.model_validate(
-                result.model_dump()
-                if hasattr(result, "model_dump")
-                else result
-            )
         except Exception as error:
             raise MemoryStoreUnavailable(
                 "memory_delete_unavailable"
@@ -478,14 +341,6 @@ class YujinMemoryService:
 _LOGGER = logging.getLogger(__name__)
 
 __all__ = [
-    "ApprovedMemoryStoreRequest",
-    "GatewayMemoryWriteOutcome",
-    "GatewayMemoryDeleteRequest",
-    "GatewayMemoryDeleteResult",
-    "GatewayMemorySearchRequest",
-    "GatewayMemorySearchResult",
-    "GatewayRetrievedMemory",
-    "MemoryReconcileRequest",
     "MemoryStoreUnavailable",
     "YujinMemoryService",
 ]

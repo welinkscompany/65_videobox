@@ -23,8 +23,6 @@ PINNED_HERMES_IMAGE = (
 HERMES_NETWORK = "videobox-agent-gateway-network"
 GATEWAY_API_NETWORK = "videobox-agent-gateway-api-network"
 PROVIDER_EGRESS_NETWORK = "videobox-hermes-provider-egress"
-MEMORY_NETWORK = "videobox-hermes-memory-network"
-MEMORY_ADAPTER_SERVICE = "videobox-hermes-memory-adapter"
 CAPABILITY_PRIVATE_KEY_B64 = (
     "ERERERERERERERERERERERERERERERERERERERERERE"
 )
@@ -71,9 +69,6 @@ def _render_compose(*, include_yujin: bool) -> dict:
                     CAPABILITY_PUBLIC_KEY_B64
                 ),
                 "VIDEOBOX_HERMES_CAPABILITY_KEY_ID": CAPABILITY_KEY_ID,
-                "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN": (
-                    "static-memory-token-at-least-32-bytes"
-                ),
             }
         )
     command.extend(["config", "--format", "json"])
@@ -106,15 +101,11 @@ def test_base_compose_remains_yujin_free_and_overlay_is_explicitly_opt_in() -> N
     assert set(merged["services"]) >= {
         "videobox-agent-gateway",
         "videobox-hermes-yujin",
-        MEMORY_ADAPTER_SERVICE,
     }
     assert merged["services"]["videobox-agent-gateway"]["profiles"] == [
         "hermes-yujin"
     ]
     assert merged["services"]["videobox-hermes-yujin"]["profiles"] == [
-        "hermes-yujin"
-    ]
-    assert merged["services"][MEMORY_ADAPTER_SERVICE]["profiles"] == [
         "hermes-yujin"
     ]
     assert set(merged["services"]["videobox-workspace"]["networks"]) == {
@@ -261,18 +252,15 @@ def test_gateway_bridges_api_hermes_and_memory_without_provider_egress() -> None
     assert gateway["networks"] == [
         GATEWAY_API_NETWORK,
         HERMES_NETWORK,
-        MEMORY_NETWORK,
     ]
     assert workspace["networks"] == [GATEWAY_API_NETWORK]
     assert compose["networks"][GATEWAY_API_NETWORK] == {"internal": True}
     assert compose["networks"][HERMES_NETWORK] == {"internal": True}
-    assert compose["networks"][MEMORY_NETWORK] == {"internal": True}
 
     assert PROVIDER_EGRESS_NETWORK not in gateway["networks"]
     assert "videobox-edge" not in gateway["networks"]
     assert "videobox-internal" not in gateway["networks"]
     assert HERMES_NETWORK not in workspace["networks"]
-    assert MEMORY_NETWORK not in workspace["networks"]
     assert PROVIDER_EGRESS_NETWORK not in workspace["networks"]
     assert "ports" not in gateway
     assert "volumes" not in gateway
@@ -311,12 +299,6 @@ def test_gateway_gets_plaintext_auth_but_workspace_never_gets_hermes_secrets() -
         "VIDEOBOX_HERMES_CAPABILITY_KEY_ID": (
             "${VIDEOBOX_HERMES_CAPABILITY_KEY_ID:?set in .env.container}"
         ),
-        "HERMES_MEMORY_ADAPTER_URL": (
-            "http://videobox-hermes-memory-adapter:8082"
-        ),
-        "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN": (
-            "${VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN:?set in .env.container}"
-        ),
     }
     assert "HERMES_YUJIN_GATEWAY_PASSWORD_HASH" not in gateway["environment"]
     assert workspace["environment"] == {
@@ -343,105 +325,6 @@ def test_gateway_gets_plaintext_auth_but_workspace_never_gets_hermes_secrets() -
     assert gateway["mem_limit"] == "256m"
     assert gateway["cpus"] == 0.5
     assert gateway["logging"]["driver"] == "local"
-
-
-def test_memory_adapter_is_the_only_mem0_provider_boundary() -> None:
-    compose = _overlay()
-    services = compose["services"]
-    adapter = services[MEMORY_ADAPTER_SERVICE]
-
-    assert adapter["build"] == {
-        "context": ".",
-        "dockerfile": "docker/hermes-memory-adapter.Dockerfile",
-    }
-    assert adapter["networks"] == [MEMORY_NETWORK, PROVIDER_EGRESS_NETWORK]
-    assert adapter["environment"] == {
-        "MEM0_API_KEY": "${MEM0_API_KEY:-}",
-        "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN": (
-            "${VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN:?set in .env.container}"
-        ),
-        # 자체 호스팅 기억 설정. 값은 전부 이 컴퓨터를 가리키고, 어느 것도
-        # 비밀이 아니다. 자세한 계약은 아래 별도 테스트가 고정한다.
-        "VIDEOBOX_MEM0_MODE": "${VIDEOBOX_MEM0_MODE:-local}",
-        "VIDEOBOX_MEM0_LOCAL_BASE_URL": (
-            "${VIDEOBOX_MEM0_LOCAL_BASE_URL:-"
-            "http://host.docker.internal:1234/v1}"
-        ),
-        # 모델 이름의 SSOT는 `.env.container`의 VIDEOBOX_LOCAL_MODEL_NAME 하나다.
-        # 기억 추출용 값이 없으면 그 SSOT를 먼저 보고, 그것도 없으면 커밋된
-        # 리터럴로 떨어진다(2026-09-11, `set-local-model.ps1`).
-        "VIDEOBOX_MEM0_LLM_MODEL": (
-            "${VIDEOBOX_MEM0_LLM_MODEL:-${VIDEOBOX_LOCAL_MODEL_NAME:-"
-            "qwen/qwen3.8-27b}}"
-        ),
-        "VIDEOBOX_MEM0_EMBEDDER_MODEL": (
-            "${VIDEOBOX_MEM0_EMBEDDER_MODEL:-text-embedding-bge-m3}"
-        ),
-        "VIDEOBOX_MEM0_EMBEDDING_DIMS": (
-            "${VIDEOBOX_MEM0_EMBEDDING_DIMS:-1024}"
-        ),
-        "VIDEOBOX_MEM0_STORE_PATH": (
-            "${VIDEOBOX_MEM0_STORE_PATH:-/var/lib/videobox-mem0/qdrant}"
-        ),
-    }
-    assert "ports" not in adapter
-    assert "expose" not in adapter
-    # 자체 호스팅 기억은 벡터 저장소가 재시작을 넘겨 살아남아야 하므로 마운트가
-    # 하나 필요하다. 규칙의 본뜻은 "마운트 금지"가 아니라 **이 서비스가 소유자의
-    # 영상·프로젝트 데이터에 닿지 않는다**이므로, 전용 볼륨 하나만 허용하고
-    # 나머지 경로는 계속 막는다.
-    assert adapter["volumes"] == [
-        "videobox_mem0_store:/var/lib/videobox-mem0"
-    ]
-    assert "depends_on" not in adapter
-    assert adapter["read_only"] is True
-    assert adapter["tmpfs"] == ["/tmp"]
-    assert adapter["cap_drop"] == ["ALL"]
-    assert adapter["security_opt"] == ["no-new-privileges:true"]
-
-    for service_name, service in services.items():
-        environment = service.get("environment", {})
-        if service_name != MEMORY_ADAPTER_SERVICE:
-            assert "MEM0_API_KEY" not in environment
-        if service_name not in {
-            MEMORY_ADAPTER_SERVICE,
-            "videobox-agent-gateway",
-        }:
-            assert "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN" not in environment
-        if service_name not in {
-            MEMORY_ADAPTER_SERVICE,
-            "videobox-hermes-yujin",
-        }:
-            assert PROVIDER_EGRESS_NETWORK not in service.get("networks", [])
-
-
-def test_memory_adapter_is_optional_and_never_blocks_chat_startup() -> None:
-    overlay = _overlay()
-    gateway = overlay["services"]["videobox-agent-gateway"]
-    hermes = overlay["services"]["videobox-hermes-yujin"]
-    rendered = _render_compose(include_yujin=True)
-
-    assert MEMORY_ADAPTER_SERVICE not in gateway.get("depends_on", {})
-    assert MEMORY_ADAPTER_SERVICE not in hermes.get("depends_on", {})
-    assert rendered["services"][MEMORY_ADAPTER_SERVICE]["environment"][
-        "MEM0_API_KEY"
-    ] == ""
-
-
-def test_memory_adapter_image_is_derived_from_exact_hermes_pin_without_agent_loop() -> None:
-    dockerfile = (
-        ROOT / "docker" / "hermes-memory-adapter.Dockerfile"
-    ).read_text(encoding="utf-8")
-
-    assert dockerfile.startswith(f"FROM {PINNED_HERMES_IMAGE}\n")
-    assert "mem0ai==2.0.10" in dockerfile
-    assert "COPY services/agent-gateway/src" in dockerfile
-    assert "uvicorn" in dockerfile
-    assert "videobox_agent_gateway.hermes_memory_adapter:app" in dockerfile
-    assert "--port\", \"8082\"" in dockerfile
-    assert "hermes " not in dockerfile.lower()
-    assert "serve" not in dockerfile.lower()
-    assert "COPY . ." not in dockerfile
 
 
 def test_hermes_runtime_is_pinned_to_the_zero_schema_context_engine() -> None:
@@ -684,10 +567,6 @@ def test_static_verifier_uses_child_dummy_env_and_checks_the_source_topology() -
         GATEWAY_API_NETWORK,
         HERMES_NETWORK,
         PROVIDER_EGRESS_NETWORK,
-        MEMORY_NETWORK,
-        MEMORY_ADAPTER_SERVICE,
-        "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN",
-        "MEM0_API_KEY",
         PINNED_HERMES_IMAGE,
         "/api/status",
     ):
@@ -911,75 +790,3 @@ def test_env_example_distinguishes_plaintext_and_hash_without_usable_credentials
     ) in example
 
 
-def test_memory_adapter_runs_mem0_on_this_computer_without_a_hosted_key() -> None:
-    """자체 호스팅 Mem0 는 이 컴퓨터 밖으로 나가지 않아야 한다.
-
-    owner 가 2026-08-08 에 자체 호스팅을 선택했다. 기억 생성과 검색을 로컬
-    모델이 처리하고, 벡터 저장소는 파일 경로 방식이라 서버가 필요 없다.
-    """
-    adapter = _overlay()["services"][MEMORY_ADAPTER_SERVICE]
-    environment = adapter["environment"]
-
-    assert environment["VIDEOBOX_MEM0_MODE"] == (
-        "${VIDEOBOX_MEM0_MODE:-local}"
-    )
-    for name in (
-        "VIDEOBOX_MEM0_LOCAL_BASE_URL",
-        "VIDEOBOX_MEM0_LLM_MODEL",
-        "VIDEOBOX_MEM0_EMBEDDER_MODEL",
-        "VIDEOBOX_MEM0_EMBEDDING_DIMS",
-        "VIDEOBOX_MEM0_STORE_PATH",
-    ):
-        assert name in environment, name
-    # 기본 끝점은 이 컴퓨터여야 한다. 외부 주소가 기본값이면 안 된다.
-    assert "host.docker.internal" in environment[
-        "VIDEOBOX_MEM0_LOCAL_BASE_URL"
-    ]
-
-    # 기억이 재시작을 넘겨 살아남아야 한다. tmpfs 에 두면 매번 사라진다.
-    volumes = adapter.get("volumes", [])
-    assert any(
-        volume.startswith("videobox_mem0_store:") for volume in volumes
-    ), volumes
-    assert adapter["read_only"] is True
-
-
-def test_memory_adapter_never_reaches_the_owners_footage_or_project_data() -> None:
-    """마운트를 하나 허용했으므로, 무엇을 계속 막는지 따로 못박는다.
-
-    기억 어댑터는 외부 제공자와 이야기할 수 있는 유일한 서비스다. 그래서
-    소유자의 영상과 프로젝트 데이터에는 어떤 경로로도 닿으면 안 된다.
-    """
-    adapter = _overlay()["services"][MEMORY_ADAPTER_SERVICE]
-
-    for volume in adapter["volumes"]:
-        source = volume.split(":", 1)[0]
-        # 호스트 경로 바인드는 통째로 금지한다. 이름 있는 볼륨만 허용한다.
-        assert not source.startswith((".", "/", "~")), volume
-        assert source == "videobox_mem0_store", volume
-
-    rendered = str(adapter)
-    for forbidden in (
-        "/videobox-data",
-        "/videobox-snapshot",
-        "videobox_postgres_data",
-        "videobox_model_cache",
-        "videobox_hermes_oauth_state",
-        "docker.sock",
-    ):
-        assert forbidden not in rendered, forbidden
-
-
-def test_memory_adapter_image_prepares_the_store_directory_for_its_user() -> None:
-    """볼륨은 이미지의 디렉터리 소유권을 물려받는다.
-
-    어댑터는 uid 10000 으로 돌고 루트 파일시스템이 읽기 전용이라, 기동한 뒤에
-    소유권을 고칠 방법이 없다. 이미지에서 미리 만들어 두지 않으면 첫 저장이
-    PermissionError 로 죽는다. 2026-08-08 실제로 겪었다.
-    """
-    dockerfile = (
-        ROOT / "docker" / "hermes-memory-adapter.Dockerfile"
-    ).read_text(encoding="utf-8")
-
-    assert "/var/lib/videobox-mem0" in dockerfile
-    assert "10000:10000" in dockerfile

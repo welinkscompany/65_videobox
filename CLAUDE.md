@@ -46,7 +46,7 @@
 | 운영 규정 SSOT | `docs/development-fast-path.ko.md` `## 10` |
 | 최상위 구현 계획 | `docs/implementation-plan.ko.md` |
 | 디자인 승인 기록 | `docs/decisions/` |
-| **최신 세션 인계** | `docs/handoffs/2026-09-18-e2e-remediation-fix01-fix02-invest02-closed.ko.md` |
+| **최신 세션 인계** | `docs/handoffs/2026-09-18-mem0-removed-native-memory-librarian.ko.md` |
 
 ### 지금 유효한 결정 (전체는 `docs/decisions/`, 가장 나중 것부터 읽어라)
 
@@ -156,11 +156,12 @@
 - 외부 게시·업로드 (유튜브·텔레그램은 승인됨. 개별 업로드 게이트는 유지)
 - 컨테이너 네트워크 경계 변경 (`§10.14`)
 
-**Mem0는 승인됐고(2026-08-08) 기본은 자체 호스팅이라 밖으로 안 나간다.** `MEM0_API_KEY`를
-채우면 그때만 승인 저장한 기억 문구(280자 이내)와 검색 질의가 나간다. 원본 영상·자산·
-대본·프로젝트 식별자는 안 나가고, 스키마가 `extra="forbid"`라 그 밖의 것을 실을 수도 없다.
-**로컬이 원본, Mem0는 검색만** — 게이트웨이 응답 중 로컬 기록과 정확히 일치하는 것만
-채택한다(`yujin_memory_service.py:207`). **이 대조는 제거하지 않는다.** 상세는 `§10.14`.
+**Mem0는 2026-09-18에 완전히 걷어냈다**(owner 지시, `docs/decisions/2026-09-18-mem0-removed-native-memory-librarian.ko.md`).
+유진의 승인된 기억은 이제 외부 provider 없이 로컬 Postgres(`yujin_memory_candidates`)에만
+저장된다. 대화(`director_conversations`/`director_messages`)를 사서가 훑어 후보를
+만들고(`packages/core-engine/.../memory_librarian.py`), owner가 승인해야 저장되는
+구조는 그대로다. 외부로 나가는 것이 아예 없으니 §10.14 2-A 조항은 폐기됐다 —
+남은 조항 1·2·2-B·2-C·3·4는 그대로 유효하다.
 
 ## 7. 턴 종료 보고
 

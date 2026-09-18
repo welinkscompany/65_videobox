@@ -9,16 +9,17 @@
     고치면 옛 모델과 새 모델을 둘 다 LM Studio에 올려 둬야 하고, 그러면 기계가
     느려진다 -- 이 스크립트가 나오게 된 이유다(2026-09-11).
 
-    이 스크립트는 아래 일곱 자리를 한 번에 맞춘다.
+    이 스크립트는 아래 다섯 자리를 한 번에 맞춘다. 2026-09-18에 Mem0를 걷어내며
+    기억 추출 전용 모델 값(`VIDEOBOX_MEM0_LLM_MODEL`)과 그 값이 박혀 있던
+    `hermes_memory_adapter.py`·`test_start_hermes_yujin_script.py` 자리가
+    통째로 없어져 일곱 자리에서 다섯으로 줄었다 -- 유진 두뇌 자리 하나만
+    맞추면 된다.
       - .env.container (VIDEOBOX_LOCAL_MODEL_NAME)
-      - compose.hermes-yujin.yaml (기억 추출 기본값의 안쪽 리터럴)
       - compose.yaml (VIDEOBOX_LOCAL_MODEL_NAME의 **커밋된 기본값**) -- 2026-09-12에
         빠뜨린 것을 발견해 더했다. `.env.container`가 gitignore라 안 세었는데, 같은
         변수의 기본값이 여기에도 커밋되어 있어서 새로 받은 환경은 이 값으로 뜬다
       - config/hermes/yujin/config.yaml (유진 두뇌)
-      - services/agent-gateway/.../hermes_memory_adapter.py (코드에 박힌 마지막 기본값)
-      - tests/test_hermes_yujin_compose_contract.py (계약 시험 리터럴 2곳)
-      - tests/test_hermes_yujin_profile_distribution.py, tests/test_start_hermes_yujin_script.py
+      - tests/test_hermes_yujin_compose_contract.py, tests/test_hermes_yujin_profile_distribution.py
         (계약 시험 리터럴 각 1곳)
 
     LM Studio는 요청에 실린 model 필드가 실제로 로드된 것과 달라도 조용히 지금
@@ -80,19 +81,15 @@ $envContainerPath = Join-Path $RepositoryRoot ".env.container"
 $composeOverlayPath = Join-Path $RepositoryRoot "compose.hermes-yujin.yaml"
 $mainComposePath = Join-Path $RepositoryRoot "compose.yaml"
 $yujinConfigPath = Join-Path $RepositoryRoot "config/hermes/yujin/config.yaml"
-$adapterPath = Join-Path $RepositoryRoot "services/agent-gateway/src/videobox_agent_gateway/hermes_memory_adapter.py"
 $composeContractTestPath = Join-Path $RepositoryRoot "tests/test_hermes_yujin_compose_contract.py"
 $profileDistributionTestPath = Join-Path $RepositoryRoot "tests/test_hermes_yujin_profile_distribution.py"
-$startScriptTestPath = Join-Path $RepositoryRoot "tests/test_start_hermes_yujin_script.py"
 
 foreach ($requiredFile in @(
         $composeOverlayPath,
         $mainComposePath,
         $yujinConfigPath,
-        $adapterPath,
         $composeContractTestPath,
-        $profileDistributionTestPath,
-        $startScriptTestPath
+        $profileDistributionTestPath
     )) {
     if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
         Write-Error "필요한 자리가 없습니다: $requiredFile"
@@ -163,12 +160,6 @@ else {
 }
 [IO.File]::WriteAllText($envContainerPath, $envUpdated, $utf8NoBom)
 
-# --- compose.hermes-yujin.yaml: 기억 추출 기본값의 안쪽(진짜 SSOT) 리터럴 ---
-Set-SingleCaptureReplacement -Path $composeOverlayPath `
-    -Pattern 'VIDEOBOX_MEM0_LLM_MODEL: \$\{VIDEOBOX_MEM0_LLM_MODEL:-\$\{VIDEOBOX_LOCAL_MODEL_NAME:-([^}]+)\}\}' `
-    -NewValue $ModelId `
-    -Description "compose.hermes-yujin.yaml 기억 추출 기본값"
-
 # --- compose.yaml: 두뇌 이름의 커밋된 기본값 ---
 # **이 자리를 처음에 빠뜨렸다(2026-09-12에 발견).** `.env.container`가 gitignore라
 # 안 센 것인데, **같은 변수의 기본값이 compose.yaml에도 커밋되어 있다.** 그래서
@@ -185,18 +176,7 @@ Set-SingleCaptureReplacement -Path $yujinConfigPath `
     -NewValue $ModelId `
     -Description "유진 프로필의 model.name"
 
-# --- hermes_memory_adapter.py: 코드에 박힌 마지막 기본값 ---
-Set-SingleCaptureReplacement -Path $adapterPath `
-    -Pattern '_LOCAL_MEM0_LLM_MODEL = "([^"]+)"' `
-    -NewValue $ModelId `
-    -Description "hermes_memory_adapter.py 코드 기본값"
-
-# --- 계약 시험 리터럴 넷 (시험 스위트가 계속 초록이려면 여기도 같이 옮겨야 한다) ---
-Set-SingleCaptureReplacement -Path $composeContractTestPath `
-    -Pattern '\$\{VIDEOBOX_MEM0_LLM_MODEL:-\$\{VIDEOBOX_LOCAL_MODEL_NAME:-([^}]+)\}\}' `
-    -NewValue $ModelId `
-    -Description "test_hermes_yujin_compose_contract.py 기억 추출 기본값 리터럴"
-
+# --- 계약 시험 리터럴 둘 (시험 스위트가 계속 초록이려면 여기도 같이 옮겨야 한다) ---
 Set-SingleCaptureReplacement -Path $composeContractTestPath `
     -Pattern '"name": "([^"]+)"' `
     -NewValue $ModelId `
@@ -207,16 +187,10 @@ Set-SingleCaptureReplacement -Path $profileDistributionTestPath `
     -NewValue $ModelId `
     -Description "test_hermes_yujin_profile_distribution.py 유진 두뇌 리터럴"
 
-Set-SingleCaptureReplacement -Path $startScriptTestPath `
-    -Pattern '"VIDEOBOX_MEM0_LLM_MODEL": "([^"]+)"' `
-    -NewValue $ModelId `
-    -Description "test_start_hermes_yujin_script.py 기억 추출 기본값 리터럴"
-
 Write-Output "'$ModelId'로 로컬 모델을 맞췄습니다. 바꾼 자리:"
 Write-Output "  - .env.container (VIDEOBOX_LOCAL_MODEL_NAME)"
-Write-Output "  - compose.hermes-yujin.yaml (기억 추출 기본값)"
+Write-Output "  - compose.yaml (두뇌 이름 커밋 기본값)"
 Write-Output "  - config/hermes/yujin/config.yaml (유진 두뇌)"
-Write-Output "  - hermes_memory_adapter.py (코드에 박힌 마지막 기본값)"
-Write-Output "  - 계약 시험 리터럴 4곳 (compose·profile·start 스크립트 시험)"
+Write-Output "  - 계약 시험 리터럴 2곳 (compose·profile 시험)"
 Write-Output ""
 Write-Output "다음 한 걸음: scripts/owner-ready.ps1 -Mode Start -Rebuild -WithYujinMemory"

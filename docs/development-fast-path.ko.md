@@ -311,7 +311,13 @@ Codex 시절 세션 단절을 메우던 장치이며, 현재 개발 환경에서
 1. `videobox-hermes-provider-egress`의 직접 egress는 VideoBox 개인 로컬 MVP에서 owner-operated `openai-codex` OAuth provider 연결을 위한 임시 한계다. production gateway allowlist가 아니며, provider host·redirect·IP 범위를 제한하거나 감사하는 보안 gateway로 주장하지 않는다.
 2. Hermes dashboard는 VideoBox data, media mount, PostgreSQL, `videobox-internal`, `videobox-edge`에 연결하지 않는다. 대시보드의 보조 기억은 그 provider 설정으로만 연결하며, 전용 `/opt/data`에는 인증 상태만 둔다.
 
-2-A. **유진 기억용 Mem0 경로 — owner 승인 (2026-08-08).** 대시보드 경로와 별개로,
+2-A. **[2026-09-18 폐기] 유진 기억용 Mem0 경로.** owner 지시로 Mem0를
+   완전히 걷어냈다 — 유진의 승인된 기억은 이제 로컬 Postgres에만 있고
+   외부로 나가는 것이 없다. 설계·실측 근거는
+   `docs/decisions/2026-09-18-mem0-removed-native-memory-librarian.ko.md`.
+   아래는 **역사 기록**으로만 남긴다 — 판단 근거로 쓰지 마라.
+
+   ~~대시보드 경로와 별개로,
    VideoBox 유진의 기억은 `videobox-hermes-memory-adapter`가
    `videobox-hermes-provider-egress`를 통해 Mem0에 연결한다. 승인 배경은
    유진의 로컬 기억이 한 번에 5개·각 280자로 제한돼 실제 사용에 부족했기 때문이다.
@@ -348,7 +354,7 @@ Codex 시절 세션 단절을 메우던 장치이며, 현재 개발 환경에서
      즉 **Mem0를 켜도 게이트웨이가 없다고 기억이 완전히 사라지지는
      않는다** — 뜻으로 고른 순위 대신 저장 순서로 내려갈 뿐이다.
    - 이 승인은 **Mem0 기억 경로 하나에만** 적용된다. 다른 외부 전송, Telegram intake,
-     host bridge, CapCut bridge의 근거가 아니다(조항 4 유지).
+     host bridge, CapCut bridge의 근거가 아니다(조항 4 유지).~~
 2-B. **유진 로컬 두뇌 경로 — owner 승인 (2026-08-08).** workspace 컨테이너가
    호스트의 LM Studio(`host.docker.internal:1234`)에 연결한다. 승인 배경은
    `base_url`이 `http://127.0.0.1:1234/v1`로 못박혀 있어 **컨테이너 안에서는 두뇌에

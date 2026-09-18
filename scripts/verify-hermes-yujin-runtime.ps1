@@ -19,8 +19,6 @@ $expectedImage = "nousresearch/hermes-agent@sha256:3811ed13da874fba2ac99b6d492db
 $gatewayApiNetwork = "videobox-agent-gateway-api-network"
 $hermesNetwork = "videobox-agent-gateway-network"
 $providerNetwork = "videobox-hermes-provider-egress"
-$memoryNetwork = "videobox-hermes-memory-network"
-$memoryAdapterService = "videobox-hermes-memory-adapter"
 
 function Assert-True {
     param(
@@ -89,8 +87,6 @@ foreach ($requiredTemplate in @(
     '${VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64:?set in .env.container}'
     '${VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64:?set in .env.container}'
     '${VIDEOBOX_HERMES_CAPABILITY_KEY_ID:?set in .env.container}'
-    '${VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN:?set in .env.container}'
-    '${MEM0_API_KEY:-}'
 )) {
     Assert-True ($source.Contains($requiredTemplate)) "A required secret template is missing."
 }
@@ -113,8 +109,6 @@ foreach ($name in @(
     "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64"
     "VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64"
     "VIDEOBOX_HERMES_CAPABILITY_KEY_ID"
-    "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN"
-    "MEM0_API_KEY"
 )) {
     [void]$baseProcessInfo.EnvironmentVariables.Remove($name)
 }
@@ -124,8 +118,7 @@ Assert-True ($baseResult.ExitCode -eq 0) "Base Compose static render failed."
 $baseRendered = $baseJson | ConvertFrom-Json
 Assert-True (
     $null -eq $baseRendered.services.PSObject.Properties["videobox-agent-gateway"] -and
-    $null -eq $baseRendered.services.PSObject.Properties["videobox-hermes-yujin"] -and
-    $null -eq $baseRendered.services.PSObject.Properties[$memoryAdapterService]
+    $null -eq $baseRendered.services.PSObject.Properties["videobox-hermes-yujin"]
 ) "Base Compose must not contain Yujin services."
 Assert-Networks $baseRendered.services.'videobox-workspace' @(
     "videobox-edge"
@@ -153,8 +146,6 @@ $dummyEnvironment = @{
     "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64" = "ERERERERERERERERERERERERERERERERERERERERERE"
     "VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64" = "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
     "VIDEOBOX_HERMES_CAPABILITY_KEY_ID" = "c3-static-key-2026-07"
-    "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN" = "static-memory-token-at-least-32-bytes"
-    "MEM0_API_KEY" = ""
 }
 foreach ($name in $dummyEnvironment.Keys) {
     $processInfo.EnvironmentVariables[$name] = $dummyEnvironment[$name]
@@ -168,13 +159,10 @@ $rendered = $renderedJson | ConvertFrom-Json
 $hermes = $rendered.services.'videobox-hermes-yujin'
 $gateway = $rendered.services.'videobox-agent-gateway'
 $workspace = $rendered.services.'videobox-workspace'
-$memoryAdapter = $rendered.services.$memoryAdapterService
 Assert-True ($null -ne $hermes) "Rendered Hermes Yujin service is missing."
 Assert-True ($null -ne $gateway) "Rendered agent gateway service is missing."
-Assert-True ($null -ne $memoryAdapter) "Rendered Hermes memory adapter service is missing."
 Assert-True (($hermes.profiles -join "|") -ceq "hermes-yujin") "Hermes profile is invalid."
 Assert-True (($gateway.profiles -join "|") -ceq "hermes-yujin") "Gateway profile is invalid."
-Assert-True (($memoryAdapter.profiles -join "|") -ceq "hermes-yujin") "Memory adapter profile is invalid."
 
 Assert-True ($hermes.image -ceq $expectedImage) "Hermes image digest does not match the pin."
 Assert-True ($hermes.container_name -ceq "videobox-hermes-yujin") "Hermes container name must match the container-only installer target."
@@ -188,94 +176,34 @@ Assert-True (
     $hermes.environment.HERMES_TUI_TOOLSETS -ceq "context_engine"
 ) "Hermes must use the pinned zero-schema context_engine toolset."
 Assert-Networks $hermes @($hermesNetwork, $providerNetwork) "videobox-hermes-yujin"
-Assert-Networks $gateway @($gatewayApiNetwork, $hermesNetwork, $memoryNetwork) "videobox-agent-gateway"
-Assert-Networks $memoryAdapter @($memoryNetwork, $providerNetwork) $memoryAdapterService
+Assert-Networks $gateway @($gatewayApiNetwork, $hermesNetwork) "videobox-agent-gateway"
 Assert-Networks $workspace @("videobox-edge", "videobox-internal", $gatewayApiNetwork) "videobox-workspace"
 
 Assert-True ($rendered.networks.$gatewayApiNetwork.internal -eq $true) "Gateway API network must be internal."
 Assert-True ($rendered.networks.$hermesNetwork.internal -eq $true) "Hermes-facing network must be internal."
-Assert-True ($rendered.networks.$memoryNetwork.internal -eq $true) "Memory adapter network must be internal."
 Assert-NoProperty $hermes "ports" "Hermes must not publish a host port."
 Assert-NoProperty $gateway "ports" "Agent gateway must not publish a host port."
-Assert-NoProperty $memoryAdapter "ports" "Memory adapter must not publish a host port."
-Assert-NoProperty $memoryAdapter "expose" "Memory adapter must not expose a host port."
 Assert-NoProperty $gateway "volumes" "Agent gateway must not have mounts."
-# 자체 호스팅 기억은 벡터 저장소가 재시작을 넘겨 살아남아야 하므로 마운트가
-# 하나 필요하다. 규칙의 본뜻은 이 서비스가 소유자의 영상·프로젝트 데이터에
-# 닿지 않는 것이므로, 이름 있는 전용 볼륨 하나만 허용한다.
-# compose config 는 마운트를 객체로 펼친다. 호스트 경로 바인드가 아니라
-# 이름 있는 전용 볼륨 하나여야 한다.
-$memoryAdapterMounts = @($memoryAdapter.volumes)
-Assert-True ($memoryAdapterMounts.Count -eq 1) `
-    "Memory adapter may mount only its own memory store."
-Assert-True (
-    ($memoryAdapterMounts[0].type -ceq "volume") -and
-    ($memoryAdapterMounts[0].source -ceq "videobox_mem0_store") -and
-    ($memoryAdapterMounts[0].target -ceq "/var/lib/videobox-mem0")
-) "Memory adapter mount must be the named memory store only."
-Assert-NoProperty $memoryAdapter "depends_on" "Memory adapter must not depend on chat services."
-Assert-True (
-    $null -eq $gateway.depends_on.PSObject.Properties[$memoryAdapterService]
-) "Gateway must not hard-depend on the optional memory adapter."
-Assert-NoProperty $hermes "depends_on" "Hermes chat must not depend on the optional memory adapter."
-foreach ($service in @($gateway, $hermes, $memoryAdapter)) {
+foreach ($service in @($gateway, $hermes)) {
     Assert-NoProperty $service "privileged" "A1 services must not be privileged."
     Assert-NoProperty $service "extra_hosts" "A1 services must not have extra hosts."
     Assert-NoProperty $service "dns" "A1 services must not override DNS."
 }
 Assert-NoProperty $gateway "cap_add" "Agent gateway must not add capabilities."
-Assert-NoProperty $memoryAdapter "cap_add" "Memory adapter must not add capabilities."
-Assert-True (
-    $memoryAdapter.build.dockerfile -ceq "docker/hermes-memory-adapter.Dockerfile"
-) "Memory adapter Dockerfile selection is invalid."
 
 $gatewayEnvironmentNames = @($gateway.environment.PSObject.Properties.Name | Sort-Object)
 Assert-True (
     ($gatewayEnvironmentNames -join "|") -ceq (
         @(
-            "HERMES_MEMORY_ADAPTER_URL"
             "HERMES_YUJIN_GATEWAY_PASSWORD"
             "HERMES_YUJIN_GATEWAY_USERNAME"
             "HERMES_YUJIN_URL"
             "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN"
             "VIDEOBOX_HERMES_CAPABILITY_KEY_ID"
             "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64"
-            "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN"
         ) -join "|"
     )
 ) "Gateway environment contract is invalid."
-Assert-True (
-    $gateway.environment.HERMES_MEMORY_ADAPTER_URL -ceq
-    "http://videobox-hermes-memory-adapter:8082"
-) "Gateway memory adapter URL is invalid."
-$memoryAdapterEnvironmentNames = @(
-    $memoryAdapter.environment.PSObject.Properties.Name | Sort-Object
-)
-Assert-True (
-    ($memoryAdapterEnvironmentNames -join "|") -ceq (
-        @(
-            # VIDEOBOX_MEM0_* 는 자체 호스팅 기억 설정이다. 전부 이 컴퓨터를
-            # 가리키는 값이고 비밀이 아니다. 정렬된 이름 목록이다.
-            "MEM0_API_KEY"
-            "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN"
-            "VIDEOBOX_MEM0_EMBEDDER_MODEL"
-            "VIDEOBOX_MEM0_EMBEDDING_DIMS"
-            "VIDEOBOX_MEM0_LLM_MODEL"
-            "VIDEOBOX_MEM0_LOCAL_BASE_URL"
-            "VIDEOBOX_MEM0_MODE"
-            "VIDEOBOX_MEM0_STORE_PATH"
-        ) -join "|"
-    )
-) "Memory adapter environment contract is invalid."
-Assert-True (
-    $memoryAdapter.environment.MEM0_API_KEY -ceq ""
-) "Static verification must leave the optional Mem0 credential empty."
-Assert-True (
-    $memoryAdapter.environment.VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN -ceq
-    $dummyEnvironment["VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN"] -and
-    $gateway.environment.VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN -ceq
-    $dummyEnvironment["VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN"]
-) "Memory adapter service credentials do not match."
 Assert-True (
     $workspace.environment.VIDEOBOX_AGENT_GATEWAY_URL -ceq
     "http://videobox-agent-gateway:8081"
@@ -298,21 +226,6 @@ Assert-NoProperty $gateway.environment `
 Assert-NoProperty $workspace.environment `
     "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64" `
     "Workspace received the capability private key."
-Assert-NoProperty $gateway.environment `
-    "MEM0_API_KEY" `
-    "Gateway received the Mem0 credential."
-Assert-NoProperty $workspace.environment `
-    "MEM0_API_KEY" `
-    "Workspace received the Mem0 credential."
-Assert-NoProperty $workspace.environment `
-    "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN" `
-    "Workspace received the memory adapter credential."
-Assert-NoProperty $hermes.environment `
-    "MEM0_API_KEY" `
-    "Interactive Hermes received the Mem0 credential."
-Assert-NoProperty $hermes.environment `
-    "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN" `
-    "Interactive Hermes received the memory adapter credential."
 foreach ($name in @($hermes.environment.PSObject.Properties.Name)) {
     Assert-True (
         $name -notmatch '^VIDEOBOX_HERMES_CAPABILITY_'
@@ -362,9 +275,6 @@ $gatewayHealth = $gateway.healthcheck.test -join " "
 Assert-True ($hermesHealth.Contains("http://127.0.0.1:9120/api/status")) "Hermes HTTP readiness probe is missing."
 Assert-True ($gatewayHealth.Contains("http://127.0.0.1:8081/health")) "Gateway HTTP readiness probe is missing."
 Assert-True (-not $hermesHealth.Contains("PASSWORD")) "Hermes healthcheck must not contain credentials."
-$memoryAdapterHealth = $memoryAdapter.healthcheck.test -join " "
-Assert-True ($memoryAdapterHealth.Contains("http://127.0.0.1:8082/health")) "Memory adapter HTTP readiness probe is missing."
-Assert-True (-not $memoryAdapterHealth.Contains("MEM0_API_KEY")) "Memory adapter healthcheck must not contain credentials."
 
 $forbiddenHermesText = @(
     $hermes | ConvertTo-Json -Depth 20 -Compress
@@ -380,23 +290,4 @@ foreach ($forbidden in @(
     Assert-True (-not $forbiddenHermesText.Contains($forbidden)) "Hermes contains a forbidden A1 boundary."
 }
 
-$forbiddenMemoryAdapterText = @(
-    $memoryAdapter | ConvertTo-Json -Depth 20 -Compress
-) -join ""
-foreach ($forbidden in @(
-    $gatewayApiNetwork
-    $hermesNetwork
-    "videobox-edge"
-    "videobox-internal"
-    "videobox-postgres"
-    "/videobox-data"
-    "/videobox-snapshot"
-    "/opt/data"
-    "docker.sock"
-)) {
-    Assert-True (
-        -not $forbiddenMemoryAdapterText.Contains($forbidden)
-    ) "Memory adapter contains a forbidden D2 boundary."
-}
-
-Write-Output "Hermes Yujin D2 static topology verified: exact chat, gateway, and optional memory adapter boundaries."
+Write-Output "Hermes Yujin A1 static topology verified: exact chat and gateway boundaries (no external memory adapter)."

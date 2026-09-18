@@ -3,9 +3,9 @@ param(
     [ValidateSet("Check", "Start", "Smoke", "Open", "OpenCapCut")]
     [string]$Mode = "Check",
     [switch]$Json,
-    # 유진 기억을 Mem0에 연결한다 (owner 승인 2026-08-08, `§10.14` 조항 2-A).
-    # 기본은 꺼짐 -- 켜면 대화 기억이 외부로 나가고, 게이트웨이가 죽으면
-    # 폴백이 없어 과거 기억을 못 꺼낸다. 켤 때만 명시적으로 지정한다.
+    # 유진 대화·기억 스택(agent-gateway, hermes-yujin)을 함께 켠다.
+    # 2026-09-18에 Mem0(외부 provider)를 걷어냈다 -- 승인된 기억은 이제
+    # 전부 로컬 Postgres에만 남는다(`docs/decisions/2026-09-18-mem0-removed-native-memory-librarian.ko.md`).
     [switch]$WithYujinMemory,
     [Uri]$VideoBoxUri = "http://127.0.0.1:5173/",
     [Uri]$HermesDashboardUri = "http://127.0.0.1:9119/",
@@ -34,7 +34,7 @@ $OutputEncoding = [Console]::OutputEncoding
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $composeFile = Join-Path $repositoryRoot "compose.yaml"
 $yujinMemoryComposeFile = Join-Path $repositoryRoot "compose.hermes-yujin.yaml"
-# 기본 스택은 compose.yaml 하나다. -WithYujinMemory 를 줬을 때만 Mem0 경로를 얹는다.
+# 기본 스택은 compose.yaml 하나다. -WithYujinMemory 를 줬을 때만 유진 대화 경로를 얹는다.
 $composeFileArguments = @("-f", $composeFile)
 # `compose.yaml`의 `name: 65_videobox`는 고정이라, 에이전트가 임시로 만드는
 # worktree(`.claude/worktrees/agent-*`)에서 그대로 돌리면 프로젝트 이름이 겹쳐
@@ -422,8 +422,7 @@ function Get-HermesCredentialStatus {
         "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN",
         "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64",
         "VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64",
-        "VIDEOBOX_HERMES_CAPABILITY_KEY_ID",
-        "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN"
+        "VIDEOBOX_HERMES_CAPABILITY_KEY_ID"
     )
     $placeholderSentinels = @(
         "replace-before-starting",
@@ -1270,8 +1269,9 @@ if ($Mode -ceq "Start") {
         -Summary $infographicSummary -Action $infographicAction -Evidence $infographicEvidence
 
     if ($WithYujinMemory) {
-        # 게이트웨이가 유진 에이전트와 메모리 어댑터에 의존한다.
-        $serviceNames += @("videobox-hermes-yujin", "videobox-hermes-memory-adapter", "videobox-agent-gateway")
+        # 게이트웨이가 유진 에이전트에 의존한다. 기억은 이제 게이트웨이를
+        # 거치지 않고 API 서비스가 로컬 Postgres에 직접 저장한다.
+        $serviceNames += @("videobox-hermes-yujin", "videobox-agent-gateway")
     }
     if ($PSBoundParameters.ContainsKey("WhatIf")) {
         $checks += New-OwnerReadyResult -Id "start" -Status "pass" `
@@ -1398,20 +1398,6 @@ if ($Mode -ceq "Smoke") {
             }
         },
         [pscustomobject]@{
-            Id = "mem0_non_live"
-            File = "smoke-hermes-yujin-mem0.ps1"
-            Arguments = @()
-            ReceiptMode = "non_live"
-            PublicMarker = "mem0_non_live_zero_calls"
-            MarkerPrefix = "HERMES_YUJIN_MEM0_NON_LIVE"
-            ExactLine = ""
-            ExpectedFields = [ordered]@{
-                network_calls = "0"
-                provider_calls = "0"
-                credentials_printed = "false"
-            }
-        },
-        [pscustomobject]@{
             Id = "plan_state"
             File = "verify-hermes-yujin-plan-state.ps1"
             Arguments = @()
@@ -1438,7 +1424,7 @@ if ($Mode -ceq "Smoke") {
             ReceiptMode = "static_only"
             PublicMarker = "runtime_static_verified"
             MarkerPrefix = ""
-            ExactLine = "Hermes Yujin D2 static topology verified: exact chat, gateway, and optional memory adapter boundaries."
+            ExactLine = "Hermes Yujin A1 static topology verified: exact chat and gateway boundaries (no external memory adapter)."
             ExpectedFields = [ordered]@{}
         }
     )

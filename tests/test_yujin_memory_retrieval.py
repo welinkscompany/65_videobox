@@ -1,3 +1,11 @@
+"""승인된 기억 조회 -- 2026-09-18부터 전부 로컬 순위 매기기다 (Mem0 제거).
+
+옛 파일은 게이트웨이(Mem0) 검색 결과를 로컬과 대조하는 시험으로 가득했다.
+이제 외부 검색 자체가 없어 그 대조는 코드 경로가 아예 없다 -- 반환값이
+`self._store`가 준 행에서만 나온다는 것을 시험이 대신 지킨다
+(`YujinMemoryService._eligible_local_memories`).
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -53,33 +61,19 @@ class _Store:
         return list(self.rows)
 
 
-class _Gateway:
-    def __init__(self, memories: object, *, delay: float = 0) -> None:
-        self.memories = memories
-        self.delay = delay
-        self.requests = []
-
-    async def search_memory(self, request):
-        self.requests.append(request)
-        if self.delay:
-            await asyncio.sleep(self.delay)
-        return {"memories": self.memories}
-
-
-def test_retrieval_cross_checks_exact_current_private_stored_rows() -> None:
-    external_a = "ext-" + "a" * 64
-    external_b = "ext-" + "b" * 64
+def test_retrieval_ranks_relevant_category_first_and_excludes_ineligible_rows() -> None:
     rows = [
         _stored(
             candidate_id="candidate-a",
             memory_ref="memory-a",
-            external_ref=external_a,
+            external_ref="ext-" + "a" * 64,
             text="빠른 컷 편집을 선호합니다.",
+            category="pacing",
         ),
         _stored(
             candidate_id="candidate-b",
             memory_ref="memory-b",
-            external_ref=external_b,
+            external_ref="ext-" + "b" * 64,
             text="자막은 두 줄 이내를 선호합니다.",
             category="caption",
         ),
@@ -113,53 +107,26 @@ def test_retrieval_cross_checks_exact_current_private_stored_rows() -> None:
             text="삭제 후보",
             storage_status="deleted",
         ),
+        _stored(
+            candidate_id="candidate-other-project",
+            memory_ref="memory-other",
+            external_ref="ext-" + "9" * 64,
+            text="다른 프로젝트 기억",
+            category="tone",
+            project_id="project-b",
+        ),
     ]
-    gateway = _Gateway(
-        [
-            {
-                "memory_ref": "memory-b",
-                "external_ref": external_b,
-                "text": "자막은 두 줄 이내를 선호합니다.",
-                "category": "caption",
-            },
-            {
-                "memory_ref": "memory-a",
-                "external_ref": external_a,
-                "text": "빠른 컷 편집을 선호합니다.",
-                "category": "pacing",
-            },
-            # Exact duplicate must collapse.
-            {
-                "memory_ref": "memory-a",
-                "external_ref": external_a,
-                "text": "빠른 컷 편집을 선호합니다.",
-                "category": "pacing",
-            },
-            # Provider/local mismatches and unrelated rows must not enter.
-            {
-                "memory_ref": "memory-a",
-                "external_ref": external_a,
-                "text": "위조된 텍스트",
-                "category": "pacing",
-            },
-            {
-                "memory_ref": "memory-other",
-                "external_ref": "ext-" + "9" * 64,
-                "text": "다른 프로젝트 기억",
-                "category": "tone",
-            },
-        ]
-    )
-    service = YujinMemoryService(store=_Store(rows), gateway=gateway)
+    service = YujinMemoryService(store=_Store(rows))
 
     memories = asyncio.run(
         service.retrieve_approved_memories(
             project_id="project-a",
             conversation_id="conversation-a",
-            query="편집 템포와 자막",
+            query="자막 배치가 어떻게 되나요?",
         )
     )
 
+    # "자막" 낱말이 caption 카테고리 힌트에 걸리므로 그 쪽이 앞으로 온다.
     assert [item.model_dump() for item in memories] == [
         {
             "kind": "user_approved_preference",
@@ -172,67 +139,12 @@ def test_retrieval_cross_checks_exact_current_private_stored_rows() -> None:
             "text": "빠른 컷 편집을 선호합니다.",
         },
     ]
-    assert len(gateway.requests) == 1
-    assert gateway.requests[0].limit == 5
     assert not hasattr(memories[0], "memory_ref")
     assert not hasattr(memories[0], "external_ref")
 
 
-def test_provider_cannot_revive_non_approved_or_non_stored_local_rows() -> None:
-    rows = [
-        _stored(
-            candidate_id=f"candidate-{index}",
-            memory_ref=f"memory-{index}",
-            external_ref="ext-" + str(index) * 64,
-            text=f"제외 대상 {index}",
-            status=status,
-            storage_status=storage_status,
-        )
-        for index, (status, storage_status) in enumerate(
-            (
-                ("pending", "not_requested"),
-                ("rejected", "not_requested"),
-                ("approved", "failed_retryable"),
-                ("approved", "deleted"),
-            ),
-            start=1,
-        )
-    ]
-    rows.append(
-        _stored(
-            candidate_id="candidate-valid",
-            memory_ref="memory-valid",
-            external_ref="ext-" + "a" * 64,
-            text="검증된 취향",
-        )
-    )
-    gateway = _Gateway(
-        [
-            {
-                "memory_ref": row["memory_ref"],
-                "external_ref": row["external_ref"],
-                "text": row["text"],
-                "category": row["category"],
-            }
-            for row in rows
-        ]
-    )
-    service = YujinMemoryService(store=_Store(rows), gateway=gateway)
-
-    memories = asyncio.run(
-        service.retrieve_approved_memories(
-            project_id="project-a",
-            conversation_id="conversation-a",
-            query="이전 편집 취향",
-        )
-    )
-    assert [item.text for item in memories] == ["검증된 취향"]
-    assert len(gateway.requests) == 1
-
-
 def test_retrieval_bounds_five_items_and_total_text_to_1400() -> None:
     rows = []
-    provider = []
     for index in range(7):
         external_ref = "ext-" + f"{index + 1:x}" * 64
         text = chr(ord("가") + index) * 280
@@ -245,17 +157,7 @@ def test_retrieval_bounds_five_items_and_total_text_to_1400() -> None:
                 category="workflow",
             )
         )
-        provider.append(
-            {
-                "memory_ref": f"memory-{index}",
-                "external_ref": external_ref,
-                "text": text,
-                "category": "workflow",
-            }
-        )
-    service = YujinMemoryService(
-        store=_Store(rows), gateway=_Gateway(provider[:5])
-    )
+    service = YujinMemoryService(store=_Store(rows))
 
     memories = asyncio.run(
         service.retrieve_approved_memories(
@@ -267,103 +169,12 @@ def test_retrieval_bounds_five_items_and_total_text_to_1400() -> None:
 
     assert len(memories) == 5
     assert sum(len(item.text) for item in memories) <= 1400
-    assert tuple(item.text for item in memories) == tuple(
-        sorted(item.text for item in memories)
-    )
 
 
-def test_retrieval_timeout_outage_and_malformed_fall_back_to_local_order_without_retry() -> None:
-    """게이트웨이가 없거나, 느리거나, 이상한 답을 줘도 로컬 원본은 살아 있다
-    (owner 판단 2026-08-31, `development-fast-path.ko.md` §10.14 2-A). 예전엔
-    이 네 경우 전부 빈 결과였다 -- 이제는 저장 순서 그대로(뜻 기반 순위 없이)
-    돌려준다. 재시도는 여전히 안 한다(요청은 매번 딱 한 번)."""
-    row = _stored(
-        candidate_id="candidate-a",
-        memory_ref="memory-a",
-        external_ref="ext-" + "a" * 64,
-        text="빠른 컷 편집을 선호합니다.",
-    )
-    expected_fallback = [
-        {
-            "kind": "user_approved_preference",
-            "category": "pacing",
-            "text": "빠른 컷 편집을 선호합니다.",
-        },
-    ]
-
-    timeout_gateway = _Gateway([], delay=1)
-    timeout_service = YujinMemoryService(
-        store=_Store([row]), gateway=timeout_gateway
-    )
-    async def exercise_timeout():
-        loop = asyncio.get_running_loop()
-        started = loop.time()
-        result = await timeout_service.retrieve_approved_memories(
-            project_id="project-a",
-            conversation_id="conversation-a",
-            query="편집 템포",
-        )
-        return result, loop.time() - started
-
-    timeout_result, elapsed = asyncio.run(exercise_timeout())
-    assert [item.model_dump() for item in timeout_result] == expected_fallback
-    assert elapsed < 0.9
-    assert len(timeout_gateway.requests) == 1
-
-    malformed_gateway = _Gateway([{"raw_provider_body": "unsafe"}])
-    malformed_service = YujinMemoryService(
-        store=_Store([row]), gateway=malformed_gateway
-    )
-    malformed_result = asyncio.run(
-        malformed_service.retrieve_approved_memories(
-            project_id="project-a",
-            conversation_id="conversation-a",
-            query="편집 템포",
-        )
-    )
-    assert [item.model_dump() for item in malformed_result] == expected_fallback
-    assert len(malformed_gateway.requests) == 1
-
-    oversized_gateway = _Gateway(
-        [
-            {
-                "memory_ref": "memory-a",
-                "external_ref": "ext-" + "a" * 64,
-                "text": "가" * 281,
-                "category": "pacing",
-            }
-        ]
-    )
-    oversized_service = YujinMemoryService(
-        store=_Store([row]), gateway=oversized_gateway
-    )
-    oversized_result = asyncio.run(
-        oversized_service.retrieve_approved_memories(
-            project_id="project-a",
-            conversation_id="conversation-a",
-            query="편집 템포",
-        )
-    )
-    assert [item.model_dump() for item in oversized_result] == expected_fallback
-    assert len(oversized_gateway.requests) == 1
-
-    unavailable_service = YujinMemoryService(
-        store=_Store([row]), gateway=None
-    )
-    unavailable_result = asyncio.run(
-        unavailable_service.retrieve_approved_memories(
-            project_id="project-a",
-            conversation_id="conversation-a",
-            query="편집 템포",
-        )
-    )
-    assert [item.model_dump() for item in unavailable_result] == expected_fallback
-
-
-def test_local_fallback_skips_ineligible_rows_and_keeps_storage_order() -> None:
-    """폴백은 승인·저장된 것만 내보내고, 나머지(대기·거절·저장 실패)는
-    `_eligible_local_memories`와 같은 기준으로 걸러야 한다. 순서는 저장소가
-    돌려준 순서(`category, proposed_text, candidate_id`)를 그대로 따른다."""
+def test_retrieval_skips_ineligible_rows_and_is_deterministic() -> None:
+    """승인·저장된 것만 내보내고, 나머지(대기·거절·저장 실패)는
+    `_eligible_local_memories`와 같은 기준으로 걸러야 한다. 순서는 관련성
+    점수, 그다음 (category, text)로 결정된다."""
     rows = [
         _stored(
             candidate_id="candidate-pending",
@@ -395,35 +206,31 @@ def test_local_fallback_skips_ineligible_rows_and_keeps_storage_order() -> None:
             category="pacing",
         ),
     ]
-    service = YujinMemoryService(store=_Store(rows), gateway=None)
+    service = YujinMemoryService(store=_Store(rows))
 
     memories = asyncio.run(
         service.retrieve_approved_memories(
             project_id="project-a",
             conversation_id="conversation-a",
-            query="편집 템포와 자막",
+            query="이전 편집 취향",
         )
     )
 
-    assert [item.text for item in memories] == [
-        "자막은 두 줄 이내를 선호합니다.",
+    assert sorted(item.text for item in memories) == [
         "빠른 컷 편집을 선호합니다.",
+        "자막은 두 줄 이내를 선호합니다.",
     ]
 
 
-def test_retrieval_returns_nothing_when_local_store_itself_has_no_eligible_rows() -> None:
-    """폴백은 로컬 원본이 있을 때만 뭔가를 돌려준다 -- 승인·저장된 기억이
-    아예 없으면 게이트웨이가 있어도 없어도 빈 결과가 맞다."""
-    empty_store = _Store([])
-    for gateway in (_Gateway([]), None):
-        service = YujinMemoryService(store=empty_store, gateway=gateway)
-        assert asyncio.run(
-            service.retrieve_approved_memories(
-                project_id="project-a",
-                conversation_id="conversation-a",
-                query="편집 템포",
-            )
-        ) == ()
+def test_retrieval_returns_nothing_when_local_store_has_no_eligible_rows() -> None:
+    service = YujinMemoryService(store=_Store([]))
+    assert asyncio.run(
+        service.retrieve_approved_memories(
+            project_id="project-a",
+            conversation_id="conversation-a",
+            query="편집 템포",
+        )
+    ) == ()
 
 
 @pytest.mark.parametrize(
@@ -444,8 +251,8 @@ def test_retrieval_scans_full_original_prompt_before_truncation(
         external_ref="ext-" + "a" * 64,
         text="빠른 컷 편집을 선호합니다.",
     )
-    gateway = _Gateway([])
-    service = YujinMemoryService(store=_Store([row]), gateway=gateway)
+    store = _Store([row])
+    service = YujinMemoryService(store=store)
 
     assert asyncio.run(
         service.retrieve_approved_memories(
@@ -454,7 +261,7 @@ def test_retrieval_scans_full_original_prompt_before_truncation(
             query=("안전한 편집 요청 " + "가" * 280 + unsafe_suffix),
         )
     ) == ()
-    assert gateway.requests == []
+    assert store.calls == []
 
 
 def test_creator_context_accepts_only_id_free_user_approved_advisory_memories() -> None:
@@ -573,20 +380,19 @@ def test_creator_context_drops_memory_first_at_48kb_boundary() -> None:
     assert attached.media_candidates == original_candidates
 
 
-def test_new_owned_dispatch_searches_once_but_replay_and_unsafe_do_not() -> None:
+def test_new_owned_dispatch_looks_up_once_but_replay_and_unsafe_do_not() -> None:
     """The integration hook must be explicit and fail-open for manual editing."""
-    gateway = _Gateway([])
-    service = YujinMemoryService(
-        store=_Store([
+    store = _Store(
+        [
             _stored(
                 candidate_id="candidate-a",
                 memory_ref="memory-a",
                 external_ref="ext-" + "a" * 64,
                 text="빠른 컷 편집을 선호합니다.",
             )
-        ]),
-        gateway=gateway,
+        ]
     )
+    service = YujinMemoryService(store=store)
 
     # This desired helper is called only from the durable dispatch-owned branch.
     async def exercise():
@@ -615,11 +421,10 @@ def test_new_owned_dispatch_searches_once_but_replay_and_unsafe_do_not() -> None
 
     owned, replay, unsafe = asyncio.run(exercise())
 
-    assert owned == ()
+    assert [item.text for item in owned] == ["빠른 컷 편집을 선호합니다."]
     assert replay == ()
     assert unsafe == ()
-    assert len(gateway.requests) == 1
-    assert gateway.requests[0].query == "새 요청"
+    assert store.calls == [("project-a", "conversation-a")]
 
 
 def test_local_store_projects_only_current_approved_stored_private_rows(

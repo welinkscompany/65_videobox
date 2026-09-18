@@ -29,7 +29,7 @@ def test_a_memory_lookup_failure_says_why_instead_of_looking_empty(
 
     import asyncio
 
-    service = YujinMemoryService(store=_ExplodingStore(), gateway=object())
+    service = YujinMemoryService(store=_ExplodingStore())
 
     with caplog.at_level(logging.WARNING):
         result = asyncio.run(
@@ -74,20 +74,7 @@ def test_a_memory_row_that_will_not_parse_says_so_instead_of_vanishing(
         def list_yujin_memory_retrieval_rows(self, **_kwargs):
             return [good, drifted]
 
-    class _Gateway:
-        async def search_memory(self, request):
-            return {
-                "memories": [
-                    {
-                        "memory_ref": good["memory_ref"],
-                        "text": good["text"],
-                        "category": good["category"],
-                        "external_ref": good["external_ref"],
-                    }
-                ]
-            }
-
-    service = YujinMemoryService(store=_Store(), gateway=_Gateway())
+    service = YujinMemoryService(store=_Store())
 
     with caplog.at_level(logging.WARNING):
         result = asyncio.run(
@@ -129,7 +116,7 @@ def test_the_dropped_memory_report_does_not_repeat_per_row(
         def list_yujin_memory_retrieval_rows(self, **_kwargs):
             return rows
 
-    service = YujinMemoryService(store=_Store(), gateway=object())
+    service = YujinMemoryService(store=_Store())
 
     with caplog.at_level(logging.WARNING):
         assert asyncio.run(
@@ -639,8 +626,6 @@ def test_every_user_path_swallow_point_carries_a_logger() -> None:
         "services/api/src/videobox_api/routers/assets.py",
         "services/api/src/videobox_api/hermes_operational_status.py",
         "services/agent-gateway/src/videobox_agent_gateway/hermes_rpc_client.py",
-        "services/agent-gateway/src/videobox_agent_gateway/memory_gateway.py",
-        "services/agent-gateway/src/videobox_agent_gateway/hermes_memory_adapter.py",
     ):
         source = (root / relative).read_text(encoding="utf-8")
         assert "logging.getLogger" in source, f"{relative} 에 로거가 없다"

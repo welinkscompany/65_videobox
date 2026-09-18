@@ -853,27 +853,18 @@ def test_start_verifies_before_validate_only_exit_and_installs_before_gateway() 
     assert "compose.hermes-yujin.yaml" in source
 
 
-def test_start_treats_memory_adapter_as_best_effort_after_chat() -> None:
+def test_start_no_longer_references_the_removed_memory_adapter() -> None:
+    """2026-09-18에 Mem0/기억 어댑터를 걷어냈다 -- 유진 채팅은 이제 그 컨테이너
+    없이 시작한다(`docs/decisions/2026-09-18-mem0-removed-native-memory-librarian.ko.md`)."""
     source = START_SCRIPT.read_text(encoding="utf-8")
 
-    for required in (
+    for forbidden in (
         "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN",
         "HERMES_MEMORY_ADAPTER_URL",
         "MEM0_API_KEY",
-        "Optional Hermes memory adapter startup failed;",
-        "chat remains available.",
-        "Memory storage is disabled; interactive Yujin chat remains available.",
+        "videobox-hermes-memory-adapter",
     ):
-        assert required in source
-
-    gateway_start = source.index(
-        '-ServiceName "videobox-agent-gateway"'
-    )
-    memory_start = source.index(
-        '-ServiceName "videobox-hermes-memory-adapter"'
-    )
-    assert gateway_start < memory_start
-    assert '--force-recreate' in source[memory_start : memory_start + 300]
+        assert forbidden not in source
     assert (
         'Assert-ResolvedCredential `\n'
         '    "MEM0_API_KEY"'

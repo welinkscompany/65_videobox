@@ -15,7 +15,6 @@ THIS_FILE = Path(__file__)
 CONSUMER_FILES = [
     ROOT / "compose.yaml",
     ROOT / "compose.hermes-yujin.yaml",
-    ROOT / "docker/hermes-memory-adapter.Dockerfile",
     ROOT / "scripts/start-hermes-yujin.ps1",
     ROOT / "scripts/verify-hermes-yujin-runtime.ps1",
     ROOT / "scripts/verify-hermes-yujin-zero-tools.ps1",
