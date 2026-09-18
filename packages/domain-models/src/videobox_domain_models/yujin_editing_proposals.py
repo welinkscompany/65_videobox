@@ -7,6 +7,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_validator
 
+from videobox_domain_models.output_variants import VariantField
+
 
 def _list_to_tuple(value: object) -> object:
     return tuple(value) if type(value) is list else value
@@ -295,6 +297,32 @@ class UnfoldShortFormOperation(_StrictFrozenModel):
     intent: Literal["unfold_short_form"]
 
 
+class ResolveVariantConflictOperation(_StrictFrozenModel):
+    """변형본(가로/세로 전체/세로 하이라이트) 충돌을 마스터 기준으로 다시 맞추거나
+    지금 변형본 값을 그대로 둔다.
+
+    `_SegmentOperation`이 아니다 -- 장면 하나가 아니라 **변형본 전체**에 거는
+    결정이다(자막 글꼴·숏폼 넷과 같은 자리). 화면의 `VariantConflictPanel`
+    단추(`routers/output_variants.py`의 `patch_variant`, `resolve_conflicts`
+    patch)와 **정확히 같은 결정**이라 그 이름을 그대로 쓴다.
+
+    `variant_id`가 필요한 이유: 한 편집본에 가로·세로 전체·(있다면) 세로
+    하이라이트가 동시에 있을 수 있고, 그중 둘 이상이 동시에 충돌 중일 수
+    있다 -- 어느 변형본인지 없으면 지어낼 수밖에 없다. `field`가 `Literal`이
+    아니라 `VariantField`(도메인 모델의 원본 표)를 그대로 쓰는 이유는
+    색감·전환과 같다: 사본을 두면 두 벌이 갈라진다.
+
+    적용은 이 세션 편집(`apply_yujin_editing_proposal`)이 아니라 변형본
+    자원(`output_variants`)에 걸린다 -- 숏폼 넷과 같은 이유로
+    `director_proposals.py`가 이 intent만 골라 다른 경로로 보낸다.
+    """
+
+    intent: Literal["resolve_variant_conflict"]
+    variant_id: str = Field(min_length=1, max_length=256)
+    field: VariantField
+    decision: Literal["keep_local", "rebase_master"]
+
+
 class RenderShortFormOperation(_StrictFrozenModel):
     """숏폼을 완성본으로 뽑는다. 파라미터 없음(위와 같은 이유 -- 어느 변형본을
     뽑을지는 서버가 "지금 걸린 숏폼 하나"로 정한다).
@@ -328,7 +356,8 @@ YujinEditingOperation = Annotated[
     | CreateShortFormOperation
     | RemakeShortFormOperation
     | UnfoldShortFormOperation
-    | RenderShortFormOperation,
+    | RenderShortFormOperation
+    | ResolveVariantConflictOperation,
     Field(discriminator="intent"),
 ]
 
@@ -356,6 +385,7 @@ __all__ = [
     "RemoveImageOverlayOperation",
     "RemoveMediaOperation",
     "ReorderSegmentsOperation",
+    "ResolveVariantConflictOperation",
     "SetCaptionTextOperation",
     "SetCutActionOperation",
     "SetCaptionFontOperation",

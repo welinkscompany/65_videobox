@@ -58,4 +58,13 @@ describe("유진이 한 일 한 줄", () => {
   it("모르는 명령이 와도 화면이 멈추지 않는다", () => {
     expect(summary({ intent: "something_new" })).toBe("편집 항목을 바꿔요.");
   });
+
+  it("변형본 충돌 풀기는 항목·결정을 화면 어휘로 말한다", () => {
+    expect(summary({
+      intent: "resolve_variant_conflict", variant_id: "variant-s1-vertical_full", field: "story", decision: "rebase_master",
+    })).toBe("스토리 충돌을 마스터 기준으로 다시 맞춰요.");
+    expect(summary({
+      intent: "resolve_variant_conflict", variant_id: "variant-s1-vertical_full", field: "crop", decision: "keep_local",
+    })).toBe("자르기(크롭) 충돌에서 지금 이 변형본 값을 그대로 둬요.");
+  });
 });

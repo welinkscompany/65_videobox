@@ -26,8 +26,12 @@ const VARIANT_CONFLICT_REASON_MESSAGES: Record<string, string> = {
 
 /** 표에 없는 항목·사유가 와도 코드를 그대로 보여주지 않는다 -- 아는 것은
  *  구체적으로, 모르는 것은 "무언가 달라졌다"까지만 말한다(`outputFailureMessages.ts`가
- *  이미 쓰는 방식과 같은 방침). */
-function conflictFieldLabel(field: string): string {
+ *  이미 쓰는 방식과 같은 방침).
+ *
+ *  **여기서 내보낸다.** 유진 채팅으로 변형본 충돌을 풀었을 때 완료 목록에
+ *  뭐가 바뀌었는지 적는 자리(`yujinEditingSummary.ts`)가 같은 어휘를 쓴다 --
+ *  이 파일 머리말이 이미 경고한 "같은 어휘를 또 만들지 말라"를 그대로 따른다. */
+export function conflictFieldLabel(field: string): string {
   return VARIANT_CONFLICT_FIELD_LABELS[field] ?? "이 설정";
 }
 

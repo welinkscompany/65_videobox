@@ -564,6 +564,19 @@ def build_director_proposals_router(
                 session_revision=int(session["session_revision"]),
             )
             is not None,
+            # 지금 이 편집본에 딸린 변형본 중 실제로 충돌 중인 것들. 없으면
+            # 유진은 어느 변형본·어느 항목이 충돌 중인지 모른 채 답해야 해서
+            # "채팅으로 변형본 충돌을 풀어줘"가 사실상 늘 막혔다 -- 이 자리가
+            # task_99becf89 인계가 "채팅에 안 실었다"고 남긴 빈자리다.
+            # `ensure_output_variants`(쓰기)가 아니라 `list_output_variants`
+            # (읽기)를 쓴다 -- 이 요청은 컨텍스트를 짓는 자리일 뿐이라, 아직
+            # 한 번도 안 열어 본 편집본에 변형본을 새로 만들 이유가 없다.
+            variant_conflicts=tuple(
+                (str(variant_row["variant_id"]), str(variant_row["kind"]), str(conflict["field"]))
+                for variant_row in store.list_output_variants(project_id=project_id, session_id=session_id)
+                for conflict in (variant_row.get("conflicts") or [])
+                if isinstance(conflict, dict) and str(conflict.get("field") or "").strip()
+            ),
         )
         result = YujinEditingProposalService(request.app.state.local_only_runtime_service_factory(store)).create(
             project_id=project_id, instruction=body.instruction, context=context
@@ -694,6 +707,14 @@ def build_director_proposals_router(
                     proposal_id=proposal_id, expected_session_revision=body.expected_revision,
                     intent=first_intent,
                 )
+            # **변형본 충돌 풀기도 세션을 안 건드린다** -- 숏폼 넷과 같은 이유다.
+            # `_validate_current_targets`(생성 단계)가 이미 "전부 같은
+            # variant_id를 가리키는 resolve_variant_conflict만 섞인다"를
+            # 확인했으므로, 여기서는 그 intent가 맞는지만 보고 가른다.
+            if first_intent == "resolve_variant_conflict":
+                return _apply_variant_conflict_resolution_from_chat(
+                    project_id=project_id, proposal_id=proposal_id, operations=editing.operations,
+                )
             updated = apply_yujin_editing_proposal(session=session, proposal=editing)
             return store.update_editing_session(project_id=project_id, session_id=session_id, session_payload=updated, expected_revision=body.expected_revision)
         except HTTPException:
@@ -785,6 +806,54 @@ def build_director_proposals_router(
             "status": "short_form_unfolded", "variant": saved,
             "editing_session": unfolded["editing_session"], "notice": UNFOLD_INDEPENDENCE_RULE,
         }
+
+    def _apply_variant_conflict_resolution_from_chat(
+        *, project_id: str, proposal_id: str, operations: tuple,
+    ) -> dict:
+        """채팅으로 낸 `resolve_variant_conflict`를 화면 단추와 **같은 적용기**로 민다.
+
+        화면 단추 경로(`routers/output_variants.py`의 `patch_variant`)와 정확히
+        같은 세 걸음이다: 지금 변형본을 읽고, `apply_variant_patch`로 충돌을
+        지우고, 저장소에 쓴다. 다른 점은 마지막 걸음뿐이다 -- 여기서는 이
+        채팅이 만든 `DirectorProposal`(`proposal_id`)도 같이 소진해야 하므로
+        `store.update_output_variant` 대신 숏폼 넷과 같은
+        `store.apply_director_variant_proposal_transaction`을 쓴다(그래야 같은
+        제안을 두 번 적용할 수 없다).
+
+        `_validate_current_targets`(생성 단계)가 이미 모든 operation이 같은
+        `variant_id`를 가리키는 것을 확인했으므로 여기서는 첫 값을 그대로 쓴다.
+        """
+        variant_id = operations[0].variant_id
+        try:
+            current_row = store.get_output_variant(project_id=project_id, variant_id=variant_id)
+        except KeyError as exc:
+            raise ValueError("output_variant_missing") from exc
+        current = output_variant_from_row(current_row)
+        expected_variant_revision = current.variant_revision
+        resolve_conflicts = {operation.field: operation.decision for operation in operations}
+        # `vertical_full`이 `story`/`segment_order` 충돌을 `rebase_master`로 풀 때만
+        # 마스터 장면 목록을 읽는다 -- 단추 경로(`routers/output_variants.py`의
+        # `patch_variant`)와 정확히 같은 이유다: 안 읽으면 충돌 딱지만 지워지고
+        # 렌더는 여전히 `vertical_full_segment_order_or_membership_changed`로
+        # 막힌다(2026-09-17에 단추 경로에서 실제로 겪은 결함과 같은 종류. 채팅
+        # 경로에서도 같은 함정에 다시 걸리지 않으려면 이 줄을 빼먹으면 안 된다).
+        current_master_segment_ids = None
+        if current.kind == "vertical_full":
+            master_session = store.get_editing_session(
+                project_id=project_id, session_id=current.source_session_id
+            )
+            current_master_segment_ids = segment_ids_from_master(master_session.get("segments", []))
+        updated = apply_variant_patch(
+            current,
+            {"resolve_conflicts": resolve_conflicts},
+            expected_variant_revision=expected_variant_revision,
+            current_master_segment_ids=current_master_segment_ids,
+        )
+        variant = store.apply_director_variant_proposal_transaction(
+            project_id=project_id, proposal_id=proposal_id, variant_id=variant_id,
+            expected_variant_revision=expected_variant_revision, variant=updated,
+        )
+        return {"status": "variant_conflict_resolved", "variant": variant}
 
     @router.get("/api/projects/{project_id}/director/sessions/{session_id}/reload")
     def reload_session(project_id: str, session_id: str) -> dict:

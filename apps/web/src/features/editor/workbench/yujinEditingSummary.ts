@@ -16,6 +16,7 @@ import { frameFitLabel } from "../inspector/frameFits";
 import { photoMotionLabel } from "../inspector/photoMotions";
 import { sceneFilterLabel } from "../inspector/sceneFilters";
 import { sceneTransitionLabel } from "../inspector/sceneTransitions";
+import { conflictFieldLabel } from "../variants/VariantConflictPanel";
 import {
   OVERLAY_HORIZONTAL_LABELS,
   OVERLAY_SIZE_LABELS,
@@ -83,6 +84,17 @@ export function yujinEditingOperationSummary(operation: YujinEditingOperation): 
   if (operation.intent === "set_scene_transform") {
     const fitted = typeof operation.fit === "string" ? frameFitLabel(operation.fit) : null;
     return fitted ? `화면 맞춤을 ${fitted}로 바꿔요.` : "화면 맞춤을 바꿔요.";
+  }
+  // 변형본(가로/세로 전체/세로 하이라이트) 충돌 풀기 -- `VariantConflictPanel`
+  // 단추와 같은 어휘(`conflictFieldLabel`)로 말한다. `충돌을`/`충돌에서`
+  // 자리에만 고정 명사(충돌)를 붙여 조사(을/를)가 항목 이름에 따라 안
+  // 어긋나게 한다(다른 항목들처럼 "{항목}을(를)" 자리에 넣으면 받침 유무에
+  // 따라 조사가 깨진다).
+  if (operation.intent === "resolve_variant_conflict") {
+    const fieldName = typeof operation.field === "string" ? conflictFieldLabel(operation.field) : "이 설정";
+    return operation.decision === "keep_local"
+      ? `${fieldName} 충돌에서 지금 이 변형본 값을 그대로 둬요.`
+      : `${fieldName} 충돌을 마스터 기준으로 다시 맞춰요.`;
   }
   return "편집 항목을 바꿔요.";
 }

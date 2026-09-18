@@ -25,6 +25,7 @@ from videobox_domain_models.yujin_editing_proposals import (
     RemakeShortFormOperation,
     RenderShortFormOperation,
     ReorderSegmentsOperation,
+    ResolveVariantConflictOperation,
     SetCaptionFontOperation,
     SetImageOverlayOperation,
     SetPhotoMotionOperation,
@@ -130,6 +131,14 @@ class YujinEditingContext:
     #: `render_short_form`을 쓰면 거절되고, `True`인데 `create_short_form`을
     #: 쓰면 거절된다.
     has_short_form_variant: bool = False
+    #: 지금 이 편집본에 딸린 변형본(가로·세로 전체·세로 하이라이트) 중 실제로
+    #: 충돌 중인 것들 -- `(variant_id, kind, field)` 세 값 튜플.
+    #: `resolve_variant_conflict`가 지어낸 `variant_id`·`field`를 받지 않게
+    #: 막는 목록이다(다른 "목록과 지금 값은 한 쌍" 필드들과 같은 이유,
+    #: task_99becf89 인계가 "채팅에 안 실었다"고 남긴 빈자리를 채운다).
+    #: 여기 없는 (variant_id, field) 조합은 애초에 충돌이 아니므로 풀 것도
+    #: 없다 -- 지어내지 말고 되물어야 한다.
+    variant_conflicts: tuple[tuple[str, str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -204,9 +213,32 @@ def _validate_current_targets(proposal: YujinEditingProposal, context: YujinEdit
     current_segment_ids = set(context.segment_ids)
     if len(current_segment_ids) != len(context.segment_ids) or not current_segment_ids:
         return "invalid_current_context"
+    # **변형본 충돌 풀기는 세그먼트 편집과 섞이지 않는다** -- 숏폼 넷과 같은
+    # 이유다(그 항목 주석 참고). 한 변형본을 가리켜야 하므로, 여러 개를
+    # 실었으면 전부 같은 `variant_id`여야 한다 -- 다르면 어느 판을 적용할지
+    # 정할 근거가 없다.
+    resolve_conflict_ops = [
+        operation for operation in proposal.operations if isinstance(operation, ResolveVariantConflictOperation)
+    ]
+    if resolve_conflict_ops and len(resolve_conflict_ops) != len(proposal.operations):
+        return "variant_conflict_resolution_must_be_alone"
+    if len({operation.variant_id for operation in resolve_conflict_ops}) > 1:
+        return "variant_conflict_resolution_must_target_one_variant"
+    current_variant_conflicts = set(
+        (variant_id, field) for variant_id, _kind, field in context.variant_conflicts
+    )
     operation_targets: set[tuple[str, ...]] = set()
     for operation in proposal.operations:
-        if isinstance(
+        if isinstance(operation, ResolveVariantConflictOperation):
+            # **지어낸 변형본·필드를 여기서 막는다** -- 색감·전환과 같은 이유다.
+            # 목록에 없는 조합은 애초에 충돌이 아니므로 풀 것도 없고, 그대로
+            # 통과시키면 적용 단계(`apply_variant_patch`)가
+            # `unknown_variant_conflict:{field}`로 늦게 막아 창작자에게는
+            # "적용하지 못했어요"만 남는다.
+            if (operation.variant_id, operation.field) not in current_variant_conflicts:
+                return "variant_conflict_not_current"
+            key = (operation.intent, operation.variant_id, operation.field)
+        elif isinstance(
             operation,
             (CreateShortFormOperation, RemakeShortFormOperation, UnfoldShortFormOperation, RenderShortFormOperation),
         ):

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import re
+from typing import get_args
 
 from videobox_core_engine.caption_translation import SUPPORTED_CAPTION_LANGUAGES
 from videobox_core_engine.media_controls import (
@@ -26,6 +27,7 @@ from videobox_domain_models.caption_style import (
     MAX_CAPTION_FONT_SIZE_PX,
     MIN_CAPTION_FONT_SIZE_PX,
 )
+from videobox_domain_models.output_variants import VariantField
 from videobox_core_engine.yujin_editing_proposal_adapter import (
     YujinEditingContext,
     YujinEditingResult,
@@ -72,6 +74,11 @@ _EDITING_OPERATION_SCHEMA = {
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "remake_short_form"}}, "required": ["intent"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "unfold_short_form"}}, "required": ["intent"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "render_short_form"}}, "required": ["intent"]},
+        # 변형본(가로/세로 전체/세로 하이라이트) 충돌 풀기. 장면이 아니라
+        # 변형본 전체에 거는 결정이라 숏폼 넷과 같은 자리에 산다. `variant_id`·
+        # `field`는 반드시 `_variant_conflict_catalogue`가 보여 주는 지금
+        # 충돌 목록에 있는 값이어야 한다 -- 지어내면 검증기가 막는다.
+        {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "resolve_variant_conflict"}, "variant_id": {"type": "string"}, "field": {"enum": sorted(get_args(VariantField))}, "decision": {"enum": ["keep_local", "rebase_master"]}}, "required": ["intent", "variant_id", "field", "decision"]},
     ]
 }
 
@@ -481,6 +488,50 @@ def _short_form_catalogue(context: YujinEditingContext) -> str:
     )
 
 
+#: 변형본 종류를 사람이 아는 말로. 화면의 `VariantConflictPanel`이 쓰는 것과
+#: 같은 말이다 -- 유진과 화면이 다른 이름을 쓰면 창작자가 답을 못 알아듣는다.
+_VARIANT_KIND_LABELS: dict[str, str] = {
+    "horizontal": "가로", "vertical_full": "세로 전체", "vertical_highlight": "세로 하이라이트(숏폼)",
+}
+
+#: 충돌 항목 이름을 사람이 아는 말로. `VariantField`가 원본이고, 여기서는
+#: 부르는 말만 붙인다 -- 색감·전환과 같은 이유로 값 목록의 사본을 만들지 않는다.
+_VARIANT_CONFLICT_FIELD_LABELS: dict[str, str] = {
+    "crop": "크롭(화면 자르기)", "focal": "초점", "caption": "자막 배치", "safe_area": "안전 영역",
+    "audio": "소리", "layout": "레이아웃(제목 띠)", "story": "스토리(장면 구성)", "segment_order": "장면 순서",
+}
+
+
+def _variant_conflict_catalogue(context: YujinEditingContext) -> str:
+    """지금 충돌 중인 변형본·항목. **이게 없으면 유진은 어느 변형본, 어느 항목이
+    충돌 중인지 모른 채 답해야 한다** -- 그러면 "가로 변형에서 스토리 충돌을
+    마스터 기준으로 맞춰줘"에 되묻거나(모호해서) 지어낸 `variant_id`로 답해
+    `variant_conflict_not_current`로 막힌다. 색감·전환·전 목록들과 같은 함정을
+    막는다(task_99becf89 인계가 "채팅에 안 실었다"고 남긴 빈자리).
+    """
+    if not context.variant_conflicts:
+        return (
+            "지금 충돌 중인 변형본은 없다 -- resolve_variant_conflict를 쓸 대상이 없다. "
+            "변형본 충돌을 풀어 달라는 요청을 들으면 지금은 충돌이 없다고 답한다."
+        )
+    entries = ", ".join(
+        f"{variant_id}({_VARIANT_KIND_LABELS.get(kind, kind)}, "
+        f"{_VARIANT_CONFLICT_FIELD_LABELS.get(field, field)} 충돌)"
+        for variant_id, kind, field in context.variant_conflicts
+    )
+    return (
+        f"지금 충돌 중인 변형본: {entries}. "
+        "'가로/세로 변형에서 마스터 기준으로 다시 맞춰줘', '이 변형은 지금 그대로 둬'처럼 "
+        "변형본 충돌을 풀어 달라는 요청에는 resolve_variant_conflict를 쓴다 -- "
+        "variant_id와 field는 반드시 위 목록에 있는 값만 쓴다(지어내면 거절된다). "
+        "마스터(원본 편집본) 기준으로 다시 맞추라는 뜻이면 decision=rebase_master, "
+        "지금 이 변형본에 있는 값을 그대로 두라는 뜻이면 decision=keep_local. "
+        "어느 변형본인지, 어느 항목인지 창작자 말에서 분명하지 않으면 지어내지 말고 "
+        "위 목록을 보여주며 되물어라. 한 요청에서 여러 항목을 동시에 풀어 달라고 하면 "
+        "resolve_variant_conflict를 여러 개 내되, 전부 같은 variant_id를 가리켜야 한다."
+    )
+
+
 def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
     success_example = {
         "schema_version": "videobox.yujin-editing-response.v1",
@@ -539,7 +590,10 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         "remove_image_overlay(얹은 사진·영상을 뺀다), "
         "remove_media(깔아 둔 영상·음악·효과음을 뺀다 -- \"음악 빼줘\"가 이것이다), "
         "create_short_form(숏폼을 처음 만든다), remake_short_form(이미 있는 숏폼을 다시 만든다), "
-        "unfold_short_form(숏폼을 따로 편집할 수 있게 펼친다), render_short_form(숏폼을 완성본으로 뽑는다)뿐이다. 요청이 모호하거나 안전한 후보를 만들 수 없으면 proposal은 null로 둔다. "
+        "unfold_short_form(숏폼을 따로 편집할 수 있게 펼친다), render_short_form(숏폼을 완성본으로 뽑는다), "
+        "resolve_variant_conflict(변형본 충돌을 마스터 기준으로 맞추거나 지금 값을 그대로 둔다 -- "
+        "\"가로/세로 변형이 마스터랑 달라요\", \"충돌 마스터 기준으로 맞춰줘\"가 이것이다)뿐이다. "
+        "요청이 모호하거나 안전한 후보를 만들 수 없으면 proposal은 null로 둔다. "
         # 실사용(2026-09-01)으로 잡힌 결함: "3번째 장면을 빼줘"를 `remove_media`로
         # 읽어 그 장면에 깔아 둔 B-roll만 지웠다. 창작자가 뜻한 것은 장면 자체를
         # 완성본에서 빼는 것이었다. 한국어 "빼다"는 둘 다 되므로 어느 쪽인지를
@@ -566,6 +620,7 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         f"{_caption_font_catalogue(context)} "
         f"{_image_overlay_catalogue(context)} "
         f"{_short_form_catalogue(context)} "
+        f"{_variant_conflict_catalogue(context)} "
         # 이 셋도 화면이 깔린 장면에만 걸 수 있다(색감과 같은 이유). 소리 정리는
         # 그 장면에 음악·효과음이 있어야 한다.
         "손떨림 보정·화면 노이즈는 set_picture_cleanup, 화면 맞춤·확대·위치·기울이기는 set_scene_transform이고 "
