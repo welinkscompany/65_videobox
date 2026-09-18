@@ -36,6 +36,19 @@ $composeFile = Join-Path $repositoryRoot "compose.yaml"
 $yujinMemoryComposeFile = Join-Path $repositoryRoot "compose.hermes-yujin.yaml"
 # 기본 스택은 compose.yaml 하나다. -WithYujinMemory 를 줬을 때만 Mem0 경로를 얹는다.
 $composeFileArguments = @("-f", $composeFile)
+# `compose.yaml`의 `name: 65_videobox`는 고정이라, 에이전트가 임시로 만드는
+# worktree(`.claude/worktrees/agent-*`)에서 그대로 돌리면 프로젝트 이름이 겹쳐
+# 지금 실사용 중인 스택을 덮어쓴다(2026-09-18 실제 사고 -- 포트 5173 스택이
+# 잠깐 내려갔다). 메인 체크아웃과 공식 활성 worktree(`.worktrees/videobox-
+# container-compatibility`)는 그대로 `65_videobox`를 쓰게 두고(기존 컨테이너
+# 이름·문서·스크립트가 이 이름을 그대로 참조한다), 일회성 에이전트 worktree일
+# 때만 폴더 이름 기반으로 자동 격리한다 -- 에이전트가 매번 COMPOSE_PROJECT_NAME을
+# 직접 챙기지 않아도 되게.
+if ($repositoryRoot -match '[\\/]\.claude[\\/]worktrees[\\/]agent-') {
+    $worktreeSlug = (Split-Path -Leaf $repositoryRoot) -replace '[^a-zA-Z0-9_-]', '-'
+    $composeProjectName = ("videobox-wt-$worktreeSlug").ToLowerInvariant()
+    $composeFileArguments = @("-p", $composeProjectName) + $composeFileArguments
+}
 $composeProfileArguments = @()
 if ($WithYujinMemory) {
     $composeFileArguments += @("-f", $yujinMemoryComposeFile)
