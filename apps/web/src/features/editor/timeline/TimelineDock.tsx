@@ -27,6 +27,14 @@ const LANE_HEIGHT_PX = 32;
  *  두 벌이 어긋나면 눌러도 422로 거절되는 단추가 생긴다. */
 const HIDEABLE_LANES = new Set<TimelineLane>(["broll", "overlay", "caption"]);
 const MUTABLE_LANES = new Set<TimelineLane>(["narration", "broll", "bgm", "sfx"]);
+/** 트랙 이름표·잠금·눈·음소거 뭉치가 실제로 차지하는 가로 폭의 넉넉한 상한이다
+ *  (실측: 내레이션 108px, 영상 최대 170px -- 2026-09-18 실물 재현). 컷 편집을 하면
+ *  0초 근처에 이 폭보다 짧은 클립이 남을 수 있다 -- 그러면 이 뭉치가 트랙 이름·
+ *  잠금·음소거 위에 **떠 있어야 한다**는 2026-09-03 원칙과, 그 클립을 실제로
+ *  고를 수 있어야 한다는 원칙이 같은 자리에서 부딪힌다. 그 자리에 걸린 클립이
+ *  없을 때만 뭉치가 클릭을 받고, 걸려 있으면 그 트랙만 양보한다(아래
+ *  `laneNeedsClipAccess`) -- 키보드 접근은 그대로 둔다, 마우스 클릭만 넘긴다. */
+const LANE_HEADER_DEAD_ZONE_PX = 180;
 const SNAP_THRESHOLD_PX = 8;
 /** 한 번에 얼마나 늘리고 줄이는가. `navigationKeyAction`의 기본값과 같은 값이고,
  *  단추·키·전체 보기가 전부 이 한 값을 본다. */
@@ -501,11 +509,21 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     return () => surface.removeEventListener("wheel", onWheel);
   }, []);
   const selectClip = (rect: ClipRect, additive = false) => {
+    // **실물 데이터는 clipId가 겹칠 수 있다**(2026-09-18 실물 재현, project
+    // 0907-b26195af: 오버레이 다섯 개가 `overlay:export-overlay-timeline_001:001-0`
+    // 하나를 같이 썼다 -- 내보내기 겹쳐얹기가 남긴 자투리로 보인다). `classifyTimelineHit`는
+    // clipId 중복을 프로그래밍 실수로 보고 즉시 던진다(`hit-testing.ts`
+    // `requireInput`) -- 맞는 전제지만, 오버레이 한 자리의 데이터 흠 때문에
+    // **내레이션을 포함한 타임라인 전체의 고르기가 통째로 죽었다**(모든 클릭이
+    // 콘솔 `RangeError: Rect clipIds must be unique`로 조용히 실패, 트림 손잡이가
+    // 영영 안 뜨는 것처럼 보인 진짜 원인). 여기서 겹치는 자리를 하나로 좁혀 두면
+    // 고르기 자체는 살아 있고, 겹친 자리의 데이터 흠은 별도로 고쳐야 한다.
+    const dedupedRects = Array.from(new Map(rects.map((item) => [item.clipId, item])).values());
     const hit = classifyTimelineHit({
       point: { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 },
       lane: rect.lane,
       edgeHandlePx: 1,
-      rects: rects.map((item) => ({ ...item, zIndex: 0 })),
+      rects: dedupedRects.map((item) => ({ ...item, zIndex: 0 })),
     });
     if (hit.kind === "body") {
       dispatch({ type: "select", clipId: hit.clipId });
@@ -908,8 +926,18 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
             "영상"이 "경상"처럼 보이는 식으로 글자가 뭉개졌다(2026-09-17
             화면 점검 실측 -- 폭이 좁아서가 아니라 두 층이 겹쳐서였다, DOM은
             글자 전체를 이미 담고 있었다). */}
-        {TIMELINE_LANES.map((lane) => <div key={lane} aria-label={laneLabel[lane]} role="listitem" style={{ height: `${LANE_HEIGHT_PX}px`, borderTop: "1px solid currentColor", position: "relative", zIndex: 4, pointerEvents: "none" }}>
-          <span style={{ pointerEvents: "auto" }}>{laneLabel[lane]}</span>
+        {TIMELINE_LANES.map((lane) => {
+          // **컷 편집으로 이 뭉치 폭보다 짧은 클립이 0초 근처에 남으면 뭉치가
+          // 양보한다**(2026-09-18 실물 재현: "내레이션 1번째 장면, 0초부터"의
+          // 중심점을 눌러도 클립이 아니라 "내레이션 트랙 음소거"가 대신 눌렸다).
+          // 이 트랙에 걸린 클립이 없으면 그대로 위에 뜬다 -- 2026-09-03 원칙은
+          // 유지한다.
+          const laneNeedsClipAccess = draftProjection.rects.some((rect) => rect.lane === lane && rect.x < LANE_HEADER_DEAD_ZONE_PX);
+          const clusterPointerEvents: "auto" | "none" = laneNeedsClipAccess ? "none" : "auto";
+          return <div key={lane} aria-label={laneLabel[lane]} role="listitem" style={{ height: `${LANE_HEIGHT_PX}px`, borderTop: "1px solid currentColor", position: "relative", zIndex: 4, pointerEvents: "none" }}>
+          {/* 이름표는 누를 곳이 아니다 -- 핸들러가 없다. `pointerEvents:"auto"`를
+              얹으면 읽는 것 말고 아무 일도 안 하면서 클립 클릭만 가로챈다. */}
+          <span>{laneLabel[lane]}</span>
           {/* **잠금 · 눈 · 음소거**(`capcut-observed` 기록 §2: "트랙마다 왼쪽에
               잠금 · 눈 · 음소거 · `···`"). 셋의 성격이 다르다 --
               **잠금**은 화면 안에서만 쓰는 것이라 여기 상태로 끝나고(새로고침하면
@@ -919,7 +947,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
           <button
             type="button"
             data-native-control="timeline-lane-lock"
-            style={{ pointerEvents: "auto" }}
+            style={{ pointerEvents: clusterPointerEvents }}
             aria-label={`${laneLabel[lane]} 트랙 잠금`}
             aria-pressed={lockedLanes.has(lane)}
             onClick={() => toggleLaneLock(lane)}
@@ -931,7 +959,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
           {HIDEABLE_LANES.has(lane) ? <button
             type="button"
             data-native-control="timeline-lane-hidden"
-            style={{ pointerEvents: "auto" }}
+            style={{ pointerEvents: clusterPointerEvents }}
             aria-label={`${laneLabel[lane]} 트랙 숨기기`}
             aria-pressed={hiddenLanes.has(lane)}
             disabled={!onUpdateTrackStates || isSaving}
@@ -942,7 +970,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
           {MUTABLE_LANES.has(lane) ? <button
             type="button"
             data-native-control="timeline-lane-muted"
-            style={{ pointerEvents: "auto" }}
+            style={{ pointerEvents: clusterPointerEvents }}
             aria-label={`${laneLabel[lane]} 트랙 음소거`}
             aria-pressed={mutedLanes.has(lane)}
             disabled={!onUpdateTrackStates || isSaving}
@@ -950,7 +978,8 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
           >
             {mutedLanes.has(lane) ? <VolumeX aria-hidden="true" size={14} /> : <Volume2 aria-hidden="true" size={14} />}
           </button> : null}
-        </div>)}
+        </div>;
+        })}
       </div>
       <div aria-label="타임라인 클립" role="group" style={{ inset: 0, position: "absolute" }}>
         {draftProjection.rects.map((rect) => {

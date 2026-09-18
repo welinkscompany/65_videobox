@@ -63,6 +63,56 @@ const twoNarrationView: EditorViewModel = {
   ],
 };
 
+/** 내레이션 트랙 버튼 뭉치(`LANE_HEADER_DEAD_ZONE_PX`)보다 오른쪽에서 시작하는
+ *  클립 하나. `viewportWidthPx=400`·`durationSec=20`이면 20px/초라 10초는
+ *  200px -- 뭉치 폭 180px보다 바깥이다. "버튼이 평소엔 뜬다"는 일반 규칙을 재는
+ *  자리라 일부러 죽은 자리를 피해서 만든다. */
+const narrationAfterDeadZoneView: EditorViewModel = {
+  ...view,
+  tracks: [
+    { trackId: "n", role: "narration", clips: [{ clipId: "n-late", segmentId: "segment-1", type: "narration", assetId: null, assetUri: null, startSec: 10, endSec: 15, controls: {} }] },
+  ],
+  captions: [],
+  gaps: [],
+};
+
+/** **컷 편집 직후의 실제 모양**(2026-09-18 실물 재현: project 0907-b26195af).
+ *  영상(broll) 트랙 0초 자리에 0.3초짜리 자투리 클립이 남는다 -- 자르기를 하면
+ *  흔히 생기는 모양이고, 실제로 트랙 음소거 버튼이 이 클립의 클릭을 가로챘다.
+ *  오버레이는 15초부터라 뭉치 폭 밖 -- "클립이 없으면 그대로 뜬다"는 대조군이다. */
+const cutEditedBrollView: EditorViewModel = {
+  ...view,
+  tracks: [
+    { trackId: "n", role: "narration", clips: [{ clipId: "n-1", segmentId: "segment-1", type: "narration", assetId: null, assetUri: null, startSec: 0, endSec: 5, controls: {} }] },
+    { trackId: "b", role: "broll", clips: [
+      { clipId: "b-cut-1", segmentId: "segment-2", type: "broll", assetId: null, assetUri: null, startSec: 0, endSec: 0.3, controls: {} },
+      { clipId: "b-cut-2", segmentId: "segment-4", type: "broll", assetId: null, assetUri: null, startSec: 0.3, endSec: 9, controls: {} },
+    ] },
+    { trackId: "o", role: "overlay", clips: [{ clipId: "o-late", segmentId: "segment-3", type: "overlay", assetId: null, assetUri: null, startSec: 15, endSec: 18, controls: {} }] },
+  ],
+  captions: [],
+  gaps: [],
+};
+
+/** **2026-09-18 실물 재현** (project 0907-b26195af, 사진 브이로그 실기 0907):
+ *  오버레이 다섯 개가 `placementId`(=clipId) `overlay:export-overlay-
+ *  timeline_001:001-0` 하나를 같이 쓰고 있었다 -- 내보내기 겹쳐얹기가 남긴
+ *  자투리로 보인다. 이 중복이 `classifyTimelineHit`의 "clipId는 겹치면 안
+ *  된다" 전제(`hit-testing.ts` `requireInput`)를 깨서, 콘솔에
+ *  `RangeError: Rect clipIds must be unique`가 나며 **내레이션을 포함한
+ *  타임라인 전체의 클릭 고르기가 통째로 죽었다** -- 트림 손잡이가 영영 안 뜨는
+ *  것처럼 보인 진짜 원인이었다(dead-zone과는 별개 결함).*/
+const duplicateOverlayPlacementView: EditorViewModel = {
+  ...view,
+  tracks: [
+    { trackId: "n", role: "narration", clips: [{ clipId: "n-1", segmentId: "segment-1", type: "narration", assetId: null, assetUri: null, startSec: 0, endSec: 5, controls: {} }] },
+    { trackId: "o1", role: "overlay", clips: [{ clipId: "o-a", segmentId: "segment-3", type: "overlay", assetId: null, assetUri: null, startSec: 6, endSec: 8, controls: {}, placementId: "overlay:dup" }] },
+    { trackId: "o2", role: "overlay", clips: [{ clipId: "o-b", segmentId: "segment-4", type: "overlay", assetId: null, assetUri: null, startSec: 10, endSec: 12, controls: {}, placementId: "overlay:dup" }] },
+  ],
+  captions: [],
+  gaps: [],
+};
+
 const offsetNarrationView: EditorViewModel = {
   ...view,
   tracks: [
@@ -260,6 +310,17 @@ describe("TimelineDock", () => {
     expect(end).toHaveStyle({ position: "absolute", right: "0", top: "0" });
     expect(reorder).toHaveAttribute("data-reorder-control", "true");
     expect(reorder).toHaveStyle({ position: "absolute", left: "33.333%", width: "33.334%" });
+  });
+
+  it("겹치는 clipId을 가진 다른 레인이 있어도 내레이션 클립을 고르고 트림 손잡이를 볼 수 있다 (2026-09-18 실물 재현)", () => {
+    const onSelectSegment = vi.fn();
+    render(<TimelineDock onSelectSegment={onSelectSegment} view={duplicateOverlayPlacementView} viewportWidthPx={400} />);
+
+    // 오버레이 레인에 clipId가 겹치는 클립 둘이 있어도 던지지 않는다 -- 던지면
+    // 그 어떤 클립도(내레이션 포함) 고를 수 없다.
+    expect(() => selectTimelineClip("n-1")).not.toThrow();
+    expect(onSelectSegment).toHaveBeenCalledWith("segment-1");
+    expect(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" })).toBeInTheDocument();
   });
 
   it("renders mutation controls only for the selected narration clip", () => {
@@ -625,7 +686,7 @@ describe("TimelineDock", () => {
     expect(screen.getByRole("group", { name: "타임라인 클립" })).not.toBe(laneList);
   });
 
-  it("트랙 이름과 잠금·눈·음소거가 클립에 가리지 않는다", () => {
+  it("트랙 이름과 잠금·눈·음소거가 클립에 가리지 않는다 (죽은 자리에 클립이 없을 때)", () => {
     // **2026-09-03 실측:** 클립 층은 트랙 전체를 `inset: 0`으로 덮는다. 고정 트랙
     // 줄이 그 아래 깔려 있어서, 0초에서 시작하는 클립이 있으면 트랙 이름과 버튼이
     // 통째로 가려졌다 -- 클립 배경이 불투명이라 **보이지도 않고**, 누르면 버튼이
@@ -634,15 +695,49 @@ describe("TimelineDock", () => {
     // jsdom은 자리를 계산하지 않아 "가려졌다"를 직접 잴 수 없다. 그래서 가리지
     // 않게 하는 두 조건을 지킨다: 클립 층보다 위에 있을 것, 그리고 빈 자리는
     // 통과시켜 이번엔 반대로 클립을 못 누르는 일이 없을 것.
-    render(<TimelineDock view={view} viewportWidthPx={400} />);
+    //
+    // 이 클립은 일부러 뭉치 폭(`LANE_HEADER_DEAD_ZONE_PX`) 밖에서 시작한다 --
+    // 죽은 자리에 클립이 걸렸을 때 버튼이 양보하는 반대 시나리오는 아래
+    // "컷 편집으로 짧게 남은 클립" 시험이 따로 잰다(2026-09-18).
+    render(<TimelineDock view={narrationAfterDeadZoneView} viewportWidthPx={400} />);
 
     const laneRow = screen.getByRole("list", { name: "고정 트랙" }).children[0] as HTMLElement;
     expect(Number(laneRow.style.zIndex)).toBeGreaterThan(0);
     expect(laneRow.style.pointerEvents).toBe("none");
+    // 이름표는 누를 곳이 아니라 클릭을 가로챌 이유가 없다 -- 2026-09-18 실물
+    // 재현에서 이름표까지 auto라 죽은 자리를 넓히고 있었다.
+    expect(screen.getByText("내레이션").style.pointerEvents).not.toBe("auto");
 
     for (const name of ["내레이션 트랙 잠금", "내레이션 트랙 음소거"]) {
       expect(screen.getByRole("button", { name }).style.pointerEvents).toBe("auto");
     }
+  });
+
+  it("컷 편집으로 0초 근처에 짧게 남은 클립이 있으면 그 트랙 버튼이 클릭을 양보한다", () => {
+    // **2026-09-18 실물 재현** (project 0907-b26195af, 사진 브이로그 실기 0907):
+    // "내레이션 1번째 장면, 0초부터" 클립 버튼 자신의 중심점에서
+    // `document.elementFromPoint`를 부르면 클립이 아니라 "내레이션 트랙 음소거"
+    // 버튼이 돌아왔다. jsdom은 실제 겹침을 못 재므로, 대신 이 트랙의 버튼 뭉치가
+    // 더 이상 클릭을 받지 않는지(구조적 대리 지표, 2026-09-03 시험과 같은 방식)를
+    // 잰다.
+    render(<TimelineDock view={cutEditedBrollView} viewportWidthPx={400} />);
+
+    // 내레이션(0~5초)과 영상(0~0.3초, 컷으로 남은 자투리)은 둘 다 0초에 걸려
+    // 있다 -- 두 트랙 다 버튼이 양보해야 한다.
+    for (const name of ["내레이션 트랙 잠금", "내레이션 트랙 음소거"]) {
+      expect(screen.getByRole("button", { name }).style.pointerEvents).not.toBe("auto");
+    }
+    for (const name of ["영상 트랙 잠금", "영상 트랙 숨기기", "영상 트랙 음소거"]) {
+      expect(screen.getByRole("button", { name }).style.pointerEvents).not.toBe("auto");
+    }
+    // 오버레이는 15초부터라 뭉치 폭 밖 -- 대조군으로 그대로 눌린다.
+    for (const name of ["오버레이 트랙 잠금", "오버레이 트랙 숨기기"]) {
+      expect(screen.getByRole("button", { name }).style.pointerEvents).toBe("auto");
+    }
+    // 클립을 실제로 고를 수 있어야 한다는 것이 이 수정의 목적이다 -- 뭉치가
+    // 양보하는 동안 클립 select 버튼은 평소와 똑같이 동작한다.
+    selectTimelineClip("b-cut-1");
+    expect(timelineClipSelection("b-cut-1")).toHaveAttribute("aria-pressed", "true");
   });
 
   it("locks a track so its clips cannot be trimmed or moved until unlocked again", () => {
