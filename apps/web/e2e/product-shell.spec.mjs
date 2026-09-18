@@ -29,7 +29,12 @@ test("local catalog renders the creator shell without an external request", asyn
 
   await expect(page.getByRole("button", { name: "작업 상태" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "어떻게 시작할까요?" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "전체 메뉴" })).toBeVisible();
+  // "전체 메뉴"(접힌 단추)는 `home` 화면에는 더 이상 없다(owner 지시
+  // 2026-09-05, `docs/decisions/2026-09-05-one-way-to-start.ko.md`가 가리키는
+  // `SideNav` 상시 세로 메뉴로 대체됐다 -- 캡컷처럼 자료실·촬영본 정리가 한
+  // 번 더 접히지 않고 첫 화면에 상시 보인다). 접힌 메뉴는 단계 화면(이야기·
+  // 편집·확인과 내보내기)에만 남아 있고, 아래 세 번째 시험이 그걸 검증한다.
+  await expect(page.getByRole("navigation", { name: "화면 이동" })).toBeVisible();
   await expect(page.getByText(/provider|billing|account/i)).toHaveCount(0);
 });
 
@@ -40,15 +45,27 @@ test("an empty local catalog keeps project creation in the catalog shell", async
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "프로젝트" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "+ 새 프로젝트 만들기" })).toBeVisible();
+  // 문구는 "+ 새 프로젝트 만들기"에서 "+ 새로 만들기"로 바뀌었다(owner 재지시
+  // 2026-08-30, `+ 새 프로젝트 만들기`는 그 시점에 편집기로 바로 가는 지름길이
+  // 됐다 -- 이름을 안 묻는다). "시작하는 문은 하나다" 결정(2026-09-05)도 이
+  // 단추 하나로 시작을 모은다.
+  await expect(page.getByRole("button", { name: "+ 새로 만들기" })).toBeVisible();
 });
 
 test("desktop shell keeps global destinations separate from the open project's three stages", async ({ page }) => {
   // 왼쪽 기둥은 없앴다 -- 위 띠 하나가 그 일을 받는다
   // (docs/decisions/2026-08-21-capcut-shell-layout.ko.md, owner 승인 2026-08-21).
   // 구분은 그대로다: 전역 목적지는 한 겹 접힌 메뉴 안, 단계는 띠 위에 펼쳐져 있다.
+  //
+  // **"home"이 아니라 "create" 단계에서 확인한다(2026-09-18 갱신).**
+  // 2026-09-05 이후 `home`(프로젝트 목록) 화면은 상시 `SideNav`(`화면 이동`)를
+  // 쓰고 접힌 "전체 메뉴"를 `hideGlobalMenu`로 숨긴다(`ProductShell.tsx`
+  // `sideNavPlace`). 접힌 "전체 메뉴"는 지금도 단계 화면(이야기·편집·확인과
+  // 내보내기)에는 그대로 남아 있다 -- `SideNav`가 그 자리를 대신 그리지 않는
+  // 화면들이다. 이 시험이 지키려는 것("전역 목적지는 접힌 메뉴 안")은 그
+  // 화면들에서 확인해야 실제로 지켜지는 것을 잰다.
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto("/projects/local-draft/home");
+  await page.goto("/projects/local-draft/create");
   await expect(page.getByRole("navigation", { name: "전체 메뉴" })).toHaveCount(0);
   const menuTrigger = page.getByRole("button", { name: "전체 메뉴", exact: true });
   await expect(menuTrigger).toHaveAttribute("aria-expanded", "false");

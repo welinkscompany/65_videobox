@@ -124,41 +124,100 @@ test("manages voice samples and TTS listening review at the canonical settings r
       await route.fulfill(json(sample, 201));
       return;
     }
+    const editingSessionInternal = {
+      session_id: "session_internal_voice",
+      project_id: projectId,
+      timeline_id: "timeline_internal_voice",
+      session_revision: 4,
+      undo_count: 0,
+      redo_count: 0,
+      updated_at: "2026-07-24T00:00:00Z",
+      history: [],
+      segments: [
+        {
+          segment_id: removedSegmentId,
+          caption_text: "삭제된 문장은 선택할 수 없습니다.",
+          start_sec: 0,
+          end_sec: 2,
+          cut_action: "remove",
+          review_required: false,
+          broll_override: null,
+          visual_overlays: [],
+          music_override: null,
+          sfx_override: null,
+          tts_replacement: null,
+        },
+        {
+          segment_id: activeSegmentId,
+          caption_text: "남겨 둔 문장을 제 목소리로 읽습니다.",
+          start_sec: 2,
+          end_sec: 5,
+          cut_action: "keep",
+          review_required: false,
+          broll_override: null,
+          visual_overlays: [],
+          music_override: null,
+          sfx_override: null,
+          tts_replacement: null,
+        },
+      ],
+    };
     if (method === "GET" && path === `/api/projects/${projectId}/editing-sessions/latest`) {
+      await route.fulfill(json(editingSessionInternal));
+      return;
+    }
+    // `/assets`(옛 자산 화면 주소)가 이제 `/editor`로 리다이렉트되면서
+    // (`AppRouter.tsx` beforeLoad), `CanonicalEditorEntry`가 위 `latest`로
+    // 찾은 세션 id로 곧장 편집기를 연다 -- 편집기는 **특정 id로** 세션과
+    // 재생 정보를 다시 부른다. 이 둘을 안 채우면 "재생 내용을 불러오지
+    // 못했어요" 오류 화면만 뜨고 그 아래 내레이션 단추까지 못 간다.
+    if (method === "GET" && path === `/api/projects/${projectId}/editing-sessions/session_internal_voice`) {
+      await route.fulfill(json(editingSessionInternal));
+      return;
+    }
+    // 편집기가 열리면서 자연히 같이 부르는 것들이다(대화 이어받기·출력
+    // 변형·전환 추천·유진 선호·작업 목록·현재 미리보기 요청) -- 이 시험이
+    // 지키려는 것과 무관해 내용은 비워 둔다.
+    if (method === "GET" && path === `/api/projects/${projectId}/director/sessions/session_internal_voice/reload`) {
+      await route.fulfill(json({ conversation: null, messages: [], proposal: null, references: [] }));
+      return;
+    }
+    if (method === "GET" && path === `/api/projects/${projectId}/output-variants`) {
+      await route.fulfill(json({ variants: [] }));
+      return;
+    }
+    if (method === "GET" && path === `/api/projects/${projectId}/editing-sessions/session_internal_voice/transition-suggestions`) {
+      await route.fulfill(json({ suggestions: [] }));
+      return;
+    }
+    if (method === "GET" && path === `/api/projects/${projectId}/director/preferences`) {
+      await route.fulfill(json({}));
+      return;
+    }
+    if (method === "GET" && path === `/api/projects/${projectId}/jobs`) {
+      await route.fulfill(json({ jobs: [] }));
+      return;
+    }
+    if (method === "POST" && path === `/api/projects/${projectId}/editing-sessions/session_internal_voice/exact-preview`) {
+      await route.fulfill(json({ status: "unavailable", url: null, source_session_id: "session_internal_voice", source_session_revision: 4 }, 202));
+      return;
+    }
+    if (method === "GET" && path === `/api/projects/${projectId}/editing-sessions/session_internal_voice/playback-manifest`) {
       await route.fulfill(json({
-        session_id: "session_internal_voice",
         project_id: projectId,
+        session_id: "session_internal_voice",
         timeline_id: "timeline_internal_voice",
         session_revision: 4,
-        history: [],
-        segments: [
-          {
-            segment_id: removedSegmentId,
-            caption_text: "삭제된 문장은 선택할 수 없습니다.",
-            start_sec: 0,
-            end_sec: 2,
-            cut_action: "remove",
-            review_required: false,
-            broll_override: null,
-            visual_overlays: [],
-            music_override: null,
-            sfx_override: null,
-            tts_replacement: null,
-          },
-          {
-            segment_id: activeSegmentId,
-            caption_text: "남겨 둔 문장을 제 목소리로 읽습니다.",
-            start_sec: 2,
-            end_sec: 5,
-            cut_action: "keep",
-            review_required: false,
-            broll_override: null,
-            visual_overlays: [],
-            music_override: null,
-            sfx_override: null,
-            tts_replacement: null,
-          },
-        ],
+        timeline_version: "v4",
+        timebase: "seconds",
+        fps: { num: 30, den: 1 },
+        output: { width: 1080, height: 1920, sample_aspect_ratio: "1:1", rotation: 0, duration_sec: 5 },
+        tracks: [],
+        captions: [],
+        gap_slots: [],
+        source_status: { status: "current", source_session_id: "session_internal_voice", source_session_revision: 4 },
+        audition: { asset_urls: {} },
+        exact_preview: { status: "unavailable", url: null, source_session_id: "session_internal_voice", source_session_revision: 4 },
       }));
       return;
     }
@@ -273,8 +332,17 @@ test("manages voice samples and TTS listening review at the canonical settings r
   await expect(page).toHaveURL(/\/settings\/voice$/);
   await expect(page.getByRole("link", { name: "내레이션 열기" })).toBeVisible();
 
+  // `/assets`(구주소 별칭)는 이제 옛 자산 화면을 안 그린다 -- `AppRouter.tsx`의
+  // `beforeLoad`가 `return_to` 없는 `assets` 단계 요청을 전부 `/editor`로
+  // 리다이렉트한다(독립 "미디어" 단계 화면이 2026-09-01에 편집기로 접혔다).
+  // 내레이션도 더 이상 탭이 아니라 **팝업**이다(owner 승인 2026-08-27,
+  // `EditorAssetBrowser.tsx`의 "내레이션" 단추 → `Dialog`) -- 도크가
+  // 220~400px라 목소리 등록·후보 생성·청취 승인을 다 넣기엔 좁아서다.
   await page.goto(`/projects/${projectId}/assets`);
-  await page.getByRole("tab", { name: "내레이션" }).click();
+  await expect(page.getByRole("region", { name: "편집 작업판" })).toBeVisible();
+  await expect(page).toHaveURL(/\/editor\?session_id=/);
+  await page.getByRole("button", { name: "내레이션", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "내레이션" })).toBeVisible();
   await expect(page.getByRole("region", { name: "내 목소리와 읽어보기 후보" })).toBeVisible();
   await expect(page.getByText("저장한 내 목소리 1개")).toBeVisible();
 
@@ -321,9 +389,12 @@ test("manages voice samples and TTS listening review at the canonical settings r
   await expect(page.getByRole("button", { name: /자동.*적용|적용/ })).toHaveCount(0);
 
   await page.reload();
-  await expect(page).toHaveURL(/\/assets$/);
-  // 새로고침하면 자산 화면은 첫 탭으로 돌아온다. 내레이션을 다시 골라야 한다.
-  await page.getByRole("tab", { name: "내레이션" }).click();
+  // 새로고침하면 이미 정식 주소(`/editor?session_id=...`)에 있으니 그대로
+  // 남는다 -- 리다이렉트는 `/assets`로 **들어올 때만** 한 번 걸린다. 팝업은
+  // 새로고침으로 닫힌 채 돌아오니 내레이션을 다시 열어야 한다.
+  await expect(page.getByRole("region", { name: "편집 작업판" })).toBeVisible();
+  await expect(page).toHaveURL(/\/editor\?session_id=/);
+  await page.getByRole("button", { name: "내레이션", exact: true }).click();
   await expect(page.getByText("저장한 내 목소리 3개")).toBeVisible();
   await page.getByLabel("후보를 만들 구간").selectOption(activeSegmentId);
   await expect(page.getByText("후보 1 · 청취 승인됨")).toBeVisible();

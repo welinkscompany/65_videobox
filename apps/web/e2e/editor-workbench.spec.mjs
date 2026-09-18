@@ -93,6 +93,16 @@ async function ensureDockOpen(page, name) {
   await page.getByRole("button", { name }).click();
 }
 
+// 유진 패널은 "세부 정보" 도크와 더 이상 같은 것이 아니다(owner 지시
+// 2026-08-30, `EditorWorkbench.tsx`: "캡컷 EditPilot처럼 도크와 무관하게
+// 화면 구석에 뜬다"). "세부 정보"는 기본으로 캡션·컷 편집 패널("편집 항목")을
+// 보여주고, 유진 대화창은 따로 있는 "유진" 단추로 연다 -- 둘은 독립된 열림
+// 상태를 갖는다(`yujinOpen`/`setYujinOpen`은 오른쪽 도크 상태와 분리돼 있다).
+async function ensureYujinOpen(page) {
+  if (await page.getByRole("region", { name: "유진" }).count()) return;
+  await page.getByRole("button", { name: "유진" }).click();
+}
+
 test.beforeEach(async ({ page }) => {
   await installFixedClock(page);
   await page.route(
@@ -158,8 +168,14 @@ test("desktop pointer drag persists the actual dock width across reload", async 
   await page.reload();
   await expect(workbench).toHaveAttribute("data-editor-density", "desktop-both");
   await expect.poll(async () => (await page.getByRole("complementary", { name: "세부 정보" }).boundingBox())?.width ?? 0).toBeCloseTo(resizedWidth, 0);
+  // "세부 정보"는 더 이상 접히지 않는다(owner 지시 2026-08-30, 캡컷과 같은
+  // 상시 노출 -- `EditorWorkbench.tsx`의 `openRightPane`은 이미 보이면 아무
+  // 일도 하지 않는다). 예전에는 이 단추가 닫기 토글이라 눌러서
+  // `desktop-single`로 접히는지까지 같이 쟀는데, 그 기능 자체가 없어졌다 --
+  // 지금은 반대로 **눌러도 안 접히는 것**이 지켜야 할 계약이다.
   await page.getByRole("button", { name: "세부 정보" }).click();
-  await expect(workbench).toHaveAttribute("data-editor-density", "desktop-single");
+  await expect(workbench).toHaveAttribute("data-editor-density", "desktop-both");
+  await expect(page.getByRole("complementary", { name: "세부 정보" })).toBeVisible();
 });
 
 test("constrains real workbench body geometry and keeps the single preview at least half-width", async ({ page }) => {
@@ -210,10 +226,21 @@ test("every toolbar control stays reachable on a phone-width screen", async ({ p
   // 아래 scoped lookup은 더 이상 모호함을 피하기 위한 것이 아니라 그냥
   // 정확한 범위 지정이다.
   const workbench = page.getByLabel("편집 작업판");
-  for (const name of ["빼기", "미디어", "세부 정보"]) {
+  for (const name of ["빼기", "세부 정보"]) {
     const right = await workbench.getByRole("button", { name }).evaluate((node) => node.getBoundingClientRect().right);
     expect(right).toBeLessThanOrEqual(390 + 1);
   }
+  // "미디어"는 더 이상 이 스크롤 도구줄의 단추가 아니다(owner 승인
+  // 2026-08-30 2단계 -- 왼쪽 패널의 실제 탭(미디어·오디오·텍스트·캡션·대본·
+  // 전환)이 패널을 연 뒤에만 보이던 것에서, 창 맨 위 `.vb-editor-workbench__rail`
+  // 이라는 **별도의 상시 노출 세로 띠**로 옮겨졌다 -- 접근성 role도 `button`이
+  // 아니라 `tab`이다(`왼쪽 패널` tablist). 이 띠는 도구줄과 같이 밀리지
+  // 않고 72px 고정폭이라 처음부터 닿는다 -- 여기서 지키는 것은 "닿는다"이지
+  // "도구줄 스크롤로 닿는다"가 아니다.
+  const mediaTab = workbench.getByRole("tab", { name: "미디어" });
+  await expect(mediaTab).toBeVisible();
+  const mediaTabRight = await mediaTab.evaluate((node) => node.getBoundingClientRect().right);
+  expect(mediaTabRight).toBeLessThanOrEqual(390 + 1);
   const toolbarHeight = await page.locator(".vb-editor-workbench__toolbar").evaluate((node) => node.getBoundingClientRect().height);
   expect(toolbarHeight).toBeLessThan(844 / 4);
 });
@@ -276,7 +303,10 @@ test("server-backed output variants keep revision lineage through materialize, l
   await page.getByRole("button", { name: "크롭 저장" }).click();
   await expect.poll(() => patchBodies.length).toBe(1);
   await expect(page.getByText("서버 변형 버전 2")).toBeVisible();
-  await page.getByRole("button", { name: "크롭·자막 잠금" }).click();
+  // 단추 문구는 "크롭·자막 잠금"이 아니라 "크롭·캡션 잠금"이다
+  // (`VariantServerControls.tsx`) -- 출력 변형 조작 안에서는 "캡션"으로
+  // 부른다(편집기 오른쪽 도크의 "캡션 조정 항목"과 같은 용어).
+  await page.getByRole("button", { name: "크롭·캡션 잠금" }).click();
   await expect.poll(() => patchBodies.length).toBe(2);
   await expect(page.getByText("출력 변형을 저장했어요.")).toBeVisible();
   await expect(page.getByText("서버 변형 버전 3")).toBeVisible();
@@ -367,7 +397,12 @@ test("Yujin applies one persisted caption only after explicit selection and pres
   const preview = page.getByRole("region", { name: "미리보기" });
   await expect(preview).toBeVisible();
   await preview.evaluate((element) => { element.setAttribute("data-b5-player", "same"); });
-  await page.getByRole("button", { name: "세부 정보" }).click();
+  // 390px에서 "세부 정보"는 **모달 서랍**(`aria-modal="true"`, "narrow drawer
+  // traps focus" 시험이 지키는 포커스 가둠)이라, 열려 있으면 화면 구석에
+  // 뜨는 "유진" 단추까지 덮어 눌리지 않는다. 이 시험이 쓰는 대화·후보
+  // 선택·자막 적용은 전부 유진 패널 자체 안에 있어서(`YujinPanel.tsx`) 굳이
+  // "세부 정보" 서랍을 열 필요가 없다 -- 열면 오히려 유진에 닿는 길을 막는다.
+  await ensureYujinOpen(page);
   const draft = page.getByRole("textbox", { name: "유진에게 요청하기" });
   await draft.fill("닫아도 남을 초안");
   const candidate = page.getByRole("radio", { name: "P01-CAPTION-TEXT-01 선택" });
@@ -383,11 +418,15 @@ test("Yujin applies one persisted caption only after explicit selection and pres
     return element.scrollTop;
   });
   expect(savedScrollTop).toBeGreaterThan(0);
-  // 서랍을 닫는 단추다. 이름으로만 찾으면 `편집 항목 닫기`와도 겹친다 --
-  // Playwright의 이름 대조는 기본이 부분 일치라서 그렇다.
-  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  // 유진 패널은 "세부 정보" 도크의 서랍이 아니라 **독립된 열림 상태**를 가진
+  // 떠 있는 패널이다(owner 지시 2026-08-30) -- 닫는 단추도 그 패널 것
+  // ("유진 닫기")이지 도크의 "닫기"가 아니다. "세부 정보"를 닫았다 열어도
+  // 유진 패널은 원래 열려 있던 상태 그대로다(둘의 열림 상태가 분리돼 있으니).
+  // 이 시험이 실제로 지키려는 것("패널을 닫았다 다시 열어도 입력·스크롤
+  // 위치가 남는다")은 유진 패널 자체를 닫고 여는 것으로 재야 맞게 잰다.
+  await page.getByRole("button", { name: "유진 닫기" }).click();
   await expect(conversation).toHaveCount(0);
-  await page.getByRole("button", { name: "세부 정보" }).click();
+  await ensureYujinOpen(page);
 
   await expect(draft).toHaveValue("닫아도 남을 초안");
   await expect(candidate).toBeChecked();
@@ -565,25 +604,24 @@ test("owned conversational-editing fixture keeps explicit AI speed apply reversi
   await page.goto(`/projects/${projectId}/editor?session_id=${sessionId}`);
   await expect(page.getByRole("region", { name: "편집 작업판" })).toHaveAttribute("data-editor-revision", "7");
   await ensureDockOpen(page, "세부 정보");
+  await ensureYujinOpen(page);
   await page.getByRole("textbox", { name: "유진에게 요청하기" }).fill("두 번째 장면을 두 배로 빠르게");
   await page.getByRole("button", { name: "요청 보내기" }).click();
   await expect(page.getByText("두 번째 장면 속도 편집안을 확인해 볼게요.")).toBeVisible();
-  expect(createdProposalBodies).toHaveLength(0);
-  await page.getByRole("button", { name: "이 대화로 편집안 만들기" }).click();
+  // **말로 시킨 편집은 확인 클릭 없이 바로 적용된다(owner 2026-09-01,
+  // `decisions/2026-09-01-yujin-chat-applies-edits-directly.ko.md`,
+  // `EditorWorkbenchRoute.tsx`의 `interpretAndApplySpokenEdit`).** 예전에는
+  // "이 대화로 편집안 만들기" → "편집안 보기" → "이 구간 미리보기" → "이
+  // 편집안 적용"을 네 번 눌러야 했다. owner가 실제로 써 보고 "말로 컷 편집이
+  // 되는지 확인한 적이 없는 것 같다"고 지적해 그 단계를 없앴다 -- 유진이
+  // 스스로 해석할 수 있는 지시라면 `요청 보내기` 한 번으로 제안이 만들어지고
+  // (`createYujinEditingProposal`) 곧바로 적용까지 간다(`applyEditingProposalNow`).
+  // 안전장치는 이제 클릭이 아니라 **되돌리기**다 -- 아래 실행 취소/다시 실행이
+  // 그것을 잰다. (미리보기 없이 세션을 바꾸지 않는다는 옛 안전 성질은 유진이
+  // 직접 적용하지 못해 사람이 수동으로 편집안을 확인해야 하는 경로에서만 남아
+  // 있고, 이 시험의 깔끔한 지시 시나리오로는 더 이상 걸리지 않는다 -- 범위 밖.)
   await expect.poll(() => createdProposalBodies.length).toBe(1);
   expect(createdProposalBodies[0]).toEqual({ instruction: "두 번째 장면을 두 배로 빠르게" });
-  await expect(page.getByText("2번 장면 · 8초 → 4초")).toBeVisible();
-  await page.getByRole("button", { name: "편집안 보기" }).click();
-  const dialog = page.getByRole("dialog", { name: "편집안" });
-  await expect(dialog).toContainText("2번 장면 · 8초 → 4초");
-  // 여기서부터 적용 전까지 저장된 편집본을 바꾸는 호출이 **한 건도** 없어야 한다.
-  const sessionMutationsBeforePreview = sessionMutationCalls.length;
-  await dialog.getByRole("button", { name: "이 구간 미리보기" }).click();
-  await expect(dialog.getByText("편집안 미리보기를 만들고 있어요.")).toBeVisible();
-  await expect(dialog.locator('video[aria-label="편집안 미리보기"]')).toHaveAttribute("src", proposalPreviewContentUrl);
-  expect(proposalPreviewStatusCalls.length).toBeGreaterThan(0);
-  expect(sessionMutationCalls.slice(sessionMutationsBeforePreview)).toEqual([]);
-  await dialog.getByRole("button", { name: "이 편집안 적용" }).click();
   await expect.poll(() => appliedBodies.length).toBe(1);
   expect(appliedBodies[0]).toEqual({ expected_revision: 7 });
   await expect(page.getByRole("region", { name: "편집 작업판" })).toHaveAttribute("data-editor-revision", "8");

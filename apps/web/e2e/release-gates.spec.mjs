@@ -2,6 +2,14 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { expect, test } from "./support/test-fixtures.mjs";
+// FIX-02(`docs/system-audit-2026-09-10-claude-remediation.ko.md`): 이 시험은
+// `--output`로 다른 결과 폴더를 지정해도 항상 이 파일의 고정 상대경로
+// (`test-results/editor-workbench-performance.json`, cwd 기준)에 썼다.
+// 다른 세션이 같은 격리 실행 폭에서 이 파일을 동시에 덮어쓸 수 있었다는
+// 뜻이다. `testInfo.outputPath`는 실제로 설정된 outputDir(`--output`이
+// 있으면 그 값, 없으면 기존 기본값 `test-results`)를 그대로 쓰고, 이
+// 시험(파일+제목) 전용 하위 폴더에 격리해 쓴다 -- 다른 실행·다른 시험과
+// 절대 안 겹친다.
 
 import { assessWorkbenchPerformance, deterministicPerformanceReport } from "./support/release-gates.mjs";
 
@@ -55,7 +63,7 @@ async function measureRightDockDrag(page, offset) {
   }).then((finishedAt) => finishedAt - startedAt);
 }
 
-test("workbench dock drag has fixed warmup and five-sample local performance evidence", async ({ page, browser }) => {
+test("workbench dock drag has fixed warmup and five-sample local performance evidence", async ({ page, browser }, testInfo) => {
   await openWorkbench(page);
   // 넓은 화면에서는 세부 정보가 기본으로 열려 있다. 토글하면 오히려 측정 대상인
   // 크기 조절 손잡이가 사라진다.
@@ -70,7 +78,10 @@ test("workbench dock drag has fixed warmup and five-sample local performance evi
     warmupMs,
     measurementsMs,
   });
-  const reportPath = path.resolve("test-results", "editor-workbench-performance.json");
+  // `testInfo.outputPath`가 실제 outputDir(기본 `test-results`, `--output`
+  // 지정 시 그 값)를 반영한다 -- 하드코딩된 `path.resolve("test-results", …)`는
+  // `--output`을 무시하고 항상 cwd 기준 고정 경로에 썼다.
+  const reportPath = testInfo.outputPath("editor-workbench-performance.json");
   await mkdir(path.dirname(reportPath), { recursive: true });
   await writeFile(reportPath, deterministicPerformanceReport(report), "utf8");
 

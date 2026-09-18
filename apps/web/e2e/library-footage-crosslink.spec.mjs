@@ -63,7 +63,10 @@ test("footage source-list crosslink returns to /library with the same asset sele
   await expect(page.getByRole("heading", { name: first.user_metadata.filename })).toBeVisible();
 
   const sourceRow = page.getByTestId("footage-source-list").locator(".vb-footage-source-row").filter({ hasText: first.user_metadata.filename });
-  const crosslink = sourceRow.getByRole("link", { name: `${first.user_metadata.filename} 라이브러리에서 보기` });
+  // 전체 메뉴의 "미디어"가 "자료실"로 이름이 바뀌면서(owner 결정 2026-08-29)
+  // 이 크로스링크의 접근성 이름도 "라이브러리에서 보기"에서 "자료실에서
+  // 보기"로 같이 바뀌었다(`FootageSourceList.tsx`). 주소(href)는 그대로다.
+  const crosslink = sourceRow.getByRole("link", { name: `${first.user_metadata.filename} 자료실에서 보기` });
   await expect(crosslink).toHaveAttribute("href", `/library?library_asset_id=${first.library_asset_id}`);
   await crosslink.click();
 
@@ -100,8 +103,12 @@ test("a library asset's in-use location links to that project's assets screen", 
 
   const usage = page.locator(".vb-library-usage");
   await expect(usage).toBeVisible();
-  const entry = usage.getByRole("link", { name: "프로젝트 편집본 미디어 화면 열기" });
-  await expect(entry).toHaveAttribute("href", "/projects/my-project/assets");
+  // 독립 "미디어" 화면이 편집기 도크로 접혔다(2026-09-01) -- 갈 곳도 그
+  // 화면이 아니라 편집기다(`LibraryPreviewPane.tsx`가 `resolveProjectStage`로
+  // 만드는 주소는 `/projects/<id>/editor`이고, 이름도 "…미디어 화면 열기"가
+  // 아니라 "…편집기에서 열기"다).
+  const entry = usage.getByRole("link", { name: "프로젝트 편집본 편집기에서 열기" });
+  await expect(entry).toHaveAttribute("href", "/projects/my-project/editor");
   // 프로젝트를 특정할 수 없는 위치는 링크가 되지 않는다.
   await expect(usage.getByText("묶음")).toBeVisible();
   await expect(usage.getByRole("link", { name: /묶음/ })).toHaveCount(0);

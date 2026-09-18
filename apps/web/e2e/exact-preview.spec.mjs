@@ -285,8 +285,21 @@ test("current exact proxy plays a valid local MP4, requests bytes, and maps a na
   await expect(page.locator("audio, video")).toHaveCount(1);
 });
 
+// 셋 다 **빈 타임라인이 아닌** 매니페스트를 준다. `EditorWorkbench.tsx`가
+// `PreviewStage`에 넘기는 `projectIsEmpty`는 `view.tracks.length === 0`로만
+// 정해지고(2026-09-04 owner 지시: "아직 아무것도 안 넣었으면 실패라고 말하지
+// 않는다"), 트랙이 비어 있으면 exact_preview 상태(pending/stale/failed)와
+// 무관하게 항상 "여기에 영상이 나와요"(빈 프로젝트 안내)만 그린다. 이 세
+// 시험은 원래 `tracks: []`인 채로 상태별 안내 문구를 기대해서 서로 모순이었다
+// -- 실제로 지키려는 것("이미 채운 프로젝트에서 exact preview 상태를 있는
+// 그대로 보여준다")을 재려면 트랙을 채워야 한다. 빈 프로젝트 안내 자체를
+// 지키는 시험은 `empty-project-stage.test.tsx`에 이미 있고 그대로 둔다.
+const oneNarrationClip = [
+  { track_id: "narration", track_type: "narration", clips: [{ clip_id: "n1", segment_id: "segment-1", clip_type: "narration", asset_id: "a1", asset_uri: "local://a1", start_sec: 0, end_sec: 6, media_controls: {} }] },
+];
+
 test("pending proxy explains that playback is unavailable and does not mount media", async ({ page }) => {
-  const state = { current: manifest({ exact: { status: "pending", url: null, artifact_revision: null } }), retryBodies: [] };
+  const state = { current: manifest({ tracks: oneNarrationClip, exact: { status: "pending", url: null, artifact_revision: null } }), retryBodies: [] };
   await openEditor(page, state);
 
   await expect(page.locator(".vb-preview-stage__empty")).toContainText("미리보기를 준비하고 있어요.");
@@ -295,7 +308,7 @@ test("pending proxy explains that playback is unavailable and does not mount med
 });
 
 test("source revision makes an older exact proxy stale and blocks its player", async ({ page }) => {
-  const state = { current: manifest({ revision: 8, exact: { status: "succeeded", url: "/api/projects/local-draft/exact-previews/generation-7/content", artifact_revision: 7, timeline_start_sec: 2, timeline_end_sec: 8 } }), retryBodies: [] };
+  const state = { current: manifest({ tracks: oneNarrationClip, revision: 8, exact: { status: "succeeded", url: "/api/projects/local-draft/exact-previews/generation-7/content", artifact_revision: 7, timeline_start_sec: 2, timeline_end_sec: 8 } }), retryBodies: [] };
   await openEditor(page, state);
 
   await expect(page.locator(".vb-preview-stage__empty")).toContainText("이전 편집본 미리보기는 재생하지 않아요.");
@@ -305,8 +318,8 @@ test("source revision makes an older exact proxy stale and blocks its player", a
 
 test("failed proxy retry requests the current revision and refreshes the surfaced status", async ({ page }) => {
   const state = {
-    current: manifest({ exact: { status: "failed", url: null, artifact_revision: null } }),
-    afterRetry: manifest({ exact: { status: "running", url: null, artifact_revision: null } }),
+    current: manifest({ tracks: oneNarrationClip, exact: { status: "failed", url: null, artifact_revision: null } }),
+    afterRetry: manifest({ tracks: oneNarrationClip, exact: { status: "running", url: null, artifact_revision: null } }),
     retryBodies: [],
   };
   await openEditor(page, state);
@@ -333,8 +346,16 @@ test("audition replaces the exact player without autoplay and can return to exac
   // 돌아오는가**다. 미디어 열을 여는 클릭은 그 원본 버튼에 닿기 위한 수단이었는데,
   // 이제 그 열은 기본으로 펴져 있다 -- 누르면 오히려 닫혀 버튼이 사라진다.
   await expect(page.getByRole("complementary", { name: "미디어" })).toBeVisible();
-  await page.getByRole("button", { name: "B-roll · 1번째 장면 원본 열기" }).click();
-  const audition = page.getByLabel("B-roll · 1번째 장면 소스 미리보기");
+  // "원본 열기" 버튼은 네이티브 `<details>`("원본 확인")로 접혀 있다
+  // (`EditorAssetBrowser.tsx`: `pane === "media" && sourceCheck ? <details
+  // className="vb-editor-assets__aside"><summary>원본 확인</summary>...`).
+  // "미디어 분석"과 같은 무늬다 -- 기본으로 닫혀 있어 열기 전까지는 안의
+  // 단추가 `hidden`이다.
+  await page.getByText("원본 확인", { exact: true }).click();
+  // "B-roll"은 2026-09-07에 화면에서 "영상"으로 통일됐다(owner 승인,
+  // `SideNav.tsx` 주석 참고 -- 자료실 분류 목록도 이미 "영상"이었다).
+  await page.getByRole("button", { name: "영상 · 1번째 장면 원본 열기" }).click();
+  const audition = page.getByLabel("영상 · 1번째 장면 소스 미리보기");
   await expect(audition).toHaveCount(1);
   await expect(audition).not.toHaveAttribute("autoplay");
   await expect(audition).toHaveJSProperty("autoplay", false);

@@ -48,7 +48,7 @@ test("ready-assets approval uses returned IDs and provides current-revision play
     const timeout = window.setTimeout(() => reject(new Error("video metadata did not load")), 5000);
     element.addEventListener("loadedmetadata", () => {
       window.clearTimeout(timeout);
-      resolve({ src: element.currentSrc, controls: element.controls, duration: element.duration });
+      resolve({ src: element.currentSrc, duration: element.duration });
     }, { once: true });
     element.addEventListener("error", () => {
       window.clearTimeout(timeout);
@@ -57,8 +57,27 @@ test("ready-assets approval uses returned IDs and provides current-revision play
     element.load();
   }));
   expect(playback.src).toContain(`/exact-previews/exact-e2e-${state.latest_bundle.bundle_id.split("-").at(-1)}-r1/content`);
-  expect(playback.controls).toBeTruthy();
   expect(playback.duration).toBeGreaterThan(0);
+  // 브라우저 기본 재생바(`video.controls`)는 이 화면이 켜지 않는다(2026-08-28
+  // owner 지적: 기본 컨트롤과 우리 재생바가 겹쳐서 탐색·재생 단추가 둘씩
+  // 뜬다, `preview-stage.tsx` 참고). 대신 이 컴포넌트가 직접 그리는 재생·
+  // 탐색·음소거 조작이 실제 미디어 상태를 바꾸는지를 잰다 -- 그게 이 시험이
+  // 지키려던 것("사용자가 영상을 다루는 재생줄이 실제로 동작한다")이다.
+  const playPauseButton = page.getByRole("button", { name: "재생 또는 일시정지" });
+  await playPauseButton.click();
+  await expect.poll(() => video.evaluate((node) => !node.paused)).toBe(true);
+  await playPauseButton.click();
+  await expect.poll(() => video.evaluate((node) => node.paused)).toBe(true);
+
+  await video.evaluate((node) => { node.currentTime = Math.min(1, node.duration / 2); });
+  await expect.poll(() => video.evaluate((node) => node.currentTime)).toBeGreaterThan(0);
+
+  const muteToggle = page.getByRole("button", { name: "음소거", exact: true });
+  await expect(video).toHaveJSProperty("muted", false);
+  await muteToggle.click();
+  await expect(video).toHaveJSProperty("muted", true);
+  await page.getByRole("button", { name: "음소거 해제", exact: true }).click();
+  await expect(video).toHaveJSProperty("muted", false);
 
   await page.goto("/projects/local-draft/outputs");
   await expect(page.getByText("현재 편집본 미리보기가 준비되었어요.")).toBeVisible();

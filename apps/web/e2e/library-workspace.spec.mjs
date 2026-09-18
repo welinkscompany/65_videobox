@@ -189,10 +189,14 @@ test("library desktop keeps a bounded three-pane layout and reconciles mixed dro
   await page.goto("/library");
   await expect(page.getByTestId("library-workspace")).toBeVisible();
   await expect(page.getByTestId("library-results-scroll")).toBeVisible();
-  // 전역 목적지는 접힌 위 메뉴 한 곳에만 둔다. 메뉴를 연 뒤에만 링크가 DOM에
-  // 나타나는 것이 현재 껍데기의 접근성 계약이다.
-  await page.getByRole("button", { name: "전체 메뉴" }).click();
-  await expect(page.getByRole("navigation", { name: "전체 메뉴" }).getByRole("link")).toHaveCount(3);
+  // 전역 목적지는 `/library`에서는 더 이상 접힌 위 메뉴("전체 메뉴")가 아니다
+  // -- owner 지시 2026-09-05로 상시 노출 왼쪽 `SideNav`("화면 이동")가
+  // 생겼고, `ProductShell.tsx`의 `sideNavPlace`가 `library` 화면에서는
+  // `hideGlobalMenu`를 켜서 접힌 메뉴를 감춘다(`product-shell.spec.mjs`가
+  // 같은 이유로 갱신됐다). 열지 않아도 이미 펼쳐져 있다.
+  // 3(프로젝트·자료실·촬영본 정리) + `내 자산` 구역 3(내 영상·음악·효과음·
+  // 내 목소리) = 6. `설정`은 서랍이라 링크가 아니라 단추다(`SideNav.tsx`).
+  await expect(page.getByRole("navigation", { name: "화면 이동" }).getByRole("link")).toHaveCount(6);
 
   await dispatchDrop(page, [
     { name: "commute.mp4", type: "video/mp4", bytes: "video-source" },
@@ -215,12 +219,17 @@ test("library desktop keeps a bounded three-pane layout and reconciles mixed dro
   const videoPreview = page.locator(".vb-library-preview video");
   await expect(videoPreview).toHaveAttribute("src", /asset-broll\/preview/);
   await waitForMediaMetadata(videoPreview);
-  await page.getByTestId("library-sidebar").getByRole("button", { name: "음악" }).click();
+  // "음악"만으로 찾으면 더 넓은 갈래("음악·효과음")도 부분 일치로 걸린다 --
+  // `LibrarySidebar.tsx`에 `음악·효과음`(모두)과 `음악`(따로) 두 필터가 함께
+  // 생겼다. 이름 뒤에 개수(`<span>`)가 붙어 "음악 2"처럼 되므로 "음악" 뒤가
+  // 가운뎃점이 아니라 공백/끝인 것으로 좁힌다.
+  await page.getByTestId("library-sidebar").getByRole("button", { name: /^음악(\s|$)/ }).click();
   await page.locator('[data-testid="library-audio-rows"] article').filter({ hasText: media.music.name }).click();
   const musicPreview = page.locator(".vb-library-preview audio");
   await expect(musicPreview).toHaveAttribute("src", /asset-music\/preview/);
   await waitForMediaMetadata(musicPreview);
-  await page.getByTestId("library-sidebar").getByRole("button", { name: "효과음" }).click();
+  // "음악·효과음"(모두)과 부분 일치로 겹치지 않게 같은 이유로 좁힌다.
+  await page.getByTestId("library-sidebar").getByRole("button", { name: /^효과음(\s|$)/ }).click();
   await page.locator('[data-testid="library-audio-rows"] article').filter({ hasText: media.sfx.name }).click();
   const sfxPreview = page.locator(".vb-library-preview audio");
   await expect(sfxPreview).toHaveAttribute("src", /asset-sfx\/preview/);
@@ -230,10 +239,15 @@ test("library desktop keeps a bounded three-pane layout and reconciles mixed dro
   await page.getByTestId("library-sidebar").getByRole("button", { name: "전체" }).click();
   await page.getByPlaceholder("파일명·장면·분위기").fill("도시");
   await expect(page.locator('[data-testid="library-asset-card"]').filter({ hasText: media.broll.name })).toBeVisible();
-  await page.getByTestId("library-sidebar").getByRole("button", { name: "음악" }).click();
+  // "음악"만으로 찾으면 더 넓은 갈래("음악·효과음")도 부분 일치로 걸린다 --
+  // `LibrarySidebar.tsx`에 `음악·효과음`(모두)과 `음악`(따로) 두 필터가 함께
+  // 생겼다. 이름 뒤에 개수(`<span>`)가 붙어 "음악 2"처럼 되므로 "음악" 뒤가
+  // 가운뎃점이 아니라 공백/끝인 것으로 좁힌다.
+  await page.getByTestId("library-sidebar").getByRole("button", { name: /^음악(\s|$)/ }).click();
   await page.getByPlaceholder("파일명·장면·분위기").fill("음악");
   await expect(page.locator('[data-testid="library-audio-rows"] article').filter({ hasText: media.music.name })).toBeVisible();
-  await page.getByTestId("library-sidebar").getByRole("button", { name: "효과음" }).click();
+  // "음악·효과음"(모두)과 부분 일치로 겹치지 않게 같은 이유로 좁힌다.
+  await page.getByTestId("library-sidebar").getByRole("button", { name: /^효과음(\s|$)/ }).click();
   await page.getByPlaceholder("파일명·장면·분위기").fill("효과음");
   await expect(page.locator('[data-testid="library-audio-rows"] article').filter({ hasText: media.sfx.name })).toBeVisible();
   await page.getByPlaceholder("파일명·장면·분위기").fill("");

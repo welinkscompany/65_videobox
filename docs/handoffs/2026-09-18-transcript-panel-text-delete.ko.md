@@ -1,3 +1,5 @@
+**대체됨:** `docs/handoffs/2026-09-18-e2e-remediation-fix01-fix02-invest02-closed.ko.md`
+
 # task_transcript-panel-text-delete -- 대본 칸을 비우면 장면이 빠진다, 실물까지 확인
 
 owner 승인(2026-09-18, "1,2번 진행하자") 위에서, 브루·캡컷의 "텍스트로 편집"(대본
