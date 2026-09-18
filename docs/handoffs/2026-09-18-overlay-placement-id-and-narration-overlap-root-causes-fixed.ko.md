@@ -1,4 +1,4 @@
-**대체됨:** (아직 없음 — 이 문서가 최신이다. `CLAUDE.md` §2에서 가리킨다.)
+**대체됨:** `docs/handoffs/2026-09-18-independent-verification-of-todays-four-fixes.ko.md`
 
 # 타임라인 클릭 크래시의 백엔드 근본 원인 둘 + 변형본 충돌 중복 하나를 고쳤다
 
