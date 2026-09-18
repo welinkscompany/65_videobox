@@ -603,6 +603,7 @@ function projectStateLabel(summary: ProjectWorkspaceSummary): string {
 function ProjectCatalogCard({ project, index = 0, onNavigateHref, onRename }: { project: Project; index?: number; onNavigateHref?: (href: string) => void; onRename?: (projectId: string, name: string) => void | Promise<void> }) {
   const [summary, setSummary] = useState<ProjectWorkspaceSummary | null>(null);
   const [summaryError, setSummaryError] = useState(false);
+  const [thumbnailFailed, setThumbnailFailed] = useState(false);
   const [requestNumber, setRequestNumber] = useState(0);
   // 목록 화면에서는 사이드바의 프로젝트 전환 목록이 나오지 않는다
   // (`hasProject`가 거짓). 카드에 길이 없으면 여기서는 제목을 못 바꾼다.
@@ -635,6 +636,7 @@ function ProjectCatalogCard({ project, index = 0, onNavigateHref, onRename }: { 
     let active = true;
     setSummary(null);
     setSummaryError(false);
+    setThumbnailFailed(false);
     void api.getProjectWorkspaceSummary(project.project_id).then((next) => {
       if (active) setSummary(next);
     }).catch(() => {
@@ -659,7 +661,18 @@ function ProjectCatalogCard({ project, index = 0, onNavigateHref, onRename }: { 
     </article>;
   }
   return <article ref={cardRef} className="vb-catalog-card" aria-label={`${project.name} 프로젝트`}>
-    {summary.thumbnail_url ? <img src={summary.thumbnail_url} alt={`${summary.display_name} 대표 이미지`} loading="lazy" /> : null}
+    {summary.thumbnail_url && !thumbnailFailed
+      ? <img
+          src={summary.thumbnail_url}
+          alt={`${summary.display_name} 대표 이미지`}
+          loading="lazy"
+          onError={() => setThumbnailFailed(true)}
+        />
+      // 자산 정리로 캐시 파일만 지워지고 metadata의 thumbnail_url은 남는
+      // 경우가 있다(INVEST-04). 404면 깨진 이미지 아이콘 대신 그림 없는
+      // 카드로 조용히 넘어간다 -- 백엔드 주석이 말하는 "그림 없으면 문구로
+      // 대체" 의도.
+      : null}
     {/* 프로젝트를 고르면 **편집기**다(owner 지적 2026-08-19, 캡컷도 열면 바로
         편집판이다). 아래 단추는 백엔드가 정한 다음 할 일이라 `/plan`·`/review`
         같은 곳으로 가는데, 그것만 있으면 편집기로 가는 길이 아예 없었다.
