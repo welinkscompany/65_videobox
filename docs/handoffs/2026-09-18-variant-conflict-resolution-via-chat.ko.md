@@ -1,3 +1,5 @@
+**대체됨:** `docs/handoffs/2026-09-18-r1-split-render-byte-diff-diagnosed.ko.md`
+
 # task_99becf89 -- 변형본 충돌 풀기를 유진 채팅에도 열었다
 
 `2026-09-17-vertical-blur-fill-confirmed-on-real-render.ko.md`가 남긴 백로그
