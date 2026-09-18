@@ -233,6 +233,30 @@ def test_rebase_inherits_locks_and_records_master_conflicts() -> None:
     assert {conflict.field for conflict in rebased.conflicts} == {"crop", "story"}
 
 
+def test_rebasing_twice_without_resolving_does_not_duplicate_the_same_field_conflict() -> None:
+    """실사용 프로젝트 `0907-b26195af`의 `variant-editing_session_001-horizontal`
+    에서 conflicts 목록에 `story` 항목이 13번 중복 쌓여 있었다
+    (`docs/handoffs/2026-09-18-timeline-click-selection-was-silently-crashing.ko.md`
+    다음 세션 백로그). `story`는 `_STRUCTURAL_FIELDS`라 마스터가 바뀔 때마다
+    `rebase_variant`가 불리는데, 그때마다 **이미 있는 미해결 `story` 충돌을
+    보지 않고 무조건 새로 append했다** -- 풀리지 않은 채로 여러 번 rebase되면
+    (owner가 그 충돌을 안 풀고 계속 편집을 이어가면) 같은 field가 그만큼
+    쌓인다. 기능은 됐다(풀 때 한 번에 다 풀림) -- 문제는 요청 크기·표시
+    성능이다(`conflicts` 필드 상한은 64).
+    """
+    variant = _variant("vertical_full")
+
+    once = rebase_variant(variant, new_master_revision=8, changed_fields=["story"])
+    twice = rebase_variant(once, new_master_revision=9, changed_fields=["story"])
+
+    story_conflicts = [conflict for conflict in twice.conflicts if conflict.field == "story"]
+    assert len(story_conflicts) == 1, f"같은 field의 미해결 충돌이 중복 쌓였다: {twice.conflicts}"
+    # 가장 최근 마스터 리비전으로 갱신은 돼야 한다 -- 그냥 옛 것을 버리는 게
+    # 아니라 최신 정보로 대체(또는 갱신)한다.
+    assert story_conflicts[0].current_master_revision == 9
+    assert story_conflicts[0].base_master_revision == 7
+
+
 def test_rebase_rejects_non_forward_master_revision() -> None:
     with pytest.raises(VariantInvariantError, match="master_revision"):
         rebase_variant(_variant(), new_master_revision=7, changed_fields=[])

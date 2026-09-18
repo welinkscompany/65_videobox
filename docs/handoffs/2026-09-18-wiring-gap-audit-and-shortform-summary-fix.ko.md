@@ -1,3 +1,5 @@
+**대체됨:** `docs/handoffs/2026-09-18-overlay-placement-id-and-narration-overlap-root-causes-fixed.ko.md`
+
 # task_ -- 유진 배선 누락 전수 조사 + 숏폼 완료 문구 누락 고침
 
 owner 지시: 오늘 앞선 세션이 `resolve_variant_conflict`가 Hermes 자율 루프

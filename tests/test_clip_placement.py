@@ -241,6 +241,151 @@ def test_a_split_segment_keeps_each_window_where_it_was() -> None:
     assert spans == [(0.0, 4.0), (4.0, 8.0)]
 
 
+def test_splitting_a_segment_with_an_overlay_does_not_duplicate_the_overlay_clip_id() -> None:
+    """실사용 프로젝트 `0907-b26195af`에서 오버레이 클립 5개가 같은
+    `placement_id`(`overlay:export-overlay-...`)를 공유해 프론트엔드
+    `selectClip`이 `RangeError: Rect clipIds must be unique`로 죽었다
+    (`docs/handoffs/2026-09-18-timeline-click-selection-was-silently-crashing.ko.md`).
+
+    원인은 `composition_plan.py`의 `export_overlays` 재구성 루프가 분할로
+    생긴 세그먼트(target)마다 도는데도, 만들어 내는 `clip_id`가 분할 조각을
+    구분하지 못하고(`source_id`와 `overlay_index`만 씀) 매번 같은 값을
+    낸다는 것이다 -- 세그먼트를 쪼개면 같은 원본을 가리키는 target이
+    여럿 생기므로 overlay 클립이 그만큼 복제되면서 clip_id가 겹친다.
+    """
+    from videobox_core_engine.composition_plan import materialize_editing_session_timeline
+    from videobox_core_engine.editing_session import split_segment
+
+    session = _session(count=1, seconds=8.0)
+    session = split_segment(session=session, segment_id="seg_001", split_sec=4.0)
+
+    timeline = {
+        "timeline_id": "timeline_001",
+        "project_id": "project_001",
+        "tracks": [{
+            "track_id": "narration_primary",
+            "track_type": "narration",
+            "clips": [{
+                "clip_id": "clip_seg_001",
+                "segment_id": "seg_001",
+                "asset_uri": "local://projects/project_001/segments/seg_001",
+                "start_sec": 0.0,
+                "end_sec": 8.0,
+                "clip_type": "narration",
+            }],
+        }],
+        "export_overlays": [{
+            "segment_id": "seg_001",
+            "overlay_type": "image_overlay",
+            "asset_id": "asset_overlay",
+            "start_sec": 0.0,
+            "end_sec": 8.0,
+        }],
+        "review_flags": [],
+        "pending_recommendations": [],
+    }
+
+    materialized = materialize_editing_session_timeline(
+        timeline=timeline, editing_session=session, project_id="project_001",
+    )
+
+    overlay_clip_ids = [str(overlay.get("clip_id")) for overlay in materialized.get("export_overlays", [])]
+    assert len(overlay_clip_ids) == 2, "쪼갠 세그먼트 둘 다 오버레이를 물려받아야 한다"
+    assert len(set(overlay_clip_ids)) == len(overlay_clip_ids), (
+        f"분할된 세그먼트가 만든 오버레이 clip_id가 겹친다: {overlay_clip_ids}"
+    )
+
+
+def test_splitting_an_already_regenerated_segment_further_does_not_overlap_its_own_children() -> None:
+    """실사용 프로젝트 `0907-b26195af`에서 드래그 트림 커밋이 매번
+    `RangeError: Narration segments must not overlap`로 거부됐다
+    (`docs/handoffs/2026-09-18-timeline-click-selection-was-silently-crashing.ko.md`
+    다음 세션 백로그 `task_ecf8eb71`). 실제 postgres 데이터를 직접 대조해
+    보니 `clip_narration_002`(세그먼트 `timeline_001:001__split_2`)가
+    `[4.0, 8.0]`을 그대로 물고 있었는데, 그 세그먼트는 이미 세션에서
+    `[4.0, 5.7)`로 다시 쪼개진 뒤였다(나머지는 `__split_2__split_3`,
+    `__split_2__split_2`가 가져갔다) -- **겹침은 검증 로직 오탐이 아니라
+    실제 데이터 흠이다.**
+
+    원인: `timeline_002`처럼 **다시 지은 편집판**은 두 세그먼트("A"=
+    `timeline_001:001`, "B"=`timeline_001:001__split_2`)가 각자 자기
+    raw narration 클립을 갖고 있으면서도, `source_slices`는 **둘 다 같은
+    진짜 원본("A")을 가리킨다**(`session_bound_clip_ids_by_track`가 이
+    모양을 이미 알고 다룬다, 2026-09-07 주석). 그 중 "B"가 세션에서
+    **또 쪼개지면**, `materialize_editing_session_timeline`의 fallback
+    경로(`elif targets is None and source_id in segments`)가 **지금
+    세그먼트의 길이가 아니라 raw 클립이 최초에 물고 있던 낡은 길이**로
+    클립을 만든다 -- 그래서 세그먼트는 `[4.0, 5.7)`로 줄었는데 클립은 옛
+    `[4.0, 8.0)`대로 남아 자기 자식과 겹친다.
+    """
+    from videobox_core_engine.composition_plan import materialize_editing_session_timeline
+    from videobox_core_engine.editing_session import split_segment
+
+    # `build_editing_session`으로 새로 지으면 "B"가 자기 자신을 원본으로
+    # 삼는다(자기 뿌리) -- 그러면 이 결함이 재현되지 않는다(실제로 확인함).
+    # 재현하려면 **regenerate가 만드는 실제 모양**대로, "B"의 `source_slices`가
+    # 자기 자신이 아니라 "A"(진짜 원본)를 가리키도록 손으로 지어야 한다.
+    session = {
+        "project_id": "project_001", "timeline_id": "timeline_001",
+        "session_revision": 1, "history": [{"mutation_type": "segment_split"}],
+        "undo_stack": [], "redo_stack": [],
+        "segments": [
+            {
+                "segment_id": "A", "caption_text": "", "start_sec": 0.0, "end_sec": 4.0, "cut_action": "keep",
+                "source_slices": [{"segment_id": "A", "source_offset_sec": 0.0, "duration_sec": 4.0}],
+                "lineage": {"root_segment_id": "A", "parent_segment_id": "A", "source_segment_ids": ["A"]},
+            },
+            {
+                "segment_id": "B", "caption_text": "", "start_sec": 4.0, "end_sec": 8.0, "cut_action": "keep",
+                "source_slices": [{"segment_id": "A", "source_offset_sec": 4.0, "duration_sec": 4.0}],
+                "lineage": {"root_segment_id": "A", "parent_segment_id": "B", "source_segment_ids": ["A"]},
+            },
+        ],
+    }
+    session = split_segment(session=session, segment_id="B", split_sec=5.7)
+
+    timeline = {
+        "timeline_id": "timeline_001",
+        "project_id": "project_001",
+        "tracks": [{
+            "track_id": "narration_primary",
+            "track_type": "narration",
+            "clips": [{
+                "clip_id": f"clip_narration_{index + 1:03d}",
+                "segment_id": segment_id,
+                "asset_uri": f"local://projects/project_001/segments/{segment_id}",
+                "start_sec": start,
+                "end_sec": end,
+                "clip_type": "narration",
+            } for index, (segment_id, start, end) in enumerate((("A", 0.0, 4.0), ("B", 4.0, 8.0)))],
+        }],
+        "review_flags": [],
+        "pending_recommendations": [],
+    }
+
+    materialized = materialize_editing_session_timeline(
+        timeline=timeline, editing_session=session, project_id="project_001",
+    )
+    narration_clips = sorted(
+        (
+            clip
+            for track in materialized.get("tracks", [])
+            if track.get("track_type") == "narration"
+            for clip in track.get("clips", [])
+        ),
+        key=lambda clip: float(clip.get("start_sec")),
+    )
+
+    spans = [(round(float(clip["start_sec"]), 4), round(float(clip["end_sec"]), 4)) for clip in narration_clips]
+    assert spans == [(0.0, 4.0), (4.0, 5.7), (5.7, 8.0)], (
+        f"쪼갠 뒤 낡은 raw 클립 길이가 되살아나면 안 된다: {spans}"
+    )
+    for previous, current in zip(narration_clips, narration_clips[1:]):
+        assert float(previous["end_sec"]) <= float(current["start_sec"]), (
+            f"내레이션 클립이 겹친다: {previous.get('clip_id')} -> {current.get('clip_id')}"
+        )
+
+
 def test_the_new_model_says_the_same_thing_the_real_renderer_does() -> None:
     """**이 파일에서 가장 중요한 시험이다.**
 

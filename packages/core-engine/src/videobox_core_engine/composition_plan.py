@@ -481,9 +481,19 @@ def materialize_editing_session_timeline(
                     continue
                 # 짝 없는 자식 클립. 자기 조각의 자리에 그대로 놓되, 그 조각에
                 # 걸린 세션 덮어쓰기(교체된 사진·음악 등)는 똑같이 존중한다.
+                #
+                # **길이는 raw 클립이 아니라 지금 세그먼트에서 잰다**(2026-09-18
+                # 실사용 프로젝트 `0907-b26195af`에서 실측한 결함). 다시 지은
+                # 편집판(`timeline_002`류)은 이 raw 클립이 세그먼트 이름을 그대로
+                # 물고 있다 -- 그런데 그 세그먼트가 **세션에서 또 쪼개지면** 이
+                # 세그먼트는 truncate되어 남는다(자식이 나머지를 가져간다). raw
+                # 클립의 `end_sec - start_sec`(쪼개지기 전의 낡은 길이)을 쓰면
+                # 줄어든 세그먼트 자리에 옛 전체 길이가 되살아나 자기 자식과
+                # 겹친다(`RangeError: Narration segments must not overlap`로
+                # 드래그 트림 커밋이 항상 거부됐다).
                 own_segment = segments[source_id]
                 own_rate = _ripple_playback_rate(own_segment)
-                own_duration = _number(raw.get("end_sec")) - _number(raw.get("start_sec"))
+                own_duration = _number(own_segment.get("end_sec")) - _number(own_segment.get("start_sec"))
                 targets = [(
                     own_segment,
                     {
@@ -625,13 +635,27 @@ def materialize_editing_session_timeline(
         if not targets or original_bounds is None:
             export_overlays.append({**deepcopy(raw_overlay), "clip_id": str(raw_overlay.get("clip_id") or f"export-overlay-{source_id}-{overlay_index}")})
             continue
-        for _segment, source_slice, placement in targets:
+        for target_index, (target_segment, source_slice, placement) in enumerate(targets):
             window_end = placement + float(source_slice["duration_sec"])
             relative_start = _number(raw_overlay.get("start_sec")) - original_bounds[0] - float(source_slice["source_offset_sec"])
             relative_end = _number(raw_overlay.get("end_sec")) - original_bounds[0] - float(source_slice["source_offset_sec"])
             start, end = max(placement, placement + relative_start), min(window_end, placement + relative_end)
             if end > start:
-                export_overlays.append({**deepcopy(raw_overlay), "clip_id": str(raw_overlay.get("clip_id") or f"export-overlay-{source_id}-{overlay_index}"), "segment_id": source_id, "start_sec": start, "end_sec": end})
+                base_clip_id = str(raw_overlay.get("clip_id") or f"export-overlay-{source_id}-{overlay_index}")
+                # **세그먼트를 나누면 같은 원본(source_id)을 가리키는 target이
+                # 여럿 생긴다** -- 그대로 두면 target 수만큼 오버레이가 복제되는데
+                # clip_id는 하나뿐이라 겹친다. `placement_id`도 clip_id를 그대로
+                # 물기 때문에(`timeline_placements.placement_id`) 겹친 clip_id가
+                # 겹친 placement_id로 이어져 프론트엔드 클릭 고르기가
+                # `RangeError: Rect clipIds must be unique`로 죽는다(2026-09-18,
+                # 실사용 프로젝트 `0907-b26195af`에서 오버레이 5개가 실측됨).
+                # target이 하나뿐이면(분할 없음) 예전과 같은 id를 유지해 지문을
+                # 안 건드린다.
+                clip_id = (
+                    base_clip_id if len(targets) == 1
+                    else f"{base_clip_id}@{str(target_segment.get('segment_id') or target_index)}"
+                )
+                export_overlays.append({**deepcopy(raw_overlay), "clip_id": clip_id, "segment_id": source_id, "start_sec": start, "end_sec": end})
     # 자막 언어는 **여기서 한 번만** 읽는다. 렌더 경로가 둘이라 인자로
     # 흘리면 한쪽만 고쳐진다(`caption_translation` 모듈 주석 참고).
     caption_language = str(editing_session.get("caption_language") or "").strip() or None

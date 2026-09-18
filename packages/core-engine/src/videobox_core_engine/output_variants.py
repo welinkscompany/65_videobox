@@ -241,7 +241,15 @@ def rebase_variant(
         if value is not None
     }
     locked = {lock.field for lock in variant.locks}
-    conflicts: list[VariantConflict] = list(variant.conflicts)
+    # **field당 하나만 들고 간다.** 예전에는 `list(variant.conflicts)`에
+    # 무조건 append했다 -- `story`/`segment_order`(`_STRUCTURAL_FIELDS`)는
+    # 마스터가 바뀔 때마다 항상 이 조건에 걸리므로, owner가 그 충돌을 안
+    # 풀고 편집을 계속하면 rebase가 불릴 때마다 같은 field가 하나씩
+    # 쌓였다(2026-09-18 실사용 프로젝트에서 `story`가 13번 중복 실측,
+    # `conflicts` 상한 64에 결국 부딪힐 수 있었다). 이미 풀리지 않은
+    # 충돌이 있으면 새로 쌓지 않고 **최초 발산 지점(`base_master_revision`)은
+    # 남긴 채 최신 마스터 리비전으로만 갱신**한다.
+    conflicts_by_field: dict[str, VariantConflict] = {conflict.field: conflict for conflict in variant.conflicts}
     for field in dict.fromkeys(changed_fields):
         if field in _STRUCTURAL_FIELDS or field in overridden or field in locked:
             reason = (
@@ -249,8 +257,11 @@ def rebase_variant(
                 if field in locked or field in _STRUCTURAL_FIELDS
                 else "master_changed_while_overridden"
             )
-            conflicts.append(
-                VariantConflict(
+            existing = conflicts_by_field.get(field)
+            conflicts_by_field[field] = (
+                existing.model_copy(update={"current_master_revision": new_master_revision})
+                if existing is not None
+                else VariantConflict(
                     field=field,  # type: ignore[arg-type]
                     base_master_revision=variant.source_session_revision,
                     current_master_revision=new_master_revision,
@@ -261,7 +272,7 @@ def rebase_variant(
         update={
             "source_session_revision": new_master_revision,
             "variant_revision": variant.variant_revision + 1,
-            "conflicts": tuple(conflicts),
+            "conflicts": tuple(conflicts_by_field.values()),
         }
     )
 
