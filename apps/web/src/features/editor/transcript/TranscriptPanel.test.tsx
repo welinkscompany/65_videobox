@@ -58,6 +58,34 @@ describe("TranscriptPanel", () => {
     expect(onSaveCaption).toHaveBeenCalledWith({ segmentId: "segment-1", text: "수정한 자막" });
   });
 
+  // 브루·캡컷의 "텍스트로 편집": 대본 칸을 완전히 비우면 그 장면이 통째로
+  // 빠진다(owner 승인 2026-09-18). **기존 "빼기" 단추와 같은 경로**를 쓴다 --
+  // 여기서는 그 경로를 부르는 자리만 검증한다.
+  it("deletes the segment when its caption is emptied completely", () => {
+    const onDeleteSegment = vi.fn();
+    const onSaveCaption = vi.fn();
+    render(<TranscriptPanel entries={entries} playbackSec={0} selectedSegmentId="segment-1" onSelectSegment={vi.fn()} onSeek={vi.fn()} onSaveCaption={onSaveCaption} onDeleteSegment={onDeleteSegment} />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "segment-1 캡션 텍스트" }), { target: { value: "" } });
+
+    expect(onDeleteSegment).toHaveBeenCalledWith("segment-1");
+    // 지우는 것과 저장하는 것은 다른 경로다 -- 빈 문자열로 "캡션 저장"을 누르게
+    // 두지 않는다(혼동 방지, 과제 지시 3번).
+    expect(onSaveCaption).not.toHaveBeenCalled();
+  });
+
+  // 문장 하나에서 단어 몇 개만 지우는 것은 이 기능의 범위가 아니다 -- 기존
+  // 캡션 수정(`onSaveCaption`)이 이미 처리한다. 완전히 빈 문자열일 때만 삭제로
+  // 해석한다.
+  it("does not delete the segment for a partial edit, only for a fully empty caption", () => {
+    const onDeleteSegment = vi.fn();
+    render(<TranscriptPanel entries={entries} playbackSec={0} selectedSegmentId="segment-1" onSelectSegment={vi.fn()} onSeek={vi.fn()} onDeleteSegment={onDeleteSegment} />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "segment-1 캡션 텍스트" }), { target: { value: "첫 번째" } });
+
+    expect(onDeleteSegment).not.toHaveBeenCalled();
+  });
+
   it("locks transcript editing and navigation while a caption save is pending", () => {
     const onSelectSegment = vi.fn();
     const onSeek = vi.fn();

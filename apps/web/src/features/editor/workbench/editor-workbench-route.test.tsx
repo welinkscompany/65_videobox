@@ -2492,6 +2492,35 @@ describe("EditorWorkbenchRoute", () => {
     expect(load).toHaveBeenCalledTimes(2);
   });
 
+  // 브루·캡컷의 "텍스트로 편집"(owner 승인 2026-09-18): 대본 칸을 완전히
+  // 비우면 그 장면이 타임라인에서 빠진다. **새 명령이 아니라 기존 "빼기"와
+  // 같은 컷 경로**(`set-cut-action`/`remove`)를 부르는지 여기서 끝까지
+  // 확인한다 -- 컴포넌트 단위 시험만으로는 실제 배선까지 못 잡는다.
+  it("deletes the linked segment through the same cut-action lane when its caption is emptied completely", async () => {
+    const load = vi.spyOn(api, "getEditorPlaybackManifest")
+      .mockResolvedValueOnce(captionManifest(4) as never)
+      .mockResolvedValueOnce({ ...captionManifest(5), tracks: [], captions: [] } as never);
+    mockEditingSessionRevisions(4, 5);
+    const cut = vi.spyOn(api, "updateEditingSessionCutAction").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(4);
+    fireEvent.click(screen.getByRole("tab", { name: "미디어" }));
+    expect(await screen.findByRole("dialog", { name: "미디어" })).toBeVisible();
+    fireEvent.click(screen.getByRole("tab", { name: "캡션" }));
+    fireEvent.click(screen.getByRole("button", { name: "원래 자막 캡션 선택" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "segment-1 캡션 텍스트" }), { target: { value: "" } });
+
+    await waitFor(() => expect(cut).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
+      cut_action: "remove",
+      expected_revision: 4,
+    }));
+    await expectEditorRevision(5);
+    expect(load).toHaveBeenCalledTimes(2);
+    // 뺀 장면은 캡션 목록에서도 사라진다 -- 대본 패널과 타임라인이 같은 상태를 본다.
+    expect(screen.getByText("아직 캡션이 없어요.")).toBeInTheDocument();
+  });
+
   it("keeps the current view, refreshes after a revision conflict, and does not retry the command", async () => {
     let resolveRefresh!: (value: ReturnType<typeof narrationManifest>) => void;
     const load = vi.spyOn(api, "getEditorPlaybackManifest")
