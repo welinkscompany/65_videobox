@@ -59,6 +59,16 @@ describe("유진이 한 일 한 줄", () => {
     expect(summary({ intent: "something_new" })).toBe("편집 항목을 바꿔요.");
   });
 
+  // 숏폼 넷(만들기·다시 만들기·펼치기·렌더)이 실제로 적용됐는데도 이 줄이
+  // 몰라서 "편집 항목을 바꿔요."로 떨어지고 있었다(2026-09-18 발견) --
+  // 이 파일 머리말이 경고한 바로 그 함정. 넷 다 제 이름으로 말해야 한다.
+  it("숏폼 넷도 제 이름으로 말한다", () => {
+    expect(summary({ intent: "create_short_form" })).toBe("숏폼을 새로 만들어요.");
+    expect(summary({ intent: "remake_short_form" })).toBe("숏폼 장면을 다시 골라요.");
+    expect(summary({ intent: "unfold_short_form" })).toBe("숏폼을 편집본으로 펼쳐요.");
+    expect(summary({ intent: "render_short_form" })).toBe("숏폼을 완성본으로 뽑아요.");
+  });
+
   it("변형본 충돌 풀기는 항목·결정을 화면 어휘로 말한다", () => {
     expect(summary({
       intent: "resolve_variant_conflict", variant_id: "variant-s1-vertical_full", field: "story", decision: "rebase_master",

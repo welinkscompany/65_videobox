@@ -96,5 +96,12 @@ export function yujinEditingOperationSummary(operation: YujinEditingOperation): 
       ? `${fieldName} 충돌에서 지금 이 변형본 값을 그대로 둬요.`
       : `${fieldName} 충돌을 마스터 기준으로 다시 맞춰요.`;
   }
+  // 숏폼 넷(만들기·다시 만들기·펼치기·렌더) -- 이 파일 머리말이 경고한 함정
+  // 그대로였다(2026-09-18 발견): 실제로 적용됐는데도 이 줄이 몰라서
+  // "편집 항목을 바꿔요."로 떨어져 owner에게 아무것도 말해 주지 않았다.
+  if (operation.intent === "create_short_form") return "숏폼을 새로 만들어요.";
+  if (operation.intent === "remake_short_form") return "숏폼 장면을 다시 골라요.";
+  if (operation.intent === "unfold_short_form") return "숏폼을 편집본으로 펼쳐요.";
+  if (operation.intent === "render_short_form") return "숏폼을 완성본으로 뽑아요.";
   return "편집 항목을 바꿔요.";
 }
