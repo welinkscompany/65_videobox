@@ -1,3 +1,5 @@
+**대체됨:** `docs/handoffs/2026-09-18-local-runtime-timeout-raised-to-60s.ko.md`
+
 # task_006f1523 -- R1 경계 나누기가 완성본 바이트를 바꾸는 이유를 끝까지 찾았다 (고치지는 않았다)
 
 owner 승인(2026-09-18, "근본적으로 확인하고 고쳐줘") 위에서

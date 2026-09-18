@@ -81,6 +81,12 @@ services:
       # and failed as "a transient network error".  Owner approved this one
       # host path on 2026-08-08 (`docs/development-fast-path.ko.md` §10.14 2-B).
       VIDEOBOX_LOCAL_RUNTIME_BASE_URL: ${VIDEOBOX_LOCAL_RUNTIME_BASE_URL:-http://host.docker.internal:1234/v1}
+      # 화면 채팅(크롭·초점 조정 등 구조화 JSON 호출)의 상한. 30초였던 코드
+      # 기본값이 이 컴퓨터의 27B 모델에 실측으로 너무 짧다고 확인됐다
+      # (task_c68ba644, 2026-09-18) -- `settings.py`의 새 기본값(60)과 맞춘
+      # 값을 여기 명시해서, 재빌드 없이 `.env.container`만 바꿔도 owner가
+      # 조정할 수 있게 열어 둔다.
+      VIDEOBOX_LOCAL_RUNTIME_TIMEOUT_SECONDS: ${VIDEOBOX_LOCAL_RUNTIME_TIMEOUT_SECONDS:-60}
       # B-roll analysis (Task 19) was activated in code but never carried into
       # compose, so the container fell back to the unavailable worker and every
       # analysis came back blocked.  Uses the same LM Studio as the line above.

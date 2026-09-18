@@ -44,6 +44,28 @@ def test_local_runtime_reads_timeout_from_the_environment(monkeypatch) -> None:
     assert resolve_local_runtime_config().timeout_seconds == 45
 
 
+def test_local_runtime_default_timeout_is_not_30_seconds(monkeypatch) -> None:
+    """The old 30s default (`LocalOpenAICompatibleRuntimeConfig.timeout_seconds`)
+    was too short for real use (task_c68ba644, 2026-09-18).
+
+    Real measurements on this machine's loaded model (qwen/qwen3.8-27b,
+    `lms ps` confirmed idle, no GPU contention) against the on-screen chat's
+    structured-JSON call path (`yujin_editing_proposal_service.create` ->
+    `LocalOnlyRuntimeService.generate_structured`, no per-call `wait_seconds`
+    override) took 12-25 seconds for a crop-adjustment instruction on a real
+    95-segment project -- close enough to 30s that real conversation logs
+    from 2026-09-12/09-13 already show `LOCAL_TIMEOUT` failures. 60s (already
+    the precedent this repo's own live-smoke tests use for the same model,
+    `tests/test_yujin_local_conversation_live_smoke.py`) gives roughly 2x
+    margin over the worst observed latency without stalling the screen for
+    an unbounded time.
+    """
+    _clear_local_runtime_environment(monkeypatch)
+
+    assert resolve_local_runtime_config().timeout_seconds == 60
+    assert LocalOpenAICompatibleRuntimeConfig().timeout_seconds == 60
+
+
 def test_blank_environment_values_fall_back_to_defaults(monkeypatch) -> None:
     _clear_local_runtime_environment(monkeypatch)
     monkeypatch.setenv("VIDEOBOX_LOCAL_MODEL_NAME", "   ")

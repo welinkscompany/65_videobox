@@ -379,7 +379,13 @@ class LocalOpenAICompatibleRuntimeConfig:
     enabled: bool = True
     base_url: str = "http://127.0.0.1:1234/v1"
     model_name: str = "qwen3-35b"
-    timeout_seconds: int = 30
+    # 30초였던 옛 기본값은 실측(2026-09-18, task_c68ba644)으로 이 컴퓨터의
+    # 27B 모델(구조화 JSON 응답)에 너무 짧다고 확인됐다 -- 실제 화면 채팅
+    # 경로(크롭 조정 등)가 12~25초 걸렸고, 2026-09-12·09-13 실제 대화 기록에도
+    # 같은 `LOCAL_TIMEOUT` 실패가 이미 남아 있었다. 60초는 이 저장소의 라이브
+    # smoke 시험(`tests/test_yujin_local_conversation_live_smoke.py`)이 같은
+    # 모델에 이미 쓰던 값과 같다 -- 실측 최댓값 대비 약 2배 여유.
+    timeout_seconds: int = 60
 
     # The pin below exists so a "local" model call can never reach the network.
     # `host.docker.internal` is the one addition: inside the container 127.0.0.1
