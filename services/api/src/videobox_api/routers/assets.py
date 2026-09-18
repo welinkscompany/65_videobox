@@ -612,14 +612,17 @@ def build_assets_router(
         except Exception as exc:
             raise _http_error(exc) from exc
         thumbnail_path = store.thumbnail_storage_path(project_id=project_id, asset_id=asset_id)
-        if not thumbnail_path.exists() and asset["asset_type"] == AssetType.IMAGE.value:
-            # brol(video)은 들여올 때 이미 만들어 둔다(`_try_generate_broll_
-            # thumbnail`). 이미지는 그 자리가 없어서 여기서 처음 물을 때
-            # 즉석으로 그려 캐시한다 -- 2026-09-17 화면 점검 실측: 실제
-            # 프로젝트에서 이미지 자산 썸네일이 그냥 404였다.
+        if not thumbnail_path.exists() and asset["asset_type"] in (AssetType.IMAGE.value, AssetType.BROLL_VIDEO.value):
+            # 등록 시점에 한 번 만든 캐시(brol은 `_try_generate_broll_
+            # thumbnail`, 이미지는 여기 이 자리)가 §10.16 정리 규칙으로
+            # 지워지면 metadata의 thumbnail_uri는 남는데 파일은 없어 그냥
+            # 404였다 -- 2026-09-17에 이미지만 즉석 재생성 fallback을
+            # 붙였다가, 2026-09-18 INVEST-04 조사에서 영상 자산은 빠져
+            # 있던 걸 확인했다. 원본이 남아 있는 한 둘 다 다시 그린다.
+            media_type = "image" if asset["asset_type"] == AssetType.IMAGE.value else "broll"
             try:
                 source = store.resolve_storage_uri(project_id=project_id, storage_uri=asset["storage_uri"])
-                rendered = render_thumbnail_bytes(source=source, media_type="image", kind="thumbnail") if source.exists() else None
+                rendered = render_thumbnail_bytes(source=source, media_type=media_type, kind="thumbnail") if source.exists() else None
             except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired):
                 rendered = None
             if rendered is not None:

@@ -1212,6 +1212,27 @@ describe("AppRouter URL ownership", () => {
     await waitFor(() => expect(recoveryRouter.state.location.pathname).toBe("/projects/project_a/home"));
   });
 
+  it("drops a broken project thumbnail instead of showing a broken-image icon", async () => {
+    // INVEST-04: 파생 캐시(derived/thumbnails)가 정리 규칙으로 지워지면
+    // metadata의 thumbnail_url은 남는데 실제 파일은 404가 난다. 이때 카드는
+    // 깨진 이미지 아이콘 대신 그림 없는 카드로 조용히 넘어가야 한다.
+    const projects = [{ project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" }];
+    vi.spyOn(api, "listProjects").mockResolvedValue(projects);
+    vi.spyOn(api, "getProjectWorkspaceSummary").mockResolvedValue({
+      project_id: "project_a", display_name: "A", updated_at: "2026-08-12T00:00:00Z",
+      current_stage: "plan", state: "ready", thumbnail_url: "/api/projects/project_a/assets/asset_1/thumbnail",
+      finished_video_count: 0,
+      next_action: { label: "프로젝트 열기", href: "/projects/project_a/plan" },
+    });
+    const catalogRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
+    render(<AppRouter router={catalogRouter} />);
+
+    const image = await screen.findByRole("img", { name: "A 대표 이미지" });
+    fireEvent.error(image);
+
+    await waitFor(() => expect(screen.queryByRole("img", { name: "A 대표 이미지" })).not.toBeInTheDocument());
+  });
+
   it("sends the voice settings route to where the voice work now lives", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue([
       { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" },
