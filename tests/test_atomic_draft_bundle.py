@@ -65,6 +65,55 @@ def test_review_can_be_rebuilt_for_the_current_edit(tmp_path):
     assert timeline["source_session_revision"] == current["session_revision"]
 
 
+# 2026-09-19 실사용 프로젝트(0907-b26195af) 화면 수동 테스트로 발견: 장면을 나눈
+# 뒤 "현재 편집본으로 검토본 다시 만들기"를 눌러도 검토 화면(`GET
+# /timelines/{job_id}`)에 뜨는 장면 경계가 분할 이전 값 그대로였다.
+# `refresh_review_for_current_edit`은 `source_session_revision` 같은 신선도
+# 표시만 갱신할 뿐, 저장된 timeline 문서의 `tracks`는 (일부러) 그대로 두기
+# 때문이다 -- 렌더 경로는 항상 session과 함께 다시 materialize 하므로 결과물은
+# 맞지만, 이 화면은 저장된 tracks를 그대로 읽어서 보여준다.
+def test_refreshing_the_review_updates_stored_tracks_to_match_a_split_segment(tmp_path):
+    from videobox_api.models import TimelinePayloadResponse
+    from videobox_api.response_normalizers import _normalize_timeline_payload_for_response
+    from videobox_core_engine.editing_session import split_segment
+
+    store = LocalProjectStore(tmp_path / "projects"); project = store.bootstrap_project("RefreshTracks")
+    brief, readiness = _ready(store, project.project_id)
+    bundle = store.materialize_atomic_draft_bundle(
+        project_id=project.project_id, brief_id=brief["brief_id"], expected_brief_revision=brief["revision"],
+        readiness_id=readiness["readiness_id"], expected_readiness_revision=readiness["revision"],
+        idempotency_key="refresh-tracks", allow_placeholder=True,
+    )
+    session_id, timeline_id = bundle["session_id"], bundle["timeline_id"]
+    session = store.get_editing_session(project_id=project.project_id, session_id=session_id)
+    original_segment_id = session["segments"][0]["segment_id"]
+
+    split = split_segment(session=session, segment_id=original_segment_id, split_sec=2.0)
+    # 실사용 재현에는 b-roll override가 걸린 장면이 있었다 -- composition_plan이
+    # broll/bgm/sfx/overlay 클립을 자리마다 새로 짓는 사전이라 `clip_type`을 안
+    # 채운다. 이 override가 없으면 그 자리(broll 트랙의 일반 경로)를 시험이 안
+    # 밟아서 회귀를 놓친다.
+    split["segments"][0]["broll_override"] = {"asset_id": "asset_probe"}
+    store.update_editing_session(project_id=project.project_id, session_id=session_id, session_payload=split)
+    left_id, right_id = [segment["segment_id"] for segment in split["segments"][:2]]
+
+    store.refresh_review_for_current_edit(project_id=project.project_id, session_id=session_id)
+
+    refreshed = store.get_timeline_run(project_id=project.project_id, timeline_id=timeline_id)
+    narration_track = next(track for track in refreshed["tracks"] if track["track_type"] == "narration")
+    stored_segment_ids = {clip["segment_id"] for clip in narration_track["clips"]}
+    assert stored_segment_ids == {left_id, right_id}, (
+        f"검토 화면에 뜨는 저장된 tracks가 분할을 반영하지 못했다: {stored_segment_ids}"
+    )
+    assert {(clip["start_sec"], clip["end_sec"]) for clip in narration_track["clips"]} == {(0.0, 2.0), (2.0, 5.0)}
+    # `get_timeline_run`은 원시 dict를 그대로 준다 -- **실제 API가 거치는 응답
+    # 계약까지 통과하는지**는 따로 확인해야 한다. 여기서 안 재면 `clip_type`
+    # 누락처럼 저장은 되는데 실제 화면은 500으로 죽는 결함을 놓친다
+    # (2026-09-19 실측: 컨테이너 재빌드 뒤 `GET /timelines/{job_id}`가
+    # `pydantic.ValidationError: clip_type Field required`로 실패했었다).
+    TimelinePayloadResponse(**_normalize_timeline_payload_for_response(refreshed))
+
+
 # 이게 실제로 막힘을 푸는 부분이다. 빈 장면을 채우려면 편집해야 하는데, 그 편집이
 # 승인을 죽였다. 채운 뒤 다시 세우면 `확인할 항목`이 사라져야 내보내기까지 갈 수 있다.
 def test_filling_an_empty_scene_clears_what_blocked_the_export(tmp_path):
