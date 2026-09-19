@@ -948,6 +948,66 @@ class EditingSessionRegenerationMixin:
         )
         return timeline
 
+    def _materialize_timeline_tracks_for_review(
+        self,
+        *,
+        project_id: str,
+        timeline: dict[str, Any],
+    ) -> dict[str, Any]:
+        """검토 화면이 저장된 tracks가 아니라 지금 편집본 기준 경계를 보게 한다.
+
+        **저장된 `timeline["tracks"]`는 손대지 않는다.** `composition_plan.py`의
+        `source_tracks`/`source_durations`/`source_bounds`가 그 값을 원본 소스
+        길이 계산 기준으로도 읽는다 -- 2026-09-20에 그걸 모르고 저장된 값을
+        덮어썼다가 broll/overlay 클립의 `overlay_type`/`overlay_payload`가
+        빠져 `playback-manifest`가 422로 죽었다(`docs/handoffs/
+        2026-09-20-timeline-manual-editing-bug-hunt.ko.md`). 렌더 경로
+        (`build_editor_playback_manifest`)가 이미 쓰는 것과 같은 패턴으로,
+        읽을 때마다 `materialize_editing_session_timeline`을 다시 불러서
+        **응답에 실을 사본만** 새로 만든다.
+        """
+        source_session_id = str(timeline.get("source_session_id") or "").strip()
+        if not source_session_id:
+            return timeline
+        try:
+            session = self.store.get_editing_session(project_id=project_id, session_id=source_session_id)
+        except Exception:  # noqa: BLE001
+            # 세션이 지워졌거나 못 찾아도 검토 화면 자체는 저장된 값으로 열려야 한다.
+            return timeline
+        materialized = materialize_editing_session_timeline(
+            timeline=timeline, editing_session=session, project_id=project_id
+        )
+        # 자막 트랙은 `materialize_editing_session_timeline`이 아예 안 만든다(자기
+        # 자리가 따로 있다 -- `editor_playback_manifest.py` 주석 참고). 저장된
+        # 값을 그대로 남긴다.
+        display_tracks = [
+            {
+                "track_id": track.get("track_id"),
+                "track_type": track.get("track_type"),
+                "clips": [
+                    {
+                        **clip,
+                        # broll/bgm/sfx/overlay 클립은 composition_plan이 자리마다
+                        # 새로 짓는 사전이라 `clip_type`을 안 채운다(렌더는 트랙의
+                        # `track_type`으로 이미 안다) -- 응답 계약
+                        # (`TimelineClipResponse.clip_type`)은 필수라 여기서 채운다.
+                        "clip_type": clip.get("clip_type") or track.get("track_type"),
+                    }
+                    for clip in track.get("clips", [])
+                    if isinstance(clip, dict)
+                ],
+            }
+            for track in materialized.get("tracks", [])
+            if isinstance(track, dict) and track.get("track_type") != "caption"
+        ]
+        stale_caption_tracks = [
+            track for track in timeline.get("tracks", [])
+            if isinstance(track, dict) and track.get("track_type") == "caption"
+        ]
+        result = dict(timeline)
+        result["tracks"] = display_tracks + stale_caption_tracks
+        return result
+
     def update_editing_session_segment_visual_overlay(
         self,
         *,

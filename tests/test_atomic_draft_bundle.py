@@ -65,6 +65,66 @@ def test_review_can_be_rebuilt_for_the_current_edit(tmp_path):
     assert timeline["source_session_revision"] == current["session_revision"]
 
 
+# 2026-09-20: 검토 화면(`GET /timelines/{job_id}` -> `get_timeline_result`)이
+# 저장된 timeline 문서의 `tracks`를 그대로 읽어서, 장면을 나눈 뒤 "현재 편집본으로
+# 검토본 다시 만들기"를 눌러도 화면의 장면 경계가 분할 이전 값 그대로였다(실사용
+# 프로젝트 `0907-b26195af`에서 발견). 첫 시도(커밋 `2183eec0`)는 저장된
+# `timeline["tracks"]` 자체를 덮어써서 고치려 했다가 되돌려졌다 -- 그 값은
+# `composition_plan.py`가 원본 소스 길이 계산(`source_durations`/`source_bounds`)
+# 에도 쓰기 때문에 덮어쓰면 broll/overlay 클립의 `overlay_type`/`overlay_payload`가
+# 빠져 `playback-manifest`가 422로 죽었다(`docs/handoffs/
+# 2026-09-20-timeline-manual-editing-bug-hunt.ko.md`). 이 시험은 **저장된 값은
+# 그대로**이고 **응답만** 최신 편집을 반영하는지를 잰다.
+def test_timeline_review_response_reflects_the_latest_split_without_mutating_storage(tmp_path):
+    from videobox_api.models import TimelinePayloadResponse
+    from videobox_api.response_normalizers import _normalize_timeline_payload_for_response
+    from videobox_core_engine.editing_session import split_segment
+
+    store = LocalProjectStore(tmp_path / "projects"); project = store.bootstrap_project("ReviewFollowsEdit")
+    brief, readiness = _ready(store, project.project_id)
+    bundle = store.materialize_atomic_draft_bundle(
+        project_id=project.project_id, brief_id=brief["brief_id"], expected_brief_revision=brief["revision"],
+        readiness_id=readiness["readiness_id"], expected_readiness_revision=readiness["revision"],
+        idempotency_key="review-follows-edit", allow_placeholder=True,
+    )
+    session_id, timeline_id, timeline_job_id = bundle["session_id"], bundle["timeline_id"], bundle["timeline_job_id"]
+    session = store.get_editing_session(project_id=project.project_id, session_id=session_id)
+    original_segment_id = session["segments"][0]["segment_id"]
+
+    split = split_segment(session=session, segment_id=original_segment_id, split_sec=2.0)
+    # 실사용 재현에는 b-roll override가 걸린 장면이 있었다 -- composition_plan이
+    # broll/bgm/sfx/overlay 클립을 자리마다 새로 짓는 사전이라 `clip_type`을 안
+    # 채운다. 이 override가 없으면 그 자리(broll 트랙의 일반 경로)를 시험이 안
+    # 밟아서 회귀를 놓친다.
+    split["segments"][0]["broll_override"] = {"asset_id": "asset_probe"}
+    store.update_editing_session(project_id=project.project_id, session_id=session_id, session_payload=split)
+    left_id, right_id = [segment["segment_id"] for segment in split["segments"][:2]]
+
+    store.refresh_review_for_current_edit(project_id=project.project_id, session_id=session_id)
+
+    stored = store.get_timeline_run(project_id=project.project_id, timeline_id=timeline_id)
+    stored_narration = next(track for track in stored["tracks"] if track["track_type"] == "narration")
+    stored_segment_ids = {clip["segment_id"] for clip in stored_narration["clips"]}
+    assert stored_segment_ids == {original_segment_id}, (
+        "저장된 timeline['tracks']는 손대지 말아야 한다 -- composition_plan.py가 "
+        "그 값을 원본 소스 길이 계산에도 쓴다"
+    )
+
+    pipeline = LocalPipelineRunner(store)
+    result = pipeline.get_timeline_result(project_id=project.project_id, job_id=timeline_job_id)
+    response_narration = next(track for track in result["timeline"]["tracks"] if track["track_type"] == "narration")
+    response_segment_ids = {clip["segment_id"] for clip in response_narration["clips"]}
+    assert response_segment_ids == {left_id, right_id}, (
+        f"검토 화면 응답이 분할을 반영하지 못했다: {response_segment_ids}"
+    )
+    assert {(clip["start_sec"], clip["end_sec"]) for clip in response_narration["clips"]} == {(0.0, 2.0), (2.0, 5.0)}
+    # `get_timeline_result`가 준 dict를 그대로 실제 API 응답 계약
+    # (`TimelinePayloadResponse`)까지 통과시켜서, `clip_type` 누락 같은 2차
+    # 결함(2026-09-19 실측: `pydantic.ValidationError: clip_type Field required`)을
+    # 다시 놓치지 않게 한다.
+    TimelinePayloadResponse(**_normalize_timeline_payload_for_response(result["timeline"]))
+
+
 # 이게 실제로 막힘을 푸는 부분이다. 빈 장면을 채우려면 편집해야 하는데, 그 편집이
 # 승인을 죽였다. 채운 뒤 다시 세우면 `확인할 항목`이 사라져야 내보내기까지 갈 수 있다.
 def test_filling_an_empty_scene_clears_what_blocked_the_export(tmp_path):

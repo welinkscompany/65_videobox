@@ -1597,6 +1597,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         else:
             timeline = self.store.get_timeline_run(project_id=project_id, timeline_id=job["output_ref"])
         timeline = self._hydrate_timeline_review_status(project_id=project_id, timeline=timeline)
+        timeline = self._materialize_timeline_tracks_for_review(project_id=project_id, timeline=timeline)
         return {"job_id": job["job_id"], "status": job["status"], "timeline": timeline}
 
     def get_review_snapshot(self, *, project_id: str, job_id: str) -> dict[str, Any]:
