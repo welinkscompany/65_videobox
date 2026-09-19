@@ -566,6 +566,14 @@ Stop 훅은 "화면에 닿는 파일을 고쳤다"는 **사실만** 알려 주�
 `docs/oss/editor-ui-source-map.json`에 핀된 반입 파일이 **전부** provenance 가드로
 배차되는지, 그리고 `.claude/settings.json`의 훅이 harness가 읽는 모양 그대로인지.
 마지막 항목이 중요하다 — 훅 형식이 틀리면 조용히 아무 일도 안 하고, 그게 최악이다.
+
+**세 번째 훅 — SessionStart (2026-09-19).** 위 둘과 다른 목적이다 — 코드가 아니라
+**git worktree 동기화 상태**를 매 세션 시작마다 알려준다(`scripts/session-start-
+worktree-sync-check.sh`). §10.21이 겪은 사고(끝난 작업이 며칠 동안 안 합쳐진 채
+방치됨)를 다시 안 겪으려는 장치다. 각 worktree를 이미 main에 병합됨(정리
+후보)/main에 없는 고유 커밋 있음(검토 후보)/미변경 아님(손대지 말 것) 셋으로
+나눠 보고만 한다 — **삭제·병합은 하지 않는다**, 그건 여전히 사람이 본다.
+
 ### 10.19 설치형(Tauri)에 남은 걸림돌 — Smart App Control
 
 `decisions/2026-08-30-installed-desktop-shell-tauri.ko.md`로 착수가 승인됐고
@@ -594,17 +602,32 @@ Stop 훅은 "화면에 닿는 파일을 고쳤다"는 **사실만** 알려 주�
 옆 프로젝트의 에이전트를 틀리게 했고, 그걸 고치던 나까지 같은 자리로 끌었다.
 **낡은 것은 남만 틀리게 하지 않는다.**
 
-**How to apply:**
+**[2026-09-19 갱신] 상시 활성 worktree(`.worktrees/videobox-container-compatibility`,
+브랜치 `codex/videobox-container-compatibility`)는 지웠다 — 아래 "How to apply"의
+첫 줄은 더 이상 참이 아니다.** main과 완전히 합쳐진 뒤(당시 두 브랜치가 완전히
+같은 커밋이었다) 대표님 승인으로 폐기했다. 지금은 **메인 체크아웃에서 직접
+작업한다**(`CLAUDE.md` §3). 이유는 같다 — 상시 유지하는 별도 worktree가 있으면
+거기서 쌓인 진행이 main에 안 합쳐진 채 방치되기 쉽고, 실제로 오늘도 그 브랜치
+자체가 한동안 뒤처져 있었다. 병렬 작업은 그때그때 격리 worktree(`.claude/worktrees/
+agent-*`)를 만들어 쓰고 끝나면 병합 후 지운다 — SessionStart 훅(§10.18 옆,
+`scripts/session-start-worktree-sync-check.sh`)이 매 세션 시작마다 안 합쳐진 게
+있는지 알려준다.
 
-- 작업은 계속 worktree에서 한다 — 컨테이너 스택·`.venv`·스크립트가 거기 맞춰져
-  있다. main은 이제 **합쳐지는 자리**이지 함정이 아니다.
-- **논리 단위가 닫히면 합쳐라.** 전체 시험 초록 + 푸시 다음이 그 자리다.
-- 벌어졌는지는 한 줄로 잰다. 세 자리 숫자가 나오면 그게 신호다:
+**How to apply (지금 기준):**
+
+- **논리 단위가 닫히면 즉시 main에 합쳐라.** 전체 시험 초록 + 푸시 다음이 그 자리다.
+  격리 worktree에서 작업했다면 그 worktree 브랜치를 main으로 병합(또는 그 브랜치를
+  직접 origin/main으로 fast-forward push)하고 worktree는 지운다.
+- 벌어졌는지는 SessionStart 훅 출력으로 안다(자동). 수동으로 보려면:
   ```bash
-  git rev-list --left-right --count main...codex/videobox-container-compatibility
+  git worktree list
   ```
-- 합칠 때 부딪히는 파일은 대개 `CLAUDE.md` 하나다. **합친 뒤 그 문서가 여전히
-  참인지 읽어라** -- "main은 뒤처져 있다" 같은 문장은 병합이 거짓말로 만든다.
+  각 worktree 경로에 대해 `git merge-base --is-ancestor <branch> main`으로 이미
+  합쳐졌는지 확인한다.
+- 합칠 때 부딪히는 파일은 대개 `CLAUDE.md`와 `docs/handoffs/`의 "대체됨" 포인터
+  줄이다(여러 worktree가 동시에 "최신 세션 인계"를 자기 문서로 갱신하려고 하기
+  때문). **합친 뒤 그 문서가 여전히 참인지 읽어라** — "main은 뒤처져 있다" 같은
+  문장은 병합이 거짓말로 만든다.
 - 루트 작업 사본에 미커밋 변경이 보이면 **해시가 아니라 내용으로** 고유한지
   확인하라. 2026-09-07에는 `.gitignore` 한 줄이 실제로 고유해서 개발선으로
   먼저 옮긴 뒤 합쳤다.
@@ -630,6 +653,16 @@ Stop 훅은 "화면에 닿는 파일을 고쳤다"는 **사실만** 알려 주�
   사실은 분석마다 남는 기록(`/provenance`)에 실린다.
 - 재부팅 뒤 별도 설정은 필요 없다 — LM Studio의 `justInTimeModelLoading`이
   이름을 대고 부르는 요청에 맞춰 올려 준다.
+- **모델이 "generating" 상태로 멈춰서 안 풀릴 수 있다(2026-09-19 실측).**
+  증상: 채팅 요청이 몇 분이 지나도 응답이 없는데, `nvidia-smi`로 보면 GPU
+  사용률이 거의 0%이고, `lms ps --json`은 `"status":"generating","queued":0`
+  인데, `lms log stream`을 몇 초 지켜봐도 토큰이 한 개도 안 찍힌다 — 즉 정말
+  일하는 중이 아니라 워커가 멈춘 것이다. 다른 프로젝트가 GPT 대신 이 로컬
+  모델로 몰리는 날(대표님 확인) 이후 한 번 재현됐다. **고치는 법**:
+  `lms unload <모델id>` 후 `lms load <모델id> -c <context-length> --parallel
+  <n> --gpu max -y`로 다시 올린다(로드된 값은 `lms ps`로 미리 확인). 재로드
+  뒤 실제 채팅 요청으로 정상 응답이 오는지(수십 초 내) 확인한다 — 이 프로젝트
+  뿐 아니라 같은 LM Studio를 공유하는 다른 프로젝트도 같이 풀린다.
 
 ## 11. 명령·주소·스크립트
 
