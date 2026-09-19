@@ -3395,15 +3395,10 @@ class LocalProjectStore(OutputVariantMixin, PreviewShareMixin, YujinMemoryMixin,
         그래서 한 번 편집하면 그 프로젝트는 내보내기까지 갈 길이 없었고, 빈 구간을
         채우려면 편집해야 하는데 그 편집이 승인을 죽여서 빠져나갈 수도 없었다.
 
-        **합성 결과 자체는 다시 계산하지 않는다.** 출력 경로는 언제나 timeline과
-        session을 함께 materialize 하므로 렌더는 이미 정확하다. 하지만 **검토
-        화면(`GET /timelines/{job_id}`)은 그 materialize를 거치지 않고 여기 저장된
-        `tracks`를 그대로 읽는다** -- 그래서 장면을 나눈 뒤 여기서 다시 세워도
-        경계가 분할 이전 값 그대로였다(2026-09-19 실사용 프로젝트 `0907-b26195af`
-        화면 수동 테스트로 발견). narration·broll·bgm·sfx·overlay 트랙의 장면
-        경계·자산 선택을 지금 편집본 기준으로 다시 세운다. 자막 트랙은 이
-        API 계약(`TimelineClipResponse`)이 애초에 `text` 필드를 안 실어서 --
-        따로 계보 문제가 있어도 화면에 영향이 없다 -- 손대지 않는다.
+        **합성을 다시 계산하지 않는다.** 출력 경로는 언제나 timeline과 session을 함께
+        materialize 하므로 timeline의 tracks는 손댈 것이 없다. 여기서 하는 일은
+        지금 편집본에서 **아직 비어 있는 장면만** 확인할 항목으로 남기고, 그 결과를
+        timeline과 승인 기록에 같은 revision으로 적는 것이다.
 
         승인까지 하지는 않는다. 상태는 `blocked`(아직 빈 장면이 있음) 또는 `draft`이며,
         `approved`로 올리는 것은 owner가 검토 화면에서 누를 일이다.
@@ -3418,43 +3413,6 @@ class LocalProjectStore(OutputVariantMixin, PreviewShareMixin, YujinMemoryMixin,
         materialized = materialize_editing_session_timeline(
             timeline=timeline, editing_session=session, project_id=project_id
         )
-        # **검토 화면이 실제로 읽는 자리를 지금 편집본 기준으로 다시 세운다.**
-        # `materialized["tracks"]`는 렌더용이라 계약 밖 필드(`playback_rate`,
-        # `source_in_sec`/`source_out_sec` 등)를 더 싣는다 -- `TimelineClipResponse`가
-        # 아는 자리만 남긴다. 자막 트랙은 `materialize`가 아예 안 만든다(자기 자리가
-        # 따로 있다, `editor_playback_manifest.py` 주석 참고) -- 저장된 것을 그대로 둔다.
-        # `clip_type`은 클립 자신에 없을 때가 있다 -- broll/bgm/sfx/overlay는
-        # composition_plan이 자리마다 새로 짓는 사전이라 그 열쇠를 안 채운다
-        # (렌더는 트랙의 `track_type`으로 이미 알고 있어서 필요가 없었다).
-        # 여기서는 응답 계약(`TimelineClipResponse.clip_type`)이 필수라 트랙
-        # 자신의 `track_type`에서 채운다 -- 클립 값이 있어도 트랙과 어긋날 수
-        # 없으므로 트랙 쪽이 더 믿을 수 있는 출처다.
-        _DISPLAY_CLIP_FIELDS = (
-            "clip_id", "segment_id", "asset_uri", "start_sec", "end_sec",
-            "recommendation_id", "asset_id", "media_controls", "expected_content_sha256",
-            "media_revision", "warning_provenance", "gap_slot_id", "label",
-        )
-        refreshed_tracks = [
-            {
-                "track_id": track.get("track_id"),
-                "track_type": track.get("track_type"),
-                "clips": [
-                    {
-                        **{field: clip[field] for field in _DISPLAY_CLIP_FIELDS if field in clip},
-                        "clip_type": track.get("track_type"),
-                    }
-                    for clip in track.get("clips", [])
-                    if isinstance(clip, dict)
-                ],
-            }
-            for track in materialized.get("tracks", [])
-            if isinstance(track, dict) and track.get("track_type") != "caption"
-        ]
-        stale_caption_tracks = [
-            track for track in timeline.get("tracks", [])
-            if isinstance(track, dict) and track.get("track_type") == "caption"
-        ]
-        timeline["tracks"] = refreshed_tracks + stale_caption_tracks
         # 자산을 채운 장면은 override가 임시 클립 구간을 덮으므로 materialize 결과에서
         # 사라진다. 확인할 항목을 저장된 목록에서 베끼지 않고 여기서 다시 유도하는
         # 이유다 -- 베끼면 owner가 채운 뒤에도 "자산이 필요하다"가 남는다.
