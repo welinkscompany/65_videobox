@@ -36,6 +36,19 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "statusMessage": "worktree 동기화 상태 확인",
+            "timeout": 30,
+            "command": "d=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; bash \"$d/scripts/session-start-worktree-sync-check.sh\" 2>/dev/null || true"
+          }
+        ]
+      }
     ]
   }
 }
