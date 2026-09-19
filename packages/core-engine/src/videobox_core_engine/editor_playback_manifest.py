@@ -112,6 +112,10 @@ def build_editor_playback_manifest(
         "captions": [
             {
                 "segment_id": str(segment["segment_id"]),
+                # 화면이 "지금 이 자막이 실제로 놓인 조각"을 알아야 할 때 쓰는
+                # 자리(`composition_plan.py`의 `owning_segment_id` 주석 참고).
+                # 없으면(옛 캐시 등) 계보 값으로 되돌아간다.
+                "owning_segment_id": str(segment.get("owning_segment_id") or segment["segment_id"]),
                 "caption_id": str(segment.get("caption_id") or placement_id(kind="caption", base_id=str(segment["segment_id"]))),
                 "placement_id": placement_id(kind="caption", base_id=str(segment.get("caption_id") or segment["segment_id"])),
                 "text": str(segment.get("caption_text") or segment.get("text") or ""),

@@ -731,7 +731,15 @@ def materialize_editing_session_timeline(
             if window_end <= window_start:
                 continue
             content_segment_id = str(window.get("source_segment_id") or segment_id)
-            session_captions.append({"caption_id": str(window.get("caption_id") or f"caption-{segment_id}-{window_index}"), "segment_id": content_segment_id, "caption_text": caption_text_for_language(window, caption_language), "caption_style": deepcopy(window.get("caption_style") or segment.get("caption_style") or editing_session.get("caption_style") or {}), "start_sec": window_start, "end_sec": window_end, "playback_rate": segment_playback_rate, "review_required": window.get("review_required"), "tts_replacement": deepcopy(window.get("tts_replacement")), "caption_source_text": str(window.get("caption_text") or ""), "caption_language": caption_language})
+            # `segment_id`는 대본 정렬·번역 조회용 **영구 계보**다(합치기·분할을
+            # 거듭해도 원래 출처를 지킨다 -- `_content_windows` docstring,
+            # `test_merge_keeps_right_semantics_windowed_and_reanchors_legacy_export_overlay`).
+            # 화면 타임라인은 **지금 이 자막이 실제로 놓인 조각**이 따로 필요하다
+            # -- 안 그러면 한 장면을 두 번 나눈 뒤 화면에서 아무 조각이나 골라도
+            # 계보가 같은 형제 자막 여러 개가 한꺼번에 "선택됨"으로 뜬다
+            # (2026-09-19 실사용 프로젝트 `0907-b26195af` 화면 수동 테스트로
+            # 발견). 계보 값을 바꾸는 대신 **화면 전용 필드를 따로 싣는다.**
+            session_captions.append({"caption_id": str(window.get("caption_id") or f"caption-{segment_id}-{window_index}"), "segment_id": content_segment_id, "owning_segment_id": segment_id, "caption_text": caption_text_for_language(window, caption_language), "caption_style": deepcopy(window.get("caption_style") or segment.get("caption_style") or editing_session.get("caption_style") or {}), "start_sec": window_start, "end_sec": window_end, "playback_rate": segment_playback_rate, "review_required": window.get("review_required"), "tts_replacement": deepcopy(window.get("tts_replacement")), "caption_source_text": str(window.get("caption_text") or ""), "caption_language": caption_language})
             for ordinal, overlay in enumerate(window.get("visual_overlays", []) if isinstance(window.get("visual_overlays"), list) else []):
                 if not isinstance(overlay, dict):
                     continue

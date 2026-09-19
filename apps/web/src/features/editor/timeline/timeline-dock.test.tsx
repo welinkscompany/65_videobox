@@ -113,6 +113,28 @@ const duplicateOverlayPlacementView: EditorViewModel = {
   gaps: [],
 };
 
+/** **2026-09-19 실물 재현**(project 0907-b26195af): 장면을 두 번 나누고 순서를
+ *  바꾸면, 백엔드 세그먼트 배열의 순서가 화면 시간순과 어긋난다. 배열 순서
+ *  그대로 순번을 매기면 "4번째 → 7번째 → 5번째"처럼 꼬인다 -- 화면에서
+ *  실측했다. 여기 클립 배열도 일부러 시간순이 아니게(3초짜리를 맨 앞에) 둔다. */
+const outOfOrderNarrationView: EditorViewModel = {
+  ...view,
+  tracks: [
+    {
+      trackId: "n",
+      role: "narration",
+      clips: [
+        { clipId: "n-third", segmentId: "segment-third", type: "narration", assetId: null, assetUri: null, startSec: 6, endSec: 9, controls: {} },
+        { clipId: "n-first", segmentId: "segment-first", type: "narration", assetId: null, assetUri: null, startSec: 0, endSec: 3, controls: {} },
+        { clipId: "n-second", segmentId: "segment-second", type: "narration", assetId: null, assetUri: null, startSec: 3, endSec: 6, controls: {} },
+      ],
+    },
+    ...view.tracks.filter((track) => track.role !== "narration"),
+  ],
+  captions: [],
+  gaps: [],
+};
+
 const offsetNarrationView: EditorViewModel = {
   ...view,
   tracks: [
@@ -1435,5 +1457,13 @@ describe("타임라인을 늘리고 줄인다 (대표님 지시 2026-09-12)", ()
     // 길이를 모르면 전체 보기로 갈 자리도 없다. 단추는 잠겨 있어야 한다 --
     // 눌러도 아무 일 없는 단추는 "있는데 안 되는 것"보다 나쁘다.
     expect(screen.getByRole("button", { name: "타임라인 전체 보기" })).toBeDisabled();
+  });
+
+  it("장면 번호는 배열 순서가 아니라 시간순으로 매긴다", () => {
+    render(<TimelineDock view={outOfOrderNarrationView} viewportWidthPx={400} />);
+
+    expect(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "내레이션 2번째 장면, 3초부터" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "내레이션 3번째 장면, 6초부터" })).toBeInTheDocument();
   });
 });

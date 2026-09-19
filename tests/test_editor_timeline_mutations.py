@@ -297,6 +297,59 @@ def test_split_enforces_minimum_duration_and_preserves_editable_identity_and_lin
     assert "inverse_payload" in updated["history"][-1]
 
 
+def test_caption_owning_segment_id_follows_the_current_split_child_while_segment_id_keeps_lineage() -> None:
+    """분할을 두 번 거듭해도 자막은 **자기 자리를 가리키는 필드**가 따로 있어야 한다.
+
+    2026-09-19 실사용 프로젝트(`0907-b26195af`)에서 화면 수동 테스트로 발견:
+    장면 하나를 두 번 나누면 생긴 자막 셋이 전부 `segment_id`로 최초 조상
+    장면을 가리켰다. `segment_id`는 대본 정렬·번역 조회용 **영구 계보**라
+    바꾸면 안 된다(`test_merge_keeps_right_semantics_windowed_and_reanchors_legacy_export_overlay`가
+    그 계약을 지킨다) -- 대신 **화면 전용 필드 `owning_segment_id`**를 새로
+    추가했다. 화면에서는 장면 하나를 고르면 관련 없는 형제 자막 여러 개가
+    함께 "선택됨"으로 뜨는 버그로 나타났다(`data-selected` 누적).
+    """
+    from videobox_core_engine.composition_plan import materialize_editing_session_timeline
+    from videobox_core_engine.editing_session import split_segment
+    from videobox_core_engine.editor_playback_manifest import build_editor_playback_manifest
+
+    project_id = "project_001"
+    session = _session()
+    session["project_id"] = project_id
+    session["session_id"] = "session_001"
+    session["timeline_id"] = "timeline_001"
+    session["caption_style"] = {}
+    once = split_segment(session=session, segment_id="seg_001", split_sec=1.0)
+    _left_id, right_id = [segment["segment_id"] for segment in once["segments"][:2]]
+    twice = split_segment(session=once, segment_id=right_id, split_sec=1.5)
+    grandchild_left_id, grandchild_right_id = [segment["segment_id"] for segment in twice["segments"][1:3]]
+
+    timeline = {
+        "project_id": project_id,
+        "timeline_id": "timeline_001",
+        "version": "v1",
+        "source_session_id": "session_001",
+        "source_session_revision": twice["session_revision"],
+        "output": {"width": 1080, "height": 1920, "duration_sec": 6.0},
+        "tracks": [],
+    }
+    materialized = materialize_editing_session_timeline(timeline=timeline, editing_session=twice, project_id=project_id)
+    manifest = build_editor_playback_manifest(
+        project_id=project_id, session=twice, timeline=timeline, asset_content_url_prefix=f"/api/projects/{project_id}/assets",
+    )
+
+    def lineage_captions(captions: list[dict]) -> list[dict]:
+        return [c for c in captions if str(c["caption_id"]).startswith("caption-seg_001")]
+
+    materialized_lineage = lineage_captions(materialized["session_captions"])
+    manifest_lineage = lineage_captions(manifest["captions"])
+    # **계보(`segment_id`)는 셋 다 최초 조상을 가리킨 채로 유지된다** -- 안
+    # 바꾼다. 화면 대조는 `owning_segment_id`가 대신한다.
+    assert {c["segment_id"] for c in materialized_lineage} == {"seg_001"}
+    assert {c["segment_id"] for c in manifest_lineage} == {"seg_001"}
+    assert {c["owning_segment_id"] for c in materialized_lineage} == {"seg_001", grandchild_left_id, grandchild_right_id}
+    assert {c["owning_segment_id"] for c in manifest_lineage} == {"seg_001", grandchild_left_id, grandchild_right_id}
+
+
 def test_visual_overlay_clear_removes_direct_and_related_windows_from_materialized_manifest() -> None:
     from videobox_core_engine.composition_plan import materialize_editing_session_timeline
     from videobox_core_engine.editing_session import clear_segment_visual_overlays

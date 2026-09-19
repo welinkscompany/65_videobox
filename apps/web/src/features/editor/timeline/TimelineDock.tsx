@@ -161,7 +161,9 @@ function clipSources(view: EditorViewModel) {
     startSec: clip.startSec,
     endSec: clip.endSec,
     }))),
-    ...view.captions.flatMap((caption) => caption.placementId ? [{ id: caption.placementId, segmentId: caption.segmentId, role: "caption" as const, startSec: caption.startSec, endSec: caption.endSec }] : []),
+    // `caption.segmentId`는 대본 정렬용 영구 계보다 -- 클립 소스는 **지금
+    // 실제로 놓인 조각**이 필요하므로 `owningSegmentId`를 쓴다.
+    ...view.captions.flatMap((caption) => caption.placementId ? [{ id: caption.placementId, segmentId: caption.owningSegmentId ?? caption.segmentId, role: "caption" as const, startSec: caption.startSec, endSec: caption.endSec }] : []),
   ];
 }
 
@@ -530,7 +532,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
       const narrationClip = narrationByClipId.get(hit.clipId);
       const caption = captionsByPlacementId.get(hit.clipId);
       const timelineClip = timelineClipById.get(hit.clipId);
-      const segmentId = narrationClip?.segmentId ?? caption?.segmentId ?? timelineClip?.segmentId;
+      const segmentId = narrationClip?.segmentId ?? caption?.owningSegmentId ?? caption?.segmentId ?? timelineClip?.segmentId;
       // 재생 위치를 먼저 옮기고 **그 다음에** 고른다. 순서가 반대면, seek이 재생
       // 위치에서 장면을 다시 유도하면서 방금 고른 클립을 덮어쓴다(경계에서는 앞
       // 장면이 잡힌다). 2026-08-17 실제 앱에서 두 클립이 함께 골라져 있었다.
@@ -545,6 +547,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   /** 끌어다 놓은 자리가 어느 장면인지. 클립 id는 표시용이고 편집은 장면 단위다. */
   const segmentIdForClip = (clipId: string): string | null =>
     narrationByClipId.get(clipId)?.segmentId
+    ?? captionsByPlacementId.get(clipId)?.owningSegmentId
     ?? captionsByPlacementId.get(clipId)?.segmentId
     ?? timelineClipById.get(clipId)?.segmentId
     ?? null;
@@ -577,7 +580,13 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   const laneOrdinalByClipId = useMemo(() => {
     const counters: Partial<Record<TimelineLane, number>> = {};
     const map = new Map<string, number>();
-    for (const source of clipSources(view)) {
+    // **화면 시각(`N초부터`)과 짝을 이루는 순번이다** -- 시간순으로 매겨야
+    // "4번째 → 7번째 → 5번째"처럼 꼬이지 않는다. 백엔드 배열 순서는 분할을
+    // 거듭하면 시간순과 어긋난다(2026-09-19 실사용 프로젝트 `0907-b26195af`
+    // 화면 수동 테스트로 발견). `narrationSegments()`가 이미 같은 이유로
+    // 정렬한다 -- 여기만 빠져 있었다.
+    const ordered = [...clipSources(view)].sort((a, b) => a.startSec - b.startSec || a.id.localeCompare(b.id));
+    for (const source of ordered) {
       const lane = source.role as TimelineLane;
       counters[lane] = (counters[lane] ?? 0) + 1;
       map.set(source.id, counters[lane]!);
@@ -987,7 +996,13 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
         const narrationClip = rect.lane === "narration" ? narrationByClipId.get(rect.clipId) : undefined;
         const placement = placementsByClipId.get(rect.clipId);
         const displayBounds = draftProjection.boundsByClipId.get(rect.clipId);
-        const isTranscriptSelected = narrationClip?.segmentId === selectedSegmentId || captionsByPlacementId.get(rect.clipId)?.segmentId === selectedSegmentId;
+        // `caption.segmentId`는 대본 정렬용 **영구 계보**라 분할을 거듭하면
+        // 여러 자막이 같은 최초 조상을 계속 가리킨다 -- 화면 선택 대조에
+        // 쓰면 한 장면을 고를 때 관련 없는 형제 자막이 함께 "선택됨"으로
+        // 뜬다(2026-09-19 실사용 프로젝트 `0907-b26195af`에서 실측). 화면은
+        // **지금 이 자막이 실제로 놓인 조각**(`owningSegmentId`)을 봐야 한다.
+        const rectCaption = captionsByPlacementId.get(rect.clipId);
+        const isTranscriptSelected = narrationClip?.segmentId === selectedSegmentId || (rectCaption?.owningSegmentId ?? rectCaption?.segmentId) === selectedSegmentId;
         const isSelected = state.selectedClipId === rect.clipId;
         const clipContent = clipContentLabel({
           captionText: captionsByPlacementId.get(rect.clipId)?.text,
