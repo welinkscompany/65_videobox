@@ -1,5 +1,10 @@
 # Mem0 완전 제거, 유진 기억 사서 네이티브 전환 (2026-09-18)
 
+**대체됨:** `docs/handoffs/2026-09-19-isolated-stack-full-e2e-verification.ko.md` —
+이 문서가 "안 한 것"으로 남겨 둔 컨테이너 재빌드 + 브라우저 실물 확인을
+격리 스택으로 끝까지 밟았고, `scripts/run_memory_librarian.py`의 컨테이너
+연결 결함을 발견·수정했다.
+
 ## 요청과 배경
 
 대표님이 다른 세션에서 직접 지시: "mem0 걷어내고, argo 시스템에서 도서관

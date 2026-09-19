@@ -50,13 +50,24 @@ def _default_store(projects_root_override: str | None) -> Any:
 
 
 def _default_runtime() -> Any:
-    from videobox_api.orchestration import LocalOnlyRuntimeService, build_local_qwen_structured_provider
-    from videobox_core_engine.settings import LocalOpenAICompatibleRuntimeConfig
+    import dataclasses
 
-    # 밤사이 여러 대화·여러 메시지를 한 번에 증류하는 프롬프트는 1턴 대화보다
-    # 훨씬 길다 -- 기본 30초로는 모자랄 수 있다(`infographic_html`이 같은
-    # 이유로 이미 따로 상한을 준 전례가 있다).
-    config = LocalOpenAICompatibleRuntimeConfig(timeout_seconds=120)
+    from videobox_api.orchestration import LocalOnlyRuntimeService, build_local_qwen_structured_provider
+    from videobox_core_engine.settings import resolve_local_runtime_config
+
+    # base_url은 환경(컨테이너 안이면 host.docker.internal, 밖이면 127.0.0.1)을
+    # 따라야 한다 -- 여기서 `LocalOpenAICompatibleRuntimeConfig(...)`를 인자 없이
+    # 새로 만들면 dataclass 리터럴 기본값(127.0.0.1)으로 고정되는데, 이 스크립트는
+    # 컨테이너 안에서 owner가 손으로 돌리는 진입점이라 그러면 127.0.0.1이 컨테이너
+    # 자신을 가리켜 LM Studio(호스트)에 닿지 못한다 -- 실측(2026-09-19)으로
+    # `ConnectionRefusedError`가 났다. `resolve_local_runtime_config()`로 환경을
+    # 먼저 읽고 timeout만 늘린다.
+    #
+    # timeout은 늘린다 -- 밤사이 여러 대화·여러 메시지를 한 번에 증류하는
+    # 프롬프트는 1턴 대화보다 훨씬 길다(`infographic_html`이 같은 이유로 이미
+    # 따로 상한을 준 전례가 있다). 환경 기본값(60초)보다 최소 120초는 남긴다.
+    resolved = resolve_local_runtime_config()
+    config = dataclasses.replace(resolved, timeout_seconds=max(resolved.timeout_seconds, 120))
     return LocalOnlyRuntimeService(
         local_provider=build_local_qwen_structured_provider(
             local_runtime_config=config,
