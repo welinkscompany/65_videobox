@@ -167,6 +167,29 @@ def test_a_missing_interpreter_is_reported_as_unknown_not_as_a_pass() -> None:
     assert result.status != router.FAIL
 
 
+def test_execute_all_runs_every_guard_regardless_of_changed_files(monkeypatch) -> None:
+    """`--all`은 정기 자가 진단 진입점이다 -- 바뀐 파일이 없어도 표 전체를 돈다.
+
+    실제로 다 돌리면 12분 넘게 걸리므로(owner-ready-script만 8분) `run_guard`를
+    가짜로 바꿔 "표에 있는 가드 수만큼 정확히 불렸는가"만 잰다.
+    """
+
+    calls: list[str] = []
+
+    def fake_run_guard(python, guard, triggers):
+        calls.append(guard.name)
+        return router.Result(guard, router.PASS, 0.0, "", triggers)
+
+    monkeypatch.setattr(router, "find_python", lambda: (Path("python"), None))
+    monkeypatch.setattr(router, "run_guard", fake_run_guard)
+
+    results, blocked = router.execute_all()
+
+    assert blocked is None
+    assert calls == [guard.name for guard in router.GUARDS]
+    assert len(results) == len(router.GUARDS)
+
+
 def _command_hooks(event: str, matcher: str | None) -> list[dict]:
     settings = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
     return [

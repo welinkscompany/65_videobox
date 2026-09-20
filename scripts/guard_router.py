@@ -655,12 +655,33 @@ def execute(
     return results, skipped, touches_screen(paths), None
 
 
+def execute_all() -> tuple[list[Result], str | None]:
+    """바뀐 파일과 무관하게 등록된 가드 전부를 돌린다.
+
+    변경 감지 기반 `execute()`는 편집 직후용이다. 이건 그 반대 -- 정기 점검용
+    "자가 진단 패키지"의 진입점으로, 바뀐 파일이 없어도(예: 예약 실행) 표에
+    있는 모든 가드를 하나씩 실제로 돌려서 PASS/FAIL/UNKNOWN을 잰다.
+    """
+
+    python, why = find_python()
+    if python is None:
+        return [], why
+
+    results = [run_guard(python, guard, ["전체 점검"]) for guard in GUARDS]
+    return results, None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--files", nargs="*", default=None, help="이 경로들에 걸린 가드를 돌린다")
     parser.add_argument("--changed", action="store_true", help="git이 본 변경 전체를 훑는다")
     parser.add_argument("--speed", choices=("fast", "all"), default="fast")
     parser.add_argument("--list", action="store_true", help="매핑 표를 출력한다")
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="바뀐 파일과 무관하게 등록된 가드 전부를 돌린다 (정기 자가 진단용)",
+    )
     parser.add_argument("--hook", choices=("post-tool-use", "stop"), default=None)
     arguments = parser.parse_args()
 
@@ -679,6 +700,22 @@ def main() -> int:
 
     if arguments.hook:
         return run_as_hook(arguments.hook)
+
+    if arguments.all:
+        results, blocked = execute_all()
+        if blocked:
+            print(f"가드를 돌리지 못했습니다: {blocked}", file=sys.stderr)
+            return 2
+        report = summarise(results, [], [])
+        print(report if report else "등록된 가드가 없습니다.")
+        unknowns = [r for r in results if r.status == UNKNOWN]
+        if unknowns:
+            print(
+                f"\n{len(unknowns)}개는 판정하지 못했습니다({UNKNOWN}) -- 표가 낡았거나"
+                " 환경 문제일 수 있습니다. 위 상세를 보세요.",
+                file=sys.stderr,
+            )
+        return 1 if any(result.status == FAIL for result in results) else 0
 
     if arguments.changed:
         paths, _ = changed_paths()
