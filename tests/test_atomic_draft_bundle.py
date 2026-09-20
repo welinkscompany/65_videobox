@@ -65,16 +65,23 @@ def test_review_can_be_rebuilt_for_the_current_edit(tmp_path):
     assert timeline["source_session_revision"] == current["session_revision"]
 
 
-# 2026-09-20: 검토 화면(`GET /timelines/{job_id}` -> `get_timeline_result`)이
-# 저장된 timeline 문서의 `tracks`를 그대로 읽어서, 장면을 나눈 뒤 "현재 편집본으로
-# 검토본 다시 만들기"를 눌러도 화면의 장면 경계가 분할 이전 값 그대로였다(실사용
-# 프로젝트 `0907-b26195af`에서 발견). 첫 시도(커밋 `2183eec0`)는 저장된
-# `timeline["tracks"]` 자체를 덮어써서 고치려 했다가 되돌려졌다 -- 그 값은
-# `composition_plan.py`가 원본 소스 길이 계산(`source_durations`/`source_bounds`)
-# 에도 쓰기 때문에 덮어쓰면 broll/overlay 클립의 `overlay_type`/`overlay_payload`가
-# 빠져 `playback-manifest`가 422로 죽었다(`docs/handoffs/
-# 2026-09-20-timeline-manual-editing-bug-hunt.ko.md`). 이 시험은 **저장된 값은
-# 그대로**이고 **응답만** 최신 편집을 반영하는지를 잰다.
+# 2026-09-20: 검토 화면(`GET /timelines/{job_id}` -> 처음엔 `get_timeline_result`를
+# 직접 고치려 했다)이 저장된 timeline 문서의 `tracks`를 그대로 읽어서, 장면을 나눈
+# 뒤 "현재 편집본으로 검토본 다시 만들기"를 눌러도 화면의 장면 경계가 분할 이전
+# 값 그대로였다(실사용 프로젝트 `0907-b26195af`에서 발견). 첫 시도(커밋
+# `2183eec0`)는 저장된 `timeline["tracks"]` 자체를 덮어써서 고치려 했다가
+# 되돌려졌다 -- 그 값은 `composition_plan.py`가 원본 소스 길이 계산
+# (`source_durations`/`source_bounds`)에도 쓰기 때문에 덮어쓰면 broll/overlay
+# 클립의 `overlay_type`/`overlay_payload`가 빠져 `playback-manifest`가 422로
+# 죽었다(`docs/handoffs/2026-09-20-timeline-manual-editing-bug-hunt.ko.md`).
+#
+# 두 번째 시도는 `get_timeline_result` 자체에 materialize를 얹었다가, 코드리뷰
+# 교차 추적에서 그 함수를 `run_final_render_job`/`start_capcut_export`/
+# `start_preview_render`/`start_subtitle_render`가 **그대로 다시 materialize
+# 하거나(이중 materialize) 저장된 값 그대로 써야 하는 곳**(CapCut 내보내기)이라는
+# 게 드러나 커밋 전에 `get_timeline_result_for_review_display`로 분리했다.
+# 이 시험은 그 분리가 지켜지는지 -- **`get_timeline_result`는 그대로**이고
+# **검토 화면 전용 메서드만** 최신 편집을 반영하는지 -- 함께 잰다.
 def test_timeline_review_response_reflects_the_latest_split_without_mutating_storage(tmp_path):
     from videobox_api.models import TimelinePayloadResponse
     from videobox_api.response_normalizers import _normalize_timeline_payload_for_response
@@ -111,7 +118,19 @@ def test_timeline_review_response_reflects_the_latest_split_without_mutating_sto
     )
 
     pipeline = LocalPipelineRunner(store)
-    result = pipeline.get_timeline_result(project_id=project.project_id, job_id=timeline_job_id)
+    # `get_timeline_result`는 다른 소비자(최종 렌더·CapCut 내보내기·미리보기·자막
+    # 렌더)가 그대로 쓰거나 자기가 다시 materialize하는 함수라 손대면 안 된다 --
+    # 여기서 그 계약이 지켜지는지도 함께 잠근다.
+    internal_result = pipeline.get_timeline_result(project_id=project.project_id, job_id=timeline_job_id)
+    internal_narration = next(track for track in internal_result["timeline"]["tracks"] if track["track_type"] == "narration")
+    internal_segment_ids = {clip["segment_id"] for clip in internal_narration["clips"]}
+    assert internal_segment_ids == {original_segment_id}, (
+        "get_timeline_result는 최종 렌더/CapCut 내보내기 등이 그대로 쓰거나 스스로 "
+        "다시 materialize하는 함수다 -- 여기서 미리 materialize하면 그 소비자들이 "
+        "이미 materialize된 tracks를 다시 materialize하는 이중 처리가 된다"
+    )
+
+    result = pipeline.get_timeline_result_for_review_display(project_id=project.project_id, job_id=timeline_job_id)
     response_narration = next(track for track in result["timeline"]["tracks"] if track["track_type"] == "narration")
     response_segment_ids = {clip["segment_id"] for clip in response_narration["clips"]}
     assert response_segment_ids == {left_id, right_id}, (
@@ -123,6 +142,60 @@ def test_timeline_review_response_reflects_the_latest_split_without_mutating_sto
     # 결함(2026-09-19 실측: `pydantic.ValidationError: clip_type Field required`)을
     # 다시 놓치지 않게 한다.
     TimelinePayloadResponse(**_normalize_timeline_payload_for_response(result["timeline"]))
+
+
+# 2026-09-20 코드리뷰에서 발견: `timeline["source_session_id"]`가 가리키는 세션이
+# 그 사이 다른 timeline으로 다시 연결됐을 수 있다(숏폼을 편집본으로 펼치기 같은
+# 흐름). `build_editor_playback_manifest`가 이미 이 짝을 검사하는 이유와 같다 --
+# 안 맞는 세션으로 materialize하면 이 timeline에 없는 segment_id를 기준으로
+# 자르려다 엉뚱하거나 빈 결과가 나온다. 검토 화면 전용 경로도 같은 짝 검사를
+# 해야 한다.
+def test_review_display_skips_materialize_when_session_points_at_a_different_timeline(tmp_path):
+    store = LocalProjectStore(tmp_path / "projects"); project = store.bootstrap_project("MismatchedSession")
+    brief, readiness = _ready(store, project.project_id)
+    bundle = store.materialize_atomic_draft_bundle(
+        project_id=project.project_id, brief_id=brief["brief_id"], expected_brief_revision=brief["revision"],
+        readiness_id=readiness["readiness_id"], expected_readiness_revision=readiness["revision"],
+        idempotency_key="mismatched-session", allow_placeholder=True,
+    )
+    timeline_id, timeline_job_id = bundle["timeline_id"], bundle["timeline_job_id"]
+
+    # `_ready`는 idempotency_key를 고정 문자열로 쓴다 -- 같은 프로젝트에서 두 번째
+    # brief를 만들려면 그 키들과 안 겹치는 값으로 직접 만들어야 한다.
+    other_brief = store.create_creation_brief(
+        project_id=project.project_id, script_filename="other.txt", script_text="다른 대본입니다.",
+        idempotency_key="brief-other", capability_profile={},
+        runtime=type("R", (), {"plan_questions": lambda *_args, **_kwargs: []})(),
+    )
+    other_brief = store.bypass_creation_interview(project_id=project.project_id, brief_id=other_brief["brief_id"], expected_revision=other_brief["revision"])
+    other_brief = store.update_creation_brief_summary(project_id=project.project_id, brief_id=other_brief["brief_id"], summary="다른 소개", expected_revision=other_brief["revision"])
+    other_brief = store.approve_creation_brief(project_id=project.project_id, brief_id=other_brief["brief_id"], expected_revision=other_brief["revision"])
+    other_readiness = store.start_draft_readiness(
+        project_id=project.project_id, brief_id=other_brief["brief_id"], narration_choice={"kind": "silent"},
+        idempotency_key="ready-other", expected_brief_revision=other_brief["revision"], defer=False,
+    )
+    other_bundle = store.materialize_atomic_draft_bundle(
+        project_id=project.project_id, brief_id=other_brief["brief_id"], expected_brief_revision=other_brief["revision"],
+        readiness_id=other_readiness["readiness_id"], expected_readiness_revision=other_readiness["revision"],
+        idempotency_key="mismatched-session-other", allow_placeholder=True,
+    )
+    other_session_id = other_bundle["session_id"]
+    assert other_bundle["timeline_id"] != timeline_id
+
+    import json as _json
+
+    stored = store.get_timeline_run(project_id=project.project_id, timeline_id=timeline_id)
+    stored["source_session_id"] = other_session_id
+    stored["source_session_revision"] = 1
+    file_path = store._timeline_file_path(project_id=project.project_id, timeline_id=timeline_id)
+    file_path.write_text(_json.dumps(stored, indent=2, ensure_ascii=True), encoding="utf-8")
+
+    pipeline = LocalPipelineRunner(store)
+    result = pipeline.get_timeline_result_for_review_display(project_id=project.project_id, job_id=timeline_job_id)
+    assert result["timeline"]["tracks"] == stored["tracks"], (
+        "세션과 timeline이 서로 다른 timeline_id를 가리키면 materialize를 건너뛰고 "
+        "저장된 tracks를 그대로 돌려줘야 한다"
+    )
 
 
 # 이게 실제로 막힘을 푸는 부분이다. 빈 장면을 채우려면 편집해야 하는데, 그 편집이

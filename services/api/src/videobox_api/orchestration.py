@@ -675,7 +675,7 @@ class ApiOrchestrator:
         )
 
     def get_timeline_job(self, *, project_id: str, job_id: str) -> dict[str, Any]:
-        return self.pipeline.get_timeline_result(project_id=project_id, job_id=job_id)
+        return self.pipeline.get_timeline_result_for_review_display(project_id=project_id, job_id=job_id)
 
     def create_editing_session(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
         return self.pipeline.create_editing_session(project_id=project_id, timeline_job_id=timeline_job_id)

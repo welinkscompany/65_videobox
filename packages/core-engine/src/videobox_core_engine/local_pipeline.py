@@ -1597,8 +1597,26 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         else:
             timeline = self.store.get_timeline_run(project_id=project_id, timeline_id=job["output_ref"])
         timeline = self._hydrate_timeline_review_status(project_id=project_id, timeline=timeline)
-        timeline = self._materialize_timeline_tracks_for_review(project_id=project_id, timeline=timeline)
         return {"job_id": job["job_id"], "status": job["status"], "timeline": timeline}
+
+    def get_timeline_result_for_review_display(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        """검토 화면(`GET /timelines/{job_id}`) 전용.
+
+        `get_timeline_result`는 `run_final_render_job`/`start_capcut_export`/
+        `start_preview_render`/`start_subtitle_render` 등 여러 곳이 그대로
+        받아서 **자기가 직접 다시 `materialize_editing_session_timeline`을
+        부르거나(이중 materialize가 되어 segment_id·source_durations 계산이
+        틀어진다), CapCut 내보내기처럼 저장된 값을 그대로 써야 하는 경로다.
+        그래서 `get_timeline_result`의 `tracks`는 절대 손대면 안 된다(2026-09-20
+        회귀 -- 커밋에는 못 올라갔고 코드리뷰에서 잡음). 검토 화면만 이 메서드로
+        따로 감싸서 응답용 사본을 만든다.
+        """
+        result = self.get_timeline_result(project_id=project_id, job_id=job_id)
+        result = dict(result)
+        result["timeline"] = self._materialize_timeline_tracks_for_review(
+            project_id=project_id, timeline=result["timeline"]
+        )
+        return result
 
     def get_review_snapshot(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         job = self.store.get_job(project_id=project_id, job_id=job_id)

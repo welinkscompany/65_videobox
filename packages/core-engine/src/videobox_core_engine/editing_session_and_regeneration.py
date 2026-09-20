@@ -974,6 +974,12 @@ class EditingSessionRegenerationMixin:
         except Exception:  # noqa: BLE001
             # 세션이 지워졌거나 못 찾아도 검토 화면 자체는 저장된 값으로 열려야 한다.
             return timeline
+        # 세션이 그 사이 다른 timeline으로 다시 연결됐을 수 있다(예: 숏폼을
+        # 편집본으로 펼치기). `build_editor_playback_manifest`도 같은 이유로
+        # 이 짝을 검사한다 -- 안 맞는 세션으로 materialize하면 이 timeline에
+        # 없는 segment_id를 기준으로 잘라서 엉뚱한(또는 빈) 결과가 나온다.
+        if str(session.get("timeline_id") or "") != str(timeline.get("timeline_id") or ""):
+            return timeline
         materialized = materialize_editing_session_timeline(
             timeline=timeline, editing_session=session, project_id=project_id
         )
