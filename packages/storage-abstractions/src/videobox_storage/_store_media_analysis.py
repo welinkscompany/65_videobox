@@ -315,7 +315,30 @@ class MediaAnalysisMixin:
             connection.close()
         if cursor.rowcount != 1:
             return None
-        return self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+        completed = self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+        if status == MediaAnalysisStatus.SUCCEEDED:
+            # A run that succeeds outright never passes through
+            # `review_media_analysis` (that path is for `needs_review` runs the
+            # owner manually confirms), so without this its tags never reach
+            # the asset's own `metadata.tags` -- and the editor's media panel
+            # search only reads that field, never the separate analysis
+            # record. Mirrors the flatten-and-merge `review_media_analysis`
+            # already does, minus the owner-confirmation gate that only
+            # `needs_review` results require.
+            self._merge_analysis_tags_onto_asset(project_id=project_id, asset_id=str(completed["asset_id"]), result=result)
+        return completed
+
+    def _merge_analysis_tags_onto_asset(self, *, project_id: str, asset_id: str, result: dict[str, Any]) -> None:
+        layers = dict(((result.get("tags") or {}).get("layers")) or {})
+        searchable_tags = [tag for values in layers.values() if isinstance(values, list) for tag in values if isinstance(tag, str)]
+        if not searchable_tags:
+            return
+        try:
+            asset = self.get_asset(project_id=project_id, asset_id=asset_id)
+        except KeyError:
+            return
+        existing_tags = asset["metadata"].get("tags") if isinstance(asset["metadata"].get("tags"), list) else []
+        self.update_asset_metadata(project_id=project_id, asset_id=asset_id, metadata_patch={"tags": list(dict.fromkeys([*existing_tags, *searchable_tags]))})
 
     def mark_media_analysis_blocked(
         self, *, project_id: str, analysis_id: str, expected_attempt: int, error_code: str, error_message: str
