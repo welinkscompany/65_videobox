@@ -2631,7 +2631,23 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         failure = job.get("error_message") or None
         if not job["output_ref"]:
             return {"job_id": job["job_id"], "status": job["status"], "render": None, "error_message": failure}
-        render = self.store.get_final_render_export(project_id=project_id, export_id=job["output_ref"])
+        try:
+            render = self.store.get_final_render_export(project_id=project_id, export_id=job["output_ref"])
+        except KeyError:
+            # A job that already succeeded can still end up pointing at an export
+            # that no longer exists. `LocalProjectStore._prune_old_exports` keeps
+            # only the newest DEFAULT_EXPORT_RETENTION_COUNT `final_render`
+            # exports *per project* (not per timeline/session lineage) and
+            # deletes both the DB row and the file for anything older -- but job
+            # rows are never pruned, so an old job's `output_ref` can go stale
+            # even though the job itself never failed. Found against the real
+            # project 0907-b26195af (2026-09-20): final_render_job_004 stayed
+            # "succeeded" pointing at export_001, which five later final
+            # renders (including for other timelines) had already evicted.
+            # Treat this the same as "no render yet" instead of letting the
+            # KeyError 404 the whole outputs screen -- the owner can just
+            # render again.
+            return {"job_id": job["job_id"], "status": job["status"], "render": None, "error_message": failure}
         return {"job_id": job["job_id"], "status": job["status"], "render": render, "error_message": failure}
 
     def start_capcut_draft_export(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:

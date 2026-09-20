@@ -157,6 +157,53 @@ def test_start_final_render_persists_export_and_updates_job(tmp_path: Path) -> N
     assert fetched["render"]["file_uri"].startswith(f"local://projects/{project.project_id}/exports/final_render/")
 
 
+def test_get_final_render_result_survives_a_pruned_export(tmp_path: Path) -> None:
+    """A `final_render` job row can outlive the export it points at.
+
+    `LocalProjectStore._prune_old_exports` keeps only the newest
+    `DEFAULT_EXPORT_RETENTION_COUNT` `final_render` exports **per project**, not
+    per timeline/session lineage, and deletes both the DB row and the on-disk
+    file for anything older. Job rows are never pruned, so a job that already
+    succeeded can end up with an `output_ref` that no longer resolves once
+    enough newer final renders exist -- even renders of a completely different
+    timeline (e.g. a horizontal/vertical variant render).
+
+    This reproduces the drift found in the real project `0907-b26195af`
+    (2026-09-20): `final_render_job_004` stayed `status: succeeded` with
+    `output_ref: export_001`, but `export_001` had already been pruned by five
+    later final renders (some for other timelines entirely). Before this fix,
+    `get_final_render_result` let `LocalProjectStore.get_final_render_export`'s
+    `KeyError` propagate, which the API turned into a raw 404
+    (`"'Export not found: export_001'"`), and the outputs screen's
+    `Promise.all` (no `.catch()` around `api.getFinalRender`, see
+    `OutputsPage.tsx`) failed the *entire* page instead of just this card.
+    """
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Pruned Export Project")
+    runner = LocalPipelineRunner(store, final_renderer=_FakeFinalRenderer())
+
+    stale_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.FINAL_RENDER,
+        status=JobStatus.RUNNING,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=stale_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref="export_999_pruned_and_gone",
+    )
+
+    result = runner.get_final_render_result(project_id=project.project_id, job_id=stale_job["job_id"])
+
+    # The job really did succeed once -- reporting it as "failed" would be a lie.
+    assert result["status"] == "succeeded"
+    # But its artifact is gone, so callers must treat this like "no render yet",
+    # not raise/404 and break every other output panel on the same page.
+    assert result["render"] is None
+    assert result["error_message"] is None
+
+
 def test_variant_final_render_publishes_without_treating_derived_timeline_as_master(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Variant final render project")
