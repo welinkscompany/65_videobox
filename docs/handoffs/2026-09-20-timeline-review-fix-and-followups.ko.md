@@ -42,6 +42,46 @@
 검토 화면의 `narration` 트랙이 실제로 8개 클립·새 경계로 나오는 것을 API 응답으로
 직접 확인했다. 확인 뒤 편집기에서 되돌리기로 원래 7컷 상태로 복구했다.
 
+## 커밋 뒤 코드리뷰에서 잡은 회귀 (고침 완료, 커밋 `94ffbac7`)
+
+`/code-review` 교차 추적(cross-file tracer) 단계에서, 위 수정이 건드린
+`get_timeline_result`가 **검토 화면 전용이 아니라 여러 렌더 경로가 공유하는
+함수**라는 게 드러났다. `run_final_render_job`(실제 완성본 렌더)·
+`start_capcut_export`(CapCut 내보내기는 코드 주석에 "저장된 값을 그대로
+받는다"고 명시돼 있었다)·`start_preview_render`·`start_subtitle_render`가
+전부 이 함수의 반환값을 그대로 쓰거나 **자기가 또 한 번
+`materialize_editing_session_timeline`을 부른다.** 검토 화면만 고치려던
+변경이 이 함수 안에 materialize를 얹는 바람에, 이 네 경로 전부가 **이미
+materialize된 tracks를 다시 materialize하는 이중 처리**에 걸리게 됐었다 --
+실사용 세션에서 편집(분할 등)을 한 뒤 완성본을 뽑거나 CapCut으로 내보내면
+경계가 잘못 나올 수 있는 위험이었다. 커밋 전 리뷰에서 잡아서 **실제로 배포된
+적은 없다**(그 사이 컨테이너에서 실행한 조작은 검토·숏폼 화면뿐, 최종 렌더나
+CapCut 내보내기는 안 눌렀다).
+
+**고침**: `get_timeline_result`는 원래 계약(저장된 tracks 그대로)으로 되돌리고,
+`GET /timelines/{job_id}` 전용 `get_timeline_result_for_review_display`를
+새로 만들어 라우터(`orchestration.py`의 `get_timeline_job`)만 여기로 옮겼다.
+추가로 `_materialize_timeline_tracks_for_review`에 세션·timeline 짝 검사를
+넣었다(`build_editor_playback_manifest` 등 기존 5곳이 이미 하는 검사인데
+이 함수엔 빠져 있었다) -- 세션이 그 사이 다른 timeline으로 재연결됐으면
+materialize를 건너뛰고 저장된 값을 그대로 돌려준다.
+
+**재검증**: 테스트 2건 추가(위 계약이 지켜지는지 + 짝 안 맞으면 건너뛰는지),
+`test_atomic_draft_bundle.py` 28건 통과. 컨테이너 재재빌드 후 실제 프로젝트에서
+다시 장면을 나누고 검토 화면을 브라우저로 확인해 고친 경계가 그대로 반영되는
+것을 재확인, 되돌리기로 복구. 백엔드 전체 pytest(`--ignore=test_mcp_server.py`)
+**5082 passed** -- 실패 7건·에러 2건은 전부 이 세션과 무관(아래 참고).
+
+**전체 pytest에서 나온, 이 세션과 무관한 기존 실패**:
+- `test_editor_ui_source_provenance.py` 5건 -- `apps/web/src/app/ProductShell.tsx`
+  provenance 해시 어긋남. `git status`로 이 파일을 전혀 안 건드렸음을 확인했고,
+  `docs/handoffs/2026-09-18-mem0-removed-native-memory-librarian.ko.md`에
+  이미 같은 증상이 기록돼 있다(`task_a923ef55`로 플래그된 상태, 이번 세션
+  범위 밖).
+- `test_youtube_import.py` 2건 + `test_api_reference_style_import.py` 2건
+  에러 -- `ModuleNotFoundError: No module named 'yt_dlp'`. 이 세션에서 건드린
+  적 없는 의존성 설치 문제.
+
 ## 버그 아닌 것으로 정정된 것
 
 - **숏폼 다시 만들기가 "읽을 자막이 없어서 전체 장면을 그대로 뒀다"고 함** —
