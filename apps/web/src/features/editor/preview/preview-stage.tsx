@@ -36,6 +36,19 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
   const localSources = sources.filter((source) => isAllowedLocalUrl(source.url));
   const coordinatorRef = useRef(new PreviewCoordinator());
   const mediaRef = useRef<MediaNode>(null);
+  // **재생 위치가 바뀌어 재생기를 다른 자리로 옮기라고 할 때(2026-09-20
+  // 실물 재현), 옮기기 직전 자리를 잠깐 들고 있는다** -- "지금 옮겨 가는
+  // 중인 옛 자리"다. 렌더 도중(커밋 전) 채운다 -- `useEffect`에서 채우면
+  // 이미 늦다(그 효과가 실제 `<video>.currentTime`을 옮기는 건 커밋 *뒤*라,
+  // 그 틈에 재생기가 스스로 `timeupdate`를 옛 위치로 보내면 `updateTimeline`이
+  // 그 옛 위치로 장면을 다시 고르는 바깥 로직을 불러 방금 고른 장면을
+  // 덮어쓴다 -- 전환 탭이 다시 "첫 장면"으로 보였다). `updateTimeline`은
+  // 재생기가 아직 이 옛 자리를 그대로 들고 있는 신호만 무시한다. 자연 재생으로
+  // 더 나아간 값(옛 자리도 아니고 아직 새 자리에 정확히 안 닿은 값 포함)은
+  // 그대로 믿는다 -- 그래야 `다음 프레임`처럼 목표에 딱 안 떨어지는 정상
+  // 진행을 막지 않는다.
+  const previousPendingSeekSecondsRef = useRef<number | null>(null);
+  const staleSeekBaselineRef = useRef<number | null>(null);
   const [mode, setMode] = useState<PreviewMode>(() => exact.kind === "current" ? coordinatorRef.current.showExact({ id: exactMediaId(exact), url: exact.url, timelineRange: exact.timelineRange }) : coordinatorRef.current.state);
   const [timelineTime, setTimelineTime] = useState(() => exact.kind === "current" ? exact.timelineRange.startSec : 0);
   const [refreshing, setRefreshing] = useState(false);
@@ -109,6 +122,16 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
     window.addEventListener("scroll", stopForScroll, { passive: true });
     return () => { window.removeEventListener("scroll", stopForScroll); stopActiveMedia(); };
   }, []);
+  // 렌더 도중(커밋 전) 동기로 채운다 -- `useEffect`에서 채우면 이미 늦다.
+  {
+    const nextPendingSeekSeconds = !Number.isFinite(playbackSec) || mode.kind === "idle" || (mode.kind === "audition" && mode.media.mediaKind === "image")
+      ? null
+      : Math.min(mode.media.timelineRange.endSec, Math.max(mode.media.timelineRange.startSec, playbackSec!)) - mode.media.timelineRange.startSec;
+    const previous = previousPendingSeekSecondsRef.current;
+    if (nextPendingSeekSeconds === null) staleSeekBaselineRef.current = null;
+    else if (previous !== null && Math.abs(nextPendingSeekSeconds - previous) > 0.001) staleSeekBaselineRef.current = previous;
+    previousPendingSeekSecondsRef.current = nextPendingSeekSeconds;
+  }
   useEffect(() => {
     if (!Number.isFinite(playbackSec) || mode.kind === "idle" || (mode.kind === "audition" && mode.media.mediaKind === "image")) return;
     const timelineSeconds = Math.min(mode.media.timelineRange.endSec, Math.max(mode.media.timelineRange.startSec, playbackSec!));
@@ -138,6 +161,19 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
     // 실제 컨테이너에서 `다음 프레임`을 눌렀을 때 새 위치 → 옛 위치 → 새 위치가
     // 번갈아 찍혔다. 가라앉은 뒤에 오는 `seeked`만 믿는다.
     if (node.seeking) return;
+    // **낡은 재생 위치 신호는 무시한다(2026-09-20 실물 재현).** 바깥에서 방금
+    // 다른 장면을 골라 재생 위치(`playbackSec`)를 옮기라고 하면 그 직전
+    // 자리를 `staleSeekBaselineRef`에 잠깐 남겨 둔다. 이
+    // 재생기가 실제로는 아직 그 옛 자리에 있는데도 스스로 `timeupdate`를
+    // 보내면 `node.seeking`은 여전히 false라 위 가드를 통과한다 -- 그 옛
+    // 위치를 믿고 올려보내면 "재생 위치로 장면을 다시 고른다"는 아래 경로가
+    // 방금 고른 장면을 덮어쓴다(전환 탭이 다시 "첫 장면"으로 보였다).
+    // **목표 자리와 다르다고 무조건 막지는 않는다** -- 자연 재생은 목표를
+    // 딱 맞히지 않고 지나쳐 계속 나아가는 게 정상이라, 그런 진행까지 막으면
+    // "가라앉은 뒤 재생이 다시 안 올라온다"는 다른 결함이 생긴다. 옛 자리
+    // 그대로일 때만 무시하고, 조금이라도 움직였으면(목표에 못 미쳐도) 믿는다.
+    if (staleSeekBaselineRef.current !== null && Math.abs(node.currentTime - staleSeekBaselineRef.current) <= 0.05) return;
+    staleSeekBaselineRef.current = null;
     // 반복이 켜져 있으면 구간 끝에서 되감는다. 자막·재생 위치를 갱신하기 전에 처리해야
     // 구간 밖 한 순간이 잠깐 보였다 사라지는 일이 없다.
     // 담고 있지 않은 구간은 반복하지 않는다. 부분 구간 미리보기(예: 4~8초)를 보는

@@ -469,6 +469,51 @@ describe("EditorWorkbench", () => {
     expect(screen.queryByText("첫 장면에는 넘어올 앞 장면이 없어요.")).not.toBeInTheDocument();
   });
 
+  it("전환 탭이 두 번째 장면을 고른 직후 미리보기 플레이어의 낡은 재생 위치 신호로 다시 첫 장면으로 되돌아가지 않는다 (2026-09-20 실물 재현)", () => {
+    // **위 두 시험과 다른 자리다.** 위 시험들은 `exactPreview.status: "unavailable"`인
+    // 공용 `view` fixture를 쓰므로 `<video>`가 아예 안 그려진다(`PreviewStage`의
+    // `mode.kind`가 "idle") -- 그래서 지금 이 결함(재생기 자체가 알려 오는 낡은
+    // 시간)이 안 걸렸다. 여기서는 편집본 미리보기를 실제로 켜서 `<video>`를
+    // 그리고, 그 재생기가 옛 위치를 다시 알려 오는 순간을 그대로 흉내 낸다.
+    const twoSegmentView = {
+      ...view,
+      output: { ...view.output, durationSec: 2 },
+      playback: { auditionUrls: {}, exactPreview: { status: "current" as const, url: "/api/exact.mp4", artifactRevision: 1, timelineStartSec: 0, timelineEndSec: 2 } },
+      tracks: [{ trackId: "narration", role: "narration", clips: [
+        { clipId: "n-1", segmentId: "segment-1", type: "narration", assetId: null, assetUri: null, startSec: 0, endSec: 1, controls: {} },
+        { clipId: "n-2", segmentId: "segment-2", type: "narration", assetId: null, assetUri: null, startSec: 1, endSec: 2, controls: {} },
+      ] }],
+      captions: [],
+    } as const;
+    const session = {
+      projectId: "project-a", sessionId: "session-a", timelineId: "timeline-a", expectedRevision: 1,
+      undoCount: 0, redoCount: 0, updatedAt: null, captionLanguage: null, translatedLanguages: [],
+      segments: [
+        { segmentId: "segment-1", cutAction: "keep", bgm: null, sfx: null, transitionIn: null, ttsReplacement: null },
+        { segmentId: "segment-2", cutAction: "keep", bgm: null, sfx: null, transitionIn: null, ttsReplacement: null },
+      ],
+    } as const;
+    render(<EditorWorkbench view={twoSegmentView} session={session as never} />);
+    openMaterialDock();
+
+    const player = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+    fireEvent.click(clipSelectionButton("n-2"));
+
+    // 골랐다는 실제 확인: 재생 위치가 두 번째 장면(1초)으로 옮겨졌다.
+    expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "1");
+
+    // **실물 재현의 핵심**: 재생기가 아직 새 위치로 옮기기 전에 갖고 있던
+    // 옛 시간(첫 장면 구간 안, 0초)을 그대로 알려 오면(`timeupdate`), 그 신호가
+    // "재생 위치로 장면을 다시 고른다"는 경로를 타고 방금 고른 두 번째 장면을
+    // 다시 첫 장면으로 덮어써 버린다.
+    Object.defineProperty(player, "currentTime", { configurable: true, writable: true, value: 0 });
+    fireEvent.timeUpdate(player);
+
+    fireEvent.click(screen.getByRole("tab", { name: "전환" }));
+
+    expect(screen.queryByText("첫 장면에는 넘어올 앞 장면이 없어요.")).not.toBeInTheDocument();
+  });
+
   it("replaces only the preview slot with the exact-preview stage while keeping read-only docks and timeline", () => {
     const currentView = {
       ...view,
