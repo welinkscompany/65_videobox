@@ -5,7 +5,15 @@ import { Button } from "../../../components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../../components/ui/dialog";
 import { LibraryResults } from "../../library/LibraryResults";
 import { LibrarySidebar, type LibraryFilter } from "../../library/LibrarySidebar";
+import { withRelevance } from "../../library/libraryRelevance";
 import "./libraryPickerDialog.css";
+
+/** `/library` 화면(`LibraryPage.tsx`)과 같은 목록이라 같은 종류 묶음을 쓴다
+ *  -- 여기서만 다르게 두면 owner가 같은 검색어로 다른 결과를 본다
+ *  (2026-09-20 코드리뷰 실측: 이 파일이 원래 `/library`의 옛 로직을 그대로
+ *  베껴 왔는데 "전체" fan-out은 안 따라왔었다). */
+const AUDIO_KINDS: readonly LibraryMediaType[] = ["music", "sfx"];
+const ALL_KINDS: readonly LibraryMediaType[] = ["broll", ...AUDIO_KINDS, "image"];
 
 function matchesFilter(asset: LibraryAsset, filter: LibraryFilter) {
   if (filter === "all") return asset.lifecycle !== "trashed";
@@ -53,11 +61,21 @@ export function LibraryPickerDialog({
     const currentEpoch = ++epoch.current;
     setLoading(true); setError(null);
     try {
-      const semanticEligible = Boolean(search.trim()) && (activeFilter === "broll" || activeFilter === "music" || activeFilter === "sfx" || activeFilter === "image");
+      // `/library` 화면과 같은 종류 묶음이다 -- "전체"도 종류 없이 열 수
+      // 없다는 이유로 단어 매칭에 머물지 않는다(owner 결정 2026-09-20).
+      const searchKinds: LibraryMediaType[] = activeFilter === "all" ? [...ALL_KINDS]
+        : activeFilter === "audio" ? [...AUDIO_KINDS]
+        : activeFilter === "broll" || activeFilter === "music" || activeFilter === "sfx" || activeFilter === "image" ? [activeFilter]
+        : [];
+      const semanticEligible = Boolean(search.trim()) && searchKinds.length > 0;
       let nextAssets: LibraryAsset[];
       if (semanticEligible) {
-        const result = await api.searchLibraryAssets(search.trim(), activeFilter as LibraryMediaType, undefined);
+        const responses = await Promise.all(searchKinds.map((kind) => api.searchLibraryAssets(search.trim(), kind, undefined)));
         if (currentEpoch !== epoch.current) return;
+        const result = {
+          matches: responses.flatMap((response) => response.matches).sort((left, right) => Number(right.score ?? 0) - Number(left.score ?? 0)),
+          semantic: responses.some((response) => response.semantic),
+        };
         const seenIds = new Set<string>();
         const usable = result.matches.filter((match) => {
           const identity = String(match.library_asset_id ?? "");
@@ -65,8 +83,8 @@ export function LibraryPickerDialog({
           seenIds.add(identity);
           return true;
         });
-        nextAssets = usable;
         setSearchMode(result.semantic && usable.some((match) => match.semantic_match) ? "semantic" : "word");
+        nextAssets = withRelevance(usable);
       } else {
         const result = await api.listLibraryAssets({ includeTrashed: false, q: search || undefined, limit: 500 });
         if (currentEpoch !== epoch.current) return;

@@ -1151,7 +1151,8 @@ export type FootageDerivativeJob = {
   error_message?: string | null;
   created_at: string;
 };
-export type LibrarySearchMatch = LibraryAsset & { score?: number; reason?: string; semantic_match?: boolean };
+/** `score`/`semantic_match`은 이미 `LibraryAsset`에 있다 — 여긴 `reason`만 더한다. */
+export type LibrarySearchMatch = LibraryAsset & { reason?: string };
 export type LibraryUsageLocation = {
   project_id?: string | null;
   materialized_asset_id?: string | null;

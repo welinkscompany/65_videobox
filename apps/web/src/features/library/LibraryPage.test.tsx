@@ -162,17 +162,24 @@ describe("LibraryPage", () => {
     expect(await screen.findByRole("status", { name: "찾은 방식" })).toHaveTextContent("뜻으로 찾음");
   });
 
-  it("`전체` 탭 의미검색 결과에도 최고점 대비 관련도를 매기고 너무 낮은 것은 접는다", async () => {
+  it("`전체` 탭 의미검색 결과에도 같은 색인 안에서 최고점 대비 관련도를 매기고 너무 낮은 것은 접는다", async () => {
     vi.spyOn(api, "searchLibraryAssets").mockImplementation(async (_query, mediaType) => {
       if (mediaType === "broll") {
         return {
-          matches: [{ ...asset({ library_asset_id: "top", user_metadata: { filename: "top.mp4" } }), score: 0.49, semantic_match: true }],
+          matches: [
+            { ...asset({ library_asset_id: "top", user_metadata: { filename: "top.mp4" } }), score: 0.49, semantic_match: true },
+            // 같은 영상·그림 색인 안에서 최고점(0.49) 대비 너무 낮은(0.1) 것은 접는다.
+            { ...asset({ library_asset_id: "far", media_type: "image", user_metadata: { filename: "far.png" } }), score: 0.1, semantic_match: true },
+          ],
           semantic: true,
         };
       }
       if (mediaType === "sfx") {
+        // 영상·그림과는 다른 색인이다(2026-09-20 코드리뷰 실측) -- 영상의
+        // 최고점(0.49)보다 낮다는 이유만으로 접히면 안 된다. 효과음 안에서는
+        // 이게 최고점이라 100%로 남아야 한다.
         return {
-          matches: [{ ...asset({ library_asset_id: "far", media_type: "sfx", user_metadata: { filename: "far.wav" } }), score: 0.1, semantic_match: true }],
+          matches: [{ ...asset({ library_asset_id: "sfx-top", media_type: "sfx", user_metadata: { filename: "sfx-top.wav" } }), score: 0.2, semantic_match: true }],
           semantic: true,
         };
       }
@@ -182,8 +189,10 @@ describe("LibraryPage", () => {
     fireEvent.change(screen.getByLabelText("검색"), { target: { value: "공원" } });
 
     await screen.findAllByText("top.mp4");
-    // 최고점 대비 너무 낮은(0.1/0.49 ≈ 20%) 결과는 화면에 안 남는다.
-    expect(screen.queryByText("far.wav")).toBeNull();
+    // 같은 색인 안에서 최고점 대비 너무 낮은 것은 화면에 안 남는다.
+    expect(screen.queryByText("far.png")).toBeNull();
+    // 다른 색인의 결과는 그 색인 안의 최고점(자기 자신)이라 남아야 한다.
+    expect(screen.getAllByText("sfx-top.wav").length).toBeGreaterThan(0);
   });
 
   it("reconciles a mixed drop and keeps a failed item visible", async () => {

@@ -59,4 +59,31 @@ describe("withRelevance", () => {
     const input = [match({ library_asset_id: "a", score: 0.9 }), match({ library_asset_id: "b", score: 0.1 })];
     expect(withRelevance(input)).toEqual(input);
   });
+
+  /** 2026-09-20 코드리뷰 실측: 영상·그림(`find_footage_matches`)과
+   *  음악·효과음(`find_audio_matches`)은 서로 다른 임베딩 색인을 쓴다 --
+   *  코사인 점수 규모가 같다는 보장이 없다. "전체" 탭처럼 네 종류를 한 번에
+   *  섞을 때, 한쪽 색인이 원래 더 높은 점수를 낸다는 이유만으로 다른 쪽
+   *  전체가 조용히 사라지면 안 된다. */
+  it("영상·그림과 음악·효과음은 서로 다른 임베딩 색인이라 관련도를 따로 잰다", () => {
+    const result = withRelevance([
+      match({ library_asset_id: "video-top", media_type: "broll", score: 0.9, semantic_match: true }),
+      // sfx 0.3은 sfx 안에서는 최고점이다. 영상의 0.9와 비교해 33%로 접히면
+      // 안 된다 -- 실제로는 정답이었을 수 있다.
+      match({ library_asset_id: "sfx-top", media_type: "sfx", score: 0.3, semantic_match: true }),
+    ]);
+
+    expect(result.map((item) => item.library_asset_id)).toEqual(["video-top", "sfx-top"]);
+    expect(result.find((item) => item.library_asset_id === "video-top")?.relevance_percent).toBe(100);
+    expect(result.find((item) => item.library_asset_id === "sfx-top")?.relevance_percent).toBe(100);
+  });
+
+  it("음악과 효과음은 같은 색인을 쓰므로 서로 대비해서 관련도를 잰다", () => {
+    const result = withRelevance([
+      match({ library_asset_id: "music-top", media_type: "music", score: 0.5, semantic_match: true }),
+      match({ library_asset_id: "sfx-far", media_type: "sfx", score: 0.05, semantic_match: true }),
+    ]);
+
+    expect(result.map((item) => item.library_asset_id)).toEqual(["music-top"]);
+  });
 });

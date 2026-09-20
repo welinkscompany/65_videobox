@@ -27,6 +27,8 @@ function fileDisplayName(file: File): string {
 /** `음악·효과음`은 소리 자산 둘을 함께 담는 한 자리다 -- 세로 메뉴
  *  `내 자산` 구역의 승인된 구조가 한 줄이기 때문이다(owner 승인 2026-09-04 §2). */
 const AUDIO_KINDS: readonly LibraryMediaType[] = ["music", "sfx"];
+/** `전체` 탭이 의미검색을 물을 네 종류(owner 결정 2026-09-20 "이왕 하는거 제대로"). */
+const ALL_KINDS: readonly LibraryMediaType[] = ["broll", ...AUDIO_KINDS, "image"];
 
 function matchesFilter(asset: LibraryAsset, filter: LibraryFilter) {
   if (filter === "all") return asset.lifecycle !== "trashed";
@@ -74,7 +76,6 @@ export function LibraryPage({ initialFilter }: { initialFilter?: LibraryFilter }
       // `전체` 탭도 같은 이유로 종류 없이 열 수 없다 — "종류를 하나도 안
       // 골랐다"가 "찾지 마라"는 뜻이 아니다(owner 결정 2026-09-20: "이왕
       // 하는거 제대로"). 그래서 네 종류 전부에 함께 묻는다.
-      const ALL_KINDS: readonly LibraryMediaType[] = ["broll", ...AUDIO_KINDS, "image"];
       const searchKinds: LibraryMediaType[] = activeFilter === "all" ? [...ALL_KINDS]
         : activeFilter === "audio" ? [...AUDIO_KINDS]
         : activeFilter === "broll" || activeFilter === "music" || activeFilter === "sfx" || activeFilter === "image" ? [activeFilter]
