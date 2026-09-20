@@ -22,19 +22,31 @@ function relevanceFamily(mediaType: LibraryAsset["media_type"]): "audio" | "foot
   return AUDIO_MEDIA_TYPES.has(mediaType) ? "audio" : "footage";
 }
 
+/**
+ * `find_audio_matches`/`find_footage_matches`가 2026-09-20부터 이 값을
+ * 직접 매겨서 보낸다(백엔드가 값이 태어나는 자리다 — 코드리뷰 altitude
+ * 지적: 화면만 이 계산을 하면 같은 함수를 부르는 유진의 추천 경로는 원시
+ * 점수만 받는다). 그래서 화면은 **다시 계산하지 않고** 그 값을 그대로
+ * 쓴다 — 같은 계산을 두 곳에서 하면 나중에 갈라질 수 있다. 아직 그 값이
+ * 없는 응답(옛 캐시, 이 계산이 나오기 전 픽스처)만 여기서 대신 매긴다.
+ */
 export function withRelevance<T extends LibraryAsset>(matches: readonly T[]): T[] {
+  const needsFallback = matches.some((match) => match.semantic_match && match.relevance_percent === undefined);
+  const withPercent = needsFallback ? attachFallbackRelevance(matches) : matches;
+  return withPercent.filter((match) => !match.semantic_match || match.relevance_percent === undefined || match.relevance_percent >= RELEVANCE_CUTOFF_PERCENT);
+}
+
+function attachFallbackRelevance<T extends LibraryAsset>(matches: readonly T[]): T[] {
   const topByFamily = new Map<string, number>();
   for (const match of matches) {
-    if (!match.semantic_match) continue;
+    if (!match.semantic_match || match.relevance_percent !== undefined) continue;
     const family = relevanceFamily(match.media_type);
     const score = Number(match.score ?? 0);
     if (score > (topByFamily.get(family) ?? 0)) topByFamily.set(family, score);
   }
-  return matches
-    .map((match) => {
-      if (!match.semantic_match) return match;
-      const top = topByFamily.get(relevanceFamily(match.media_type)) ?? 0;
-      return top > 0 ? { ...match, relevance_percent: Math.round((Number(match.score ?? 0) / top) * 100) } : match;
-    })
-    .filter((match) => !match.semantic_match || match.relevance_percent === undefined || match.relevance_percent >= RELEVANCE_CUTOFF_PERCENT);
+  return matches.map((match) => {
+    if (!match.semantic_match || match.relevance_percent !== undefined) return match;
+    const top = topByFamily.get(relevanceFamily(match.media_type)) ?? 0;
+    return top > 0 ? { ...match, relevance_percent: Math.round((Number(match.score ?? 0) / top) * 100) } : match;
+  });
 }

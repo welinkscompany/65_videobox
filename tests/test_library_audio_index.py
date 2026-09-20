@@ -163,6 +163,38 @@ def test_search_ranks_by_similarity_and_stays_within_the_kind_asked_for(tmp_path
     assert matches[0]["score"] > matches[1]["score"]
 
 
+def test_search_attaches_relevance_percent_relative_to_this_calls_own_top_score(tmp_path: Path) -> None:
+    """2026-09-20 코드리뷰(altitude): 화면(`libraryRelevance.ts`)만 관련도를
+    쟀었다 -- 유진의 추천 경로는 같은 함수를 부르면서도 원시 코사인 점수만
+    받았다. 이제 이 함수 자체가 관련도를 매겨서 두 쪽이 같은 신호를 쓴다.
+    """
+    store = _store(tmp_path)
+    _install(store, tmp_path, [
+        {"asset_id": "music-near", "media_type": "music", "payload": b"1"},
+        {"asset_id": "music-far", "media_type": "music", "payload": b"2"},
+    ])
+    by_id = {item["library_asset_id"]: item for item in store.list_assets_needing_audio_analysis()}
+    vectors = {
+        "pack:test-pack:music-near": [1.0, 0.0],
+        # 45도 -- 코사인 유사도 약 0.707, 최고점(1.0) 대비 약 71%.
+        "pack:test-pack:music-far": [1.0, 1.0],
+    }
+    for library_asset_id, vector in vectors.items():
+        store.save_audio_descriptor(
+            library_asset_id=library_asset_id,
+            sha256=str(by_id[library_asset_id]["sha256"]),
+            measurements={"duration_seconds": 1.0, "loudness_rms": 0.1, "brightness_hz": 900.0, "onset_rate_per_second": 0.2},
+            words={"세기": "보통", "밝기": "어두움", "빠르기": "느림"},
+            description="설명",
+            embedding=vector,
+        )
+
+    matches = store.find_audio_matches(query_embedding=[1.0, 0.0], media_type="music", limit=5)
+
+    assert matches[0]["relevance_percent"] == 100
+    assert matches[1]["relevance_percent"] == 71
+
+
 def test_search_refuses_a_query_it_cannot_rank(tmp_path: Path) -> None:
     store = _store(tmp_path)
 

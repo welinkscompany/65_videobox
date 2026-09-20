@@ -19,6 +19,10 @@ function matchesFilter(asset: LibraryAsset, filter: LibraryFilter) {
   if (filter === "all") return asset.lifecycle !== "trashed";
   if (filter === "trash") return asset.lifecycle === "trashed";
   if (filter === "favorites") return Boolean(asset.user_metadata?.favorite);
+  // `LibrarySidebar`가 이 팝업에서도 "음악·효과음" 탭을 항상 보여 준다 --
+  // 그 케이스가 없으면 media_type이 "audio"일 수 없어 목록이 통째로 비어
+  // 보였다(2026-09-20 코드리뷰 중 발견한 사전 존재 결함).
+  if (filter === "audio") return AUDIO_KINDS.includes(asset.media_type) && asset.lifecycle !== "trashed";
   return asset.media_type === filter && asset.lifecycle !== "trashed";
 }
 
@@ -113,6 +117,7 @@ export function LibraryPickerDialog({
   const counts = {
     all: assets.filter((item) => item.lifecycle !== "trashed").length,
     broll: assets.filter((item) => item.media_type === "broll" && item.lifecycle !== "trashed").length,
+    audio: assets.filter((item) => AUDIO_KINDS.includes(item.media_type) && item.lifecycle !== "trashed").length,
     music: assets.filter((item) => item.media_type === "music" && item.lifecycle !== "trashed").length,
     sfx: assets.filter((item) => item.media_type === "sfx" && item.lifecycle !== "trashed").length,
     image: assets.filter((item) => item.media_type === "image" && item.lifecycle !== "trashed").length,

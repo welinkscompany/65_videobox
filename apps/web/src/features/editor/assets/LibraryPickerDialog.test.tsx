@@ -27,7 +27,43 @@ afterEach(() => cleanup());
  * 검색어로 두 진입점이 다른 결과·다른 배지를 보여 주는 불일치였다. 여기서
  * 잠근다.
  */
+/** 자료실 화면(`LibraryPage.test.tsx`)의 같은 이름 헬퍼와 동일한 규칙 --
+ *  이름 뒤에 개수만 오는 것으로 찾는다("음악"이 "음악·효과음"까지 함께
+ *  집지 않도록). */
+function chooseCategory(label: string): HTMLElement {
+  const sidebar = screen.getByTestId("library-sidebar");
+  const button = within(sidebar).getByRole("button", { name: new RegExp(`^${label}(\\s|$)`) });
+  fireEvent.click(button);
+  return button;
+}
+
 describe("LibraryPickerDialog", () => {
+  /**
+   * 2026-09-20 코드리뷰 중 우연히 발견 -- 이 팝업의 `matchesFilter()`엔
+   * `LibraryPage.tsx`에 있는 `if (filter === "audio") ...` 케이스가 없었다.
+   * `LibrarySidebar`는 이 팝업에서도 "음악·효과음" 탭을 항상 보여 주는데,
+   * 그걸 누르면 `activeFilter`가 "audio"가 되고 `asset.media_type === "audio"`는
+   * 절대 참이 될 수 없어 목록이 통째로 비어 보였다. 이 파일 자체는 오늘
+   * 세션 이전부터 있던 사전 존재 결함이다.
+   */
+  it("`음악·효과음` 탭을 눌러도 목록이 비지 않는다", async () => {
+    vi.mocked(api.listLibraryAssets).mockResolvedValue({
+      assets: [
+        asset({ library_asset_id: "m1", media_type: "music", user_metadata: { filename: "calm.mp3" } }),
+        asset({ library_asset_id: "s1", media_type: "sfx", user_metadata: { filename: "door.wav" } }),
+        asset({ library_asset_id: "b1", media_type: "broll", user_metadata: { filename: "walk.mp4" } }),
+      ],
+      total: 3,
+    });
+    render(<LibraryPickerDialog open projectId="project-a" onOpenChange={() => {}} />);
+    await screen.findAllByText("walk.mp4");
+
+    expect(chooseCategory("음악·효과음")).toHaveAttribute("aria-pressed", "true");
+    expect((await screen.findAllByText("calm.mp3")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("door.wav").length).toBeGreaterThan(0);
+    expect(screen.queryByText("walk.mp4")).toBeNull();
+  });
+
   it("`전체` 탭에서도 네 종류에 함께 물어 뜻으로 찾는다", async () => {
     const search = vi.spyOn(api, "searchLibraryAssets").mockImplementation(async (_query, mediaType) => ({
       matches: [{ ...asset({ library_asset_id: `${mediaType}_1`, media_type: mediaType, user_metadata: { filename: `${mediaType}.dat` } }), score: 0.9, semantic_match: true }],

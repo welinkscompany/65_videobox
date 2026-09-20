@@ -154,6 +154,23 @@ def test_search_ranks_footage_and_can_ask_for_one_orientation(tmp_path: Path) ->
     assert [match["filename"] for match in portrait_only] == ["tall-near.mp4"]
 
 
+def test_search_attaches_relevance_percent_relative_to_this_calls_own_top_score(tmp_path: Path) -> None:
+    """2026-09-20 코드리뷰(altitude): 화면만 관련도를 쟀었다 -- 유진의
+    추천 경로도 같은 신호를 받도록 값이 태어나는 자리에서 매긴다."""
+    store = _store(tmp_path)
+    near = _footage(tmp_path, "near.mp4", b"1")
+    far = _footage(tmp_path, "far.mp4", b"2")
+    _save(store, near, b"1", embedding=[1.0, 0.0])
+    # 45도 -- 코사인 유사도 약 0.707, 최고점(1.0) 대비 약 71%.
+    _save(store, far, b"2", embedding=[1.0, 1.0])
+
+    matches = store.find_footage_matches(query_embedding=[1.0, 0.0], limit=5)
+
+    by_filename = {match["filename"]: match for match in matches}
+    assert by_filename["near.mp4"]["relevance_percent"] == 100
+    assert by_filename["far.mp4"]["relevance_percent"] == 71
+
+
 def test_search_refuses_a_query_it_cannot_rank(tmp_path: Path) -> None:
     store = _store(tmp_path)
 

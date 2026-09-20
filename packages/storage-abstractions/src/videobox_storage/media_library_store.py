@@ -20,6 +20,26 @@ from videobox_storage.footage_organizer_store import (
 )
 
 
+def _attach_relevance_percent(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """이 호출 하나의 결과 안에서 최고점 대비 상대 퍼센트를 매긴다.
+
+    코사인 유사도는 절대값으로 "몇 % 확신"을 말할 수 없다(2026-09-20 owner
+    화면 실측: "공원" 검색에서 관련 있는 것과 없는 것이 0.44~0.49 사이에
+    몰렸다). 화면(`libraryRelevance.ts`)만 이 계산을 하면 같은 함수를 부르는
+    유진의 추천 경로는 원시 점수만 받는다 -- 그래서 여기, 값이 태어나는
+    자리에서 매긴다. 이 함수를 부르는 자리는 이미 한 색인(음악·효과음 또는
+    영상·그림)만 보므로, 다른 임베딩 모델과 섞일 일이 없다.
+    """
+    if not matches:
+        return matches
+    top = matches[0]["score"]
+    if top <= 0:
+        return matches
+    for match in matches:
+        match["relevance_percent"] = round((match["score"] / top) * 100)
+    return matches
+
+
 def footage_segment_index_identity(source_sha256: str, start_sec: float, end_sec: float) -> str:
     """Return a stable content-addressed key for one immutable source range."""
     start = float(start_sec)
@@ -448,7 +468,7 @@ class MediaLibraryStore:
                 "score": round(score, 6),
             })
         matches.sort(key=lambda match: (-match["score"], match["library_asset_id"]))
-        return matches[:limit]
+        return _attach_relevance_percent(matches[:limit])
 
     # ------------------------------------------------------------------
     # The owner's own footage
@@ -716,7 +736,7 @@ class MediaLibraryStore:
                 "score": round(score, 6),
             })
         matches.sort(key=lambda match: (-match["score"], match["filename"]))
-        return matches[:limit]
+        return _attach_relevance_percent(matches[:limit])
 
     def register_approved_footage_segments(
         self, *, segments: Iterable[dict[str, Any]]

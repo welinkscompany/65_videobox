@@ -60,6 +60,23 @@ describe("withRelevance", () => {
     expect(withRelevance(input)).toEqual(input);
   });
 
+  /** 2026-09-20 코드리뷰 후속(altitude): `find_audio_matches`/
+   *  `find_footage_matches`가 이제 값이 태어나는 자리에서 관련도를 매겨
+   *  보낸다(유진의 추천 경로도 같은 함수를 쓰므로 같은 신호를 받는다).
+   *  화면은 그 값을 다시 계산하지 않고 그대로 믿는다 -- 두 곳에서 같은
+   *  계산을 하면 나중에 갈라질 수 있다. */
+  it("백엔드가 이미 매긴 relevance_percent가 있으면 다시 계산하지 않고 그대로 믿는다", () => {
+    const result = withRelevance([
+      // score만 보면 33%지만, 백엔드가 이미 자기 색인 안에서 100%라고
+      // 매겨 보냈다 -- 화면은 이 값을 그대로 따라야 한다.
+      match({ library_asset_id: "backend-said-100", media_type: "sfx", score: 0.3, semantic_match: true, relevance_percent: 100 }),
+      match({ library_asset_id: "video-top", media_type: "broll", score: 0.9, semantic_match: true, relevance_percent: 100 }),
+    ]);
+
+    expect(result.map((item) => item.library_asset_id)).toEqual(["backend-said-100", "video-top"]);
+    expect(result.find((item) => item.library_asset_id === "backend-said-100")?.relevance_percent).toBe(100);
+  });
+
   /** 2026-09-20 코드리뷰 실측: 영상·그림(`find_footage_matches`)과
    *  음악·효과음(`find_audio_matches`)은 서로 다른 임베딩 색인을 쓴다 --
    *  코사인 점수 규모가 같다는 보장이 없다. "전체" 탭처럼 네 종류를 한 번에
