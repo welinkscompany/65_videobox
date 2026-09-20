@@ -306,6 +306,11 @@ function EditorWorkbenchInstance({
     const segmentIds = new Set([
       ...view.tracks.filter((track) => track.role === "narration").flatMap((track) => track.clips.map((clip) => clip.segmentId)),
       ...view.captions.map((caption) => caption.segmentId),
+      // 분할된 캡션은 `owningSegmentId`로 골라진다(TimelineDock.selectClip) --
+      // segmentId만 모으면 그 선택이 "존재하지 않는 장면"으로 보여 리비전이
+      // 바뀔 때마다(예: 백그라운드 재검증) 조용히 첫 장면으로 되돌아갔다
+      // (2026-09-20 실측).
+      ...view.captions.map((caption) => caption.owningSegmentId ?? caption.segmentId),
     ]);
     setSelectedSegmentId((current) => current && segmentIds.has(current) ? current : segmentIds.has(view.local.selectedSegmentId ?? "") ? view.local.selectedSegmentId : null);
     setPlaybackSec((current) => clampPlaybackSeconds(current, view.output.durationSec));

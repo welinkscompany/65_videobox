@@ -734,6 +734,50 @@ describe("EditorWorkbench", () => {
     });
   });
 
+  it("keeps a split-child caption selected across a same-route revision bump (2026-09-20 실측)", async () => {
+    // 실측: 캡션을 골라 전환 탭을 열면(왼쪽 패널 전환은 view.expectedRevision을
+    // 안 바꾸지만, 배경 재검증 등으로 리비전이 오르는 경로는 실제로 존재한다)
+    // 방금 고른 장면이 첫 장면으로 되돌아갔다. 원인: split된 캡션은
+    // `owningSegmentId`로 선택되는데(TimelineDock.selectClip), 리비전이 바뀌면
+    // EditorWorkbench가 "아직 존재하는 선택인지" 검사하는 집합이 `segmentId`만
+    // 모아서 `owningSegmentId`를 못 찾고 선택을 버렸다.
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockReturnValue({
+      width: 1600,
+    } as DOMRect);
+    const observedTimeline: Array<Readonly<{ selectedSegmentId: string | null | undefined }>> = [];
+    vi.spyOn(timelineDockModule, "TimelineDock").mockImplementation((props) => {
+      observedTimeline.push({ selectedSegmentId: props.selectedSegmentId });
+      return (
+        <section aria-label="타임라인">
+          <button type="button" onClick={() => props.onSelectSegment?.("segment-1__split_2")}>
+            분할된 두 번째 캡션 고르기
+          </button>
+        </section>
+      );
+    });
+    const splitView = {
+      ...view,
+      output: { ...view.output, durationSec: 5 },
+      captions: [{
+        segmentId: "segment-1",
+        owningSegmentId: "segment-1__split_2",
+        text: "QA 자막",
+        startSec: 2.5,
+        endSec: 5,
+        style: {} as never,
+      }],
+    };
+    const rendered = render(<EditorWorkbench view={splitView} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "분할된 두 번째 캡션 고르기" }));
+    await waitFor(() => expect(observedTimeline.at(-1)?.selectedSegmentId).toBe("segment-1__split_2"));
+
+    observedTimeline.length = 0;
+    rendered.rerender(<EditorWorkbench view={{ ...splitView, expectedRevision: 2 }} />);
+
+    expect(observedTimeline.at(-1)?.selectedSegmentId).toBe("segment-1__split_2");
+  });
+
   it("uses a video element for a source-backed visual overlay audition rather than treating it as audio", () => {
     const overlayView = {
       ...view,
