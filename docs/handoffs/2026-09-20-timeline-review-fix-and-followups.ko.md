@@ -1,5 +1,7 @@
 # 검토 화면 최신 편집 반영 고침 + 후속 점검 (2026-09-20)
 
+**대체됨:** `2026-09-20-full-feature-qa-sweep.ko.md`가 이어받았다.
+
 ## 요청과 배경
 
 `docs/handoffs/2026-09-20-timeline-manual-editing-bug-hunt.ko.md`의 "다음 세션
