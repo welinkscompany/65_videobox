@@ -1735,6 +1735,7 @@ class EditingSessionResponse(BaseModel):
 class EditorFpsResponse(BaseModel):
     num: int = Field(gt=0)
     den: int = Field(gt=0)
+    model_config = ConfigDict(extra="forbid")
 
 
 class EditorOutputResponse(BaseModel):
@@ -1743,6 +1744,7 @@ class EditorOutputResponse(BaseModel):
     sample_aspect_ratio: str
     rotation: int
     duration_sec: float = Field(ge=0)
+    model_config = ConfigDict(extra="forbid")
 
 
 class EditorMediaControlsResponse(BaseModel):
@@ -1800,6 +1802,7 @@ class EditorClipResponse(BaseModel):
     media_revision: str | None = None
     overlay_type: Literal["explanation_card", "image_overlay", "table_overlay", "shape_overlay"] | None = None
     overlay_payload: dict[str, object] = Field(default_factory=dict)
+    model_config = ConfigDict(extra="forbid")
 
 
 class EditorTrackResponse(BaseModel):
@@ -1808,6 +1811,7 @@ class EditorTrackResponse(BaseModel):
     clips: list[EditorClipResponse]
     # 눈·음소거는 여기 싣지 않는다. 화면은 맨 위 `track_states` 하나만 읽는다
     # (자막 트랙은 이 목록에 아예 안 실려 트랙 쪽으로는 못 읽는다).
+    model_config = ConfigDict(extra="forbid")
 
 
 class EditorCaptionStyleResponse(BaseModel):
@@ -1843,6 +1847,7 @@ class EditorCaptionResponse(BaseModel):
     start_sec: float = Field(ge=0)
     end_sec: float = Field(ge=0)
     style: EditorCaptionStyleResponse
+    model_config = ConfigDict(extra="forbid")
 
 
 class EditorGapSlotResponse(BaseModel):
@@ -1851,16 +1856,19 @@ class EditorGapSlotResponse(BaseModel):
     start_sec: float = Field(ge=0)
     end_sec: float = Field(ge=0)
     reason: str
+    model_config = ConfigDict(extra="forbid")
 
 
 class EditorSourceStatusResponse(BaseModel):
     status: Literal["current", "stale"]
     source_session_id: str | None = None
     source_session_revision: int | None = None
+    model_config = ConfigDict(extra="forbid")
 
 
 class EditorAuditionResponse(BaseModel):
     asset_urls: dict[str, str]
+    model_config = ConfigDict(extra="forbid")
 
 
 class EditorExactPreviewResponse(BaseModel):
@@ -1873,6 +1881,7 @@ class EditorExactPreviewResponse(BaseModel):
     timeline_end_sec: float | None = None
     artifact_revision: int | None = None
     fingerprint: str | None = None
+    model_config = ConfigDict(extra="forbid")
 
 
 class ExactPreviewRequestBody(BaseModel):
@@ -1919,6 +1928,14 @@ class EditorPlaybackManifestResponse(BaseModel):
     source_status: EditorSourceStatusResponse
     audition: EditorAuditionResponse
     exact_preview: EditorExactPreviewResponse
+    # extra="forbid": 이 응답 계약 전체(및 위 Editor*Response 가족)가
+    # 2026-09-20에 `owning_segment_id`를 조용히 잘라 보낸 실측 결함으로
+    # 얻은 방어다. 내부 매니페스트 빌더(`editor_playback_manifest.py`)가
+    # 새 필드를 만들어도 이 모델에 안 적으면 Pydantic이 기본값(무시)으로
+    # 조용히 버렸다 -- 응답이 죽지 않으니 아무도 눈치 못 챈다. `forbid`로
+    # 바꾸면 그 자리에서 검증 에러로 바로 터진다(`EditorMediaControlsResponse`가
+    # 이미 같은 이유로 쓰던 패턴).
+    model_config = ConfigDict(extra="forbid")
 
 
 class SegmentAnalysisRecord(BaseModel):
