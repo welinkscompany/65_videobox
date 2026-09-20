@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from videobox_provider_interfaces.embeddings import EmbeddingRequest, EmbeddingResponse, EmbeddingProvider
+from videobox_provider_interfaces.local_qwen import _strip_reasoning_block
 from videobox_provider_interfaces.vision import FIXED_VISION_LAYERS, REQUIRED_VISION_LAYERS, FIXED_VISION_RESPONSE_SCHEMA, VisionAnalysisRequest, VisionAnalysisResponse, VisionProvider
 
 
@@ -308,6 +309,13 @@ class LMStudioVisionProvider(VisionProvider):
     def _parse_output(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
             raw = payload["choices"][0]["message"]["content"]
+            # Qwen3 계열은 "생각" 모드가 켜지면 실제 답 앞에 <think>...</think>
+            # 추론 블록을 content에 그대로 얹어 보낸다(`local_qwen.py`가 채팅
+            # 경로에서 이미 겪고 고친 문제 -- 2026-09-17). 이 파일의 vision
+            # 경로는 그 방어를 안 물려받아서 실측(2026-09-20, 프로젝트
+            # `10-06-da081c96`에서 모든 미디어 분석이 매번 "malformed JSON"으로
+            # 죽는 것으로 재현·확인)으로 같은 누출이 그대로 났다.
+            raw = _strip_reasoning_block(raw) if isinstance(raw, str) else raw
             output = json.loads(raw)
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             raise LMStudioProviderError("Vision response is malformed JSON.", "failed") from exc

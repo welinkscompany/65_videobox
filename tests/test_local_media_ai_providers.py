@@ -270,6 +270,35 @@ def test_vision_provider_rejects_arbitrary_or_malformed_structured_output() -> N
     assert captured.value.code == "failed"
 
 
+# 2026-09-20 실측: 프로젝트 `10-06-da081c96`에서 모든 촬영본 미디어 분석이
+# "Vision response is malformed JSON."으로 매번(4회 연속) 실패했다. LM Studio에
+# 직접 같은 형태로 물어봐서 원인을 확인했다 -- 지금 켜진 vision 모델
+# (`qwen/qwen3.8-27b`, Qwen3 계열)이 응답 맨 앞에 `<think>...</think>` 추론
+# 블록을 얹어 보냈다. `local_qwen.py`의 채팅 경로는 이미 2026-09-17에 같은
+# 문제를 겪고 고쳤는데(`_strip_reasoning_block`), 이 vision 경로는 그 방어를
+# 안 물려받아서 그대로 다시 났다.
+def test_vision_provider_strips_a_leaked_reasoning_block_before_parsing_json() -> None:
+    leaked = {
+        "choices": [{"message": {"content": "<think>이미지를 보고 있다...</think>" + __import__("json").dumps({
+            "layers": {name: [] for name in FIXED_VISION_LAYERS},
+            "summary": "ok",
+            "confidence": 1,
+            "review_reasons": [],
+        })}}],
+    }
+    client = FakeLMStudioClient([
+        _loaded_models(capabilities=["vision", "structured_json"]),
+        leaked,
+    ])
+    provider = LMStudioVisionProvider(transport=LMStudioHTTPTransport(http_client=client))
+
+    response = provider.analyze_images(
+        VisionAnalysisRequest(model_name="local-media", prompt="describe", images=(_image_bytes(),), response_schema=VISION_RESPONSE_SCHEMA)
+    )
+
+    assert response.output_data["summary"] == "ok"
+
+
 def test_vision_provider_rejects_undecodable_oversized_bytes() -> None:
     client = FakeLMStudioClient([_loaded_models(capabilities=["vision", "structured_json"])])
     provider = LMStudioVisionProvider(transport=LMStudioHTTPTransport(http_client=client))
