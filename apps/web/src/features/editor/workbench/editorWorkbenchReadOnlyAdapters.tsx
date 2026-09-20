@@ -19,10 +19,36 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, selectedS
     const localSources = sources.filter((source) => isAllowedLocalUrl(source.url));
     // 캡컷은 전환을 왼쪽 패널 탭에서 고른다. 걸 대상은 오른쪽 속성 패널이 쓰는
     // 것과 **같은 계산**이다 -- 고른 장면과, 그 앞에 장면이 있는지.
-    const leftSelectedIndex = selectedSegmentId === null
-      ? -1
-      : session?.segments.findIndex((segment) => segment.segmentId === selectedSegmentId) ?? -1;
-    const transitionTarget = selectedSegmentId === null || leftSelectedIndex < 0
+    //
+    // **앞 장면 유무는 `session.segments` 배열 순서로 재면 안 된다**(2026-09-20
+    // 실물 재현). 그 배열은 백엔드 저장 순서라 장면을 나누거나 순서를 바꾸면
+    // 화면 시간순과 어긋난다(`TimelineDock`이 이미 같은 이유로 클립 번호를
+    // 배열 순서 대신 시간순으로 매긴다 -- `장면 번호는 배열 순서가 아니라
+    // 시간순으로 매긴다` 시험, 2026-09-19 실물 재현). 배열 index로 재면, 재배치된
+    // 뒤쪽 장면을 골라도 "앞 장면 없음"을 잘못 말한다 -- 트림 손잡이는 맞는 클립에
+    // 뜨는데 이 탭만 첫 장면으로 본다. 여기서는 `view`가 들고 있는 실제 화면
+    // 시간순(내레이션 먼저, 없으면 자막)으로 다시 줄을 세운다.
+    const timelineSegmentOrder = new Map<string, number>();
+    for (const track of view.tracks) {
+      if (track.role !== "narration") continue;
+      for (const clip of track.clips) {
+        const known = timelineSegmentOrder.get(clip.segmentId);
+        if (known === undefined || clip.startSec < known) timelineSegmentOrder.set(clip.segmentId, clip.startSec);
+      }
+    }
+    for (const caption of view.captions) {
+      const key = caption.owningSegmentId ?? caption.segmentId;
+      const known = timelineSegmentOrder.get(key);
+      if (known === undefined || caption.startSec < known) timelineSegmentOrder.set(key, caption.startSec);
+    }
+    const orderedSegmentIds = Array.from(timelineSegmentOrder.entries())
+      .sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]))
+      .map(([segmentId]) => segmentId);
+    const leftSelectedIndex = selectedSegmentId === null ? -1 : orderedSegmentIds.indexOf(selectedSegmentId);
+    // 세션이 그 장면을 모르면(예: 전환 저장 대상이 아닌 장면) 여전히 대상이 없다.
+    const knownToSession = selectedSegmentId !== null
+      && (session?.segments.some((segment) => segment.segmentId === selectedSegmentId) ?? false);
+    const transitionTarget = selectedSegmentId === null || leftSelectedIndex < 0 || !knownToSession
       ? null
       : { segmentId: selectedSegmentId, hasPrevious: leftSelectedIndex > 0 };
     // **"화면에 얹기"가 거짓말이 되는 자리(2026-09-11 실측 결함).** 장면 하나는
