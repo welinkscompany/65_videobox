@@ -304,12 +304,14 @@ GUARDS: tuple[Guard, ...] = (
     Guard(
         name="guard-router-itself",
         what="이 라우터와 그 매핑 표가 실제 파일을 가리키는지",
-        tests=("tests/test_guard_router_table.py",),
+        tests=("tests/test_guard_router_table.py", "tests/test_handoff_freshness_guard.py"),
         patterns=(
             "scripts/guard_router.py",
             "tests/test_guard_router_table.py",
+            "tests/test_handoff_freshness_guard.py",
         ),
-        seconds=1.2,
+        seconds=24.7,
+        notes="느려졌다(2026-09-20, handoff-freshness 시험 추가) -- Stop에서만 돈다.",
     ),
 )
 
@@ -320,6 +322,37 @@ SCREEN_PATTERNS: tuple[str, ...] = (
     "apps/web/src/*",
     "services/api/src/videobox_api/routers/*",
 )
+
+
+# 이 세션이 실제 제품 코드를 고쳤다고 보는 자리.  `docs/decisions/`는 소스는
+# 아니지만 결정 기록이라 같은 급으로 본다.
+HANDOFF_SOURCE_PATTERNS: tuple[str, ...] = (
+    "packages/**",
+    "services/**",
+    "apps/web/src/**",
+    "docs/decisions/*",
+)
+
+# CLAUDE.md §7: "인계는 프롬프트가 아니라 docs/handoffs/ 문서로 남긴다."
+HANDOFF_DOC_PATTERN = "docs/handoffs/*"
+
+
+def needs_handoff_reminder(paths: list[str]) -> bool:
+    """제품 코드를 고쳤는데 이번 세션에 인계 문서를 하나도 안 건드렸는지.
+
+    **막지 않는다 — 알려만 준다.** 이 저장소는 커밋을 turn마다 하는 게
+    기본값이라(§10.1), 소스를 고칠 때마다 막으면 세션 하나에 커밋을 여러 번
+    하는 정상적인 흐름 자체를 막는다. 인계는 원래 세션이 마무리될 때 한 번
+    쓰는 것이라(§7), 그 판단까지 이 훅이 대신할 수 없다 -- `touches_screen`과
+    같은 자리(정보 제공, 실패 아님)에 놓는다.
+    """
+
+    touched_source = any(
+        matches(pattern, path) for path in paths for pattern in HANDOFF_SOURCE_PATTERNS
+    )
+    if not touched_source:
+        return False
+    return not any(matches(HANDOFF_DOC_PATTERN, path) for path in paths)
 
 
 # ---------------------------------------------------------------------------
@@ -743,6 +776,12 @@ def run_as_hook(event: str) -> int:
     # Stop: 이번 세션에 바뀐 것 전체를 한 번 훑는 자리다. 오늘 놓친 자리가 여기다.
     already_blocked = bool(payload.get("stop_hook_active"))
     message = "세션 끝 가드 점검\n" + report
+    if needs_handoff_reminder(paths):
+        message += (
+            "\n[알림] 제품 코드를 고쳤는데 이번 세션에 docs/handoffs/ 인계 문서를"
+            " 아직 안 남겼습니다. 세션을 마무리한다면 §7 형식으로 남기세요"
+            "(막지는 않습니다 -- 아직 끝낼 때가 아니면 무시하세요)."
+        )
     if failures and not already_blocked:
         emit_hook(
             {
