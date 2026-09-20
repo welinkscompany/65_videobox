@@ -72,6 +72,40 @@ async function installLibraryApi(page) {
     const id = idMatch ? decodeURIComponent(idMatch[1]) : null;
     const action = idMatch?.[2] ?? null;
 
+    // "전체" 탭도 검색어가 있으면 종류별로 이 자리를 부른다(2026-09-20,
+    // "이왕 하는거 제대로" -- `LibraryPage.tsx`의 `ALL_KINDS` fan-out).
+    // 이 가짜 서버는 의미 색인이 없으니 단어 매칭으로만 답한다 -- 실제
+    // 서버의 "단어로만 찾음" 대체 경로와 같은 모양이다.
+    if (path === "/api/library/search" && request.method() === "GET") {
+      const query = url.searchParams.get("q")?.trim().toLowerCase() ?? "";
+      const mediaType = url.searchParams.get("media_type");
+      if (query.includes("1000")) {
+        // 1000행 fixture는 검색어 자체가 파일명과 안 겹친다("1000-row fixture" vs
+        // "synthetic-0000.mp4") -- 원래 `/api/library/assets` 분기와 같은 모양으로
+        // 파일명 대조 없이 그대로 돌려준다. broll 말고 다른 종류엔 이 fixture가
+        // 없다.
+        if (mediaType !== "broll") return json(route, { matches: [], semantic: false });
+        const synthetic = Array.from({ length: 1000 }, (_, index) => asset({
+          id: `synthetic-${index}`,
+          name: `synthetic-${String(index).padStart(4, "0")}.mp4`,
+          mime: "video/mp4",
+          label: "1000행 레이아웃 fixture",
+          mediaType: "broll",
+        }));
+        return json(route, { matches: synthetic.map((item) => ({ ...item, score: 1, reason: "파일명 또는 분석 메타데이터 일치", semantic_match: false })), semantic: false });
+      }
+      const matches = state.assets
+        .filter((item) => item.lifecycle !== "trashed" && item.media_type === mediaType)
+        .filter((item) => {
+          if (!query) return true;
+          const filename = String(item.user_metadata?.filename ?? "").toLowerCase();
+          const description = String(item.machine_metadata?.description ?? "").toLowerCase();
+          return filename.includes(query) || description.includes(query);
+        })
+        .map((item) => ({ ...item, score: 1, reason: "파일명 또는 분석 메타데이터 일치", semantic_match: false }));
+      return json(route, { matches, semantic: false });
+    }
+
     if (path === "/api/library/assets" && request.method() === "GET") {
       const query = url.searchParams.get("q")?.trim().toLowerCase() ?? "";
       if (query.includes("1000")) {

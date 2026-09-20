@@ -1066,6 +1066,12 @@ export type LibraryAsset = {
   preview_url?: string | null;
   thumbnail_url?: string | null;
   waveform_url?: string | null;
+  /** 의미검색 결과에만 실려 온다 — 목록 조회에는 없다. */
+  score?: number;
+  semantic_match?: boolean;
+  /** 이번 검색에서 가장 잘 맞는 것 대비 상대 퍼센트(0~100). 화면에서
+   *  계산해 붙인다 — 백엔드가 주는 값이 아니다(`libraryRelevance.ts`). */
+  relevance_percent?: number;
 };
 
 export type LibraryAssetListResponse = { assets: LibraryAsset[]; total: number };

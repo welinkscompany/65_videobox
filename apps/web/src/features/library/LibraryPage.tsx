@@ -6,6 +6,7 @@ import { IngestJobTable } from "./IngestJobTable";
 import { LibraryPreviewPane } from "./LibraryPreviewPane";
 import { LibraryResults } from "./LibraryResults";
 import { LibrarySidebar, type LibraryFilter } from "./LibrarySidebar";
+import { withRelevance } from "./libraryRelevance";
 import "./library.css";
 
 function fileType(file: File): LibraryMediaType | null {
@@ -58,7 +59,8 @@ export function LibraryPage({ initialFilter }: { initialFilter?: LibraryFilter }
     try {
       // 종류 탭을 고르고 검색하면 의미검색(`/api/library/search`)을 부른다.
       // 이 엔드포인트는 백엔드에 있었는데 부르는 화면이 없어 검색이 언제나
-      // 단어 매칭이었다. 종류가 없는 탭(전체·즐겨찾기·휴지통)은 목록 검색 그대로다.
+      // 단어 매칭이었다. 즐겨찾기·휴지통은 목록 검색 그대로다(종류가 아니라
+      // 사용자가 고른 상태라 의미검색 대상이 아니다).
       // 그림도 이 길로 보낸다. 그림에는 의미 색인이 없어 서버가 `semantic:
       // false`를 돌려주고, 배지가 `단어로만 찾음`으로 정직하게 뜬다. 목록
       // 검색으로 돌리면 어느 방식으로 찾았는지 아예 말하지 못한다.
@@ -68,7 +70,13 @@ export function LibraryPage({ initialFilter }: { initialFilter?: LibraryFilter }
       // 돌던 의미검색이 여기서 조용히 단어 매칭으로 떨어지면, 추천이 갑자기
       // 나빠진 이유를 알 수 없다. 서버는 종류를 하나만 받는다(`media_type`은
       // 필수) -- 그래서 한 번이 아니라 두 번 묻는다.
-      const searchKinds: LibraryMediaType[] = activeFilter === "audio" ? [...AUDIO_KINDS]
+      //
+      // `전체` 탭도 같은 이유로 종류 없이 열 수 없다 — "종류를 하나도 안
+      // 골랐다"가 "찾지 마라"는 뜻이 아니다(owner 결정 2026-09-20: "이왕
+      // 하는거 제대로"). 그래서 네 종류 전부에 함께 묻는다.
+      const ALL_KINDS: readonly LibraryMediaType[] = ["broll", ...AUDIO_KINDS, "image"];
+      const searchKinds: LibraryMediaType[] = activeFilter === "all" ? [...ALL_KINDS]
+        : activeFilter === "audio" ? [...AUDIO_KINDS]
         : activeFilter === "broll" || activeFilter === "music" || activeFilter === "sfx" || activeFilter === "image" ? [activeFilter]
         : [];
       const semanticEligible = Boolean(search.trim()) && searchKinds.length > 0;
@@ -89,10 +97,12 @@ export function LibraryPage({ initialFilter }: { initialFilter?: LibraryFilter }
           seenIds.add(identity);
           return true;
         });
-        nextAssets = usable;
         // 배지는 화면에 실제로 남은 행 기준으로 말한다. 의미검색이 돌았어도
-        // 남은 행이 전부 단어 매칭이면 `뜻으로 찾음`은 거짓말이다.
+        // 남은 행이 전부 단어 매칭이면 `뜻으로 찾음`은 거짓말이다. 관련도
+        // 컷오프는 그 판정 *뒤에* 적용한다 -- 컷오프로 접힌 행까지 감안해서
+        // "찾은 방식"을 말하면 안 된다.
         setSearchMode(result.semantic && usable.some((match) => match.semantic_match) ? "semantic" : "word");
+        nextAssets = withRelevance(usable);
       } else {
         const result = await api.listLibraryAssets({ includeTrashed: activeFilter === "trash", q: search || undefined, limit: 500 });
         if (currentEpoch !== epoch.current) return;

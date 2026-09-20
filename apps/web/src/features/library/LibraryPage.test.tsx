@@ -144,6 +144,48 @@ describe("LibraryPage", () => {
     expect(await screen.findByRole("status", { name: "찾은 방식" })).toHaveTextContent("단어로만 찾음");
   });
 
+  /** 2026-09-20 owner 결정: "전체" 탭은 "이왕 하는거 제대로" -- 종류를 하나도
+   *  안 골랐다고 단어 매칭으로 조용히 떨어지지 않는다. 영상·음악·효과음·그림
+   *  네 종류에 동시에 물어서 점수로 합친다. */
+  it("`전체` 탭에서도 네 종류에 함께 물어 뜻으로 찾는다", async () => {
+    const search = vi.spyOn(api, "searchLibraryAssets").mockImplementation(async (_query, mediaType) => ({
+      matches: [{ ...asset({ library_asset_id: `${mediaType}_1`, media_type: mediaType, user_metadata: { filename: `${mediaType}.dat` } }), score: 0.9, semantic_match: true }],
+      semantic: mediaType !== "image",
+    }));
+    render(<LibraryPage />);
+    fireEvent.change(screen.getByLabelText("검색"), { target: { value: "공원" } });
+
+    await waitFor(() => expect(search).toHaveBeenCalledWith("공원", "broll", undefined));
+    expect(search).toHaveBeenCalledWith("공원", "music", undefined);
+    expect(search).toHaveBeenCalledWith("공원", "sfx", undefined);
+    expect(search).toHaveBeenCalledWith("공원", "image", undefined);
+    expect(await screen.findByRole("status", { name: "찾은 방식" })).toHaveTextContent("뜻으로 찾음");
+  });
+
+  it("`전체` 탭 의미검색 결과에도 최고점 대비 관련도를 매기고 너무 낮은 것은 접는다", async () => {
+    vi.spyOn(api, "searchLibraryAssets").mockImplementation(async (_query, mediaType) => {
+      if (mediaType === "broll") {
+        return {
+          matches: [{ ...asset({ library_asset_id: "top", user_metadata: { filename: "top.mp4" } }), score: 0.49, semantic_match: true }],
+          semantic: true,
+        };
+      }
+      if (mediaType === "sfx") {
+        return {
+          matches: [{ ...asset({ library_asset_id: "far", media_type: "sfx", user_metadata: { filename: "far.wav" } }), score: 0.1, semantic_match: true }],
+          semantic: true,
+        };
+      }
+      return { matches: [], semantic: false };
+    });
+    render(<LibraryPage />);
+    fireEvent.change(screen.getByLabelText("검색"), { target: { value: "공원" } });
+
+    await screen.findAllByText("top.mp4");
+    // 최고점 대비 너무 낮은(0.1/0.49 ≈ 20%) 결과는 화면에 안 남는다.
+    expect(screen.queryByText("far.wav")).toBeNull();
+  });
+
   it("reconciles a mixed drop and keeps a failed item visible", async () => {
     vi.mocked(api.ingestLibraryAssets)
       .mockResolvedValueOnce({ ingest_batch_id: "batch_b", partial: false, items: [{ filename: "clip.mp4", state: "ready", library_asset_id: "new_clip" }] })
