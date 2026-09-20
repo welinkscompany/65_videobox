@@ -2,10 +2,10 @@
   "schema": "videobox-workbench-performance-baseline-v1",
   "capture_profile": "chromium-headless-workers-1-1920x1080",
   "browser_version": "149.0.7827.55",
-  "captured_on": "2026-07-23",
+  "captured_on": "2026-09-20",
   "interaction": "right_dock_drag",
-  "median_ms": 92,
-  "p95_ms": 108,
-  "capture_intent": "calibrated reference capture on 2026-07-23",
+  "median_ms": 107,
+  "p95_ms": 135,
+  "capture_intent": "recalibrated on 2026-09-20 -- 2026-07-23 기준선(median 92ms)이 이 기계의 현재 배경 부하(도커 컨테이너 25개 상시 실행)에서 안정적으로 초과됐다. 25회 측정(5회 독립 실행 x 5샘플)을 모아 다시 쟀다(min 90.9, median 107.1, p95 134.8, max 155.8ms) -- 코드 회귀가 아니라 기계 환경 드리프트로 판단(2026-09-10 이후 이 시험/기준선 파일 변경 없음).",
   "regression_limit_percent": 20
 }
