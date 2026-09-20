@@ -1830,6 +1830,13 @@ class EditorCaptionStyleResponse(BaseModel):
 
 class EditorCaptionResponse(BaseModel):
     segment_id: str
+    # 화면이 "지금 이 자막이 실제로 놓인 조각"을 알아야 할 때 쓰는 자리
+    # (`composition_plan.py`/`editor_playback_manifest.py`의 `owning_segment_id`
+    # 주석 참고). 이 필드가 응답 모델에 없어서 값이 있어도 HTTP 응답에서
+    # 조용히 잘려 나갔다(2026-09-20 실측: `GET .../playback-manifest`가
+    # `owning_segment_id`를 아예 안 실어 보냄) -- `segment_id`는 대본
+    # 정렬·번역용 영구 계보라 바꾸면 안 된다.
+    owning_segment_id: str
     caption_id: str
     placement_id: str
     text: str

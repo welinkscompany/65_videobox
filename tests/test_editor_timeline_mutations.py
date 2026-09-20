@@ -350,6 +350,53 @@ def test_caption_owning_segment_id_follows_the_current_split_child_while_segment
     assert {c["owning_segment_id"] for c in manifest_lineage} == {"seg_001", grandchild_left_id, grandchild_right_id}
 
 
+# 2026-09-20 실측: 위 시험은 build_editor_playback_manifest가 만든 순수 dict만
+# 확인한다 -- 실제 화면이 받는 건 그 dict가 아니라 FastAPI가
+# EditorPlaybackManifestResponse(**result)로 다시 감싼 HTTP 응답이다.
+# owning_segment_id를 위 시험을 통과하도록 배선한(2026-09-19) 뒤에도
+# EditorCaptionResponse 모델에 이 필드를 안 적어 놔서, 실제 GET
+# .../playback-manifest 응답에서는 owning_segment_id가 조용히 잘려 나가고
+# 있었다 -- "API 응답 계약까지 통과하는지"를 안 재서 놓친 결함(2026-09-19
+# 검토 화면 고침 세션에서 이미 한 번 겪은 것과 같은 함정).
+def test_owning_segment_id_survives_the_actual_http_response_model() -> None:
+    from videobox_core_engine.composition_plan import materialize_editing_session_timeline
+    from videobox_core_engine.editing_session import split_segment
+    from videobox_core_engine.editor_playback_manifest import build_editor_playback_manifest
+    from videobox_api.models import EditorPlaybackManifestResponse
+
+    project_id = "project_001"
+    session = _session()
+    session["project_id"] = project_id
+    session["session_id"] = "session_001"
+    session["timeline_id"] = "timeline_001"
+    session["caption_style"] = {}
+    split = split_segment(session=session, segment_id="seg_001", split_sec=1.0)
+    left_id, right_id = [segment["segment_id"] for segment in split["segments"][:2]]
+
+    timeline = {
+        "project_id": project_id,
+        "timeline_id": "timeline_001",
+        "version": "v1",
+        "source_session_id": "session_001",
+        "source_session_revision": split["session_revision"],
+        "output": {"width": 1080, "height": 1920, "duration_sec": 6.0},
+        "tracks": [],
+    }
+    materialize_editing_session_timeline(timeline=timeline, editing_session=split, project_id=project_id)
+    manifest = build_editor_playback_manifest(
+        project_id=project_id, session=split, timeline=timeline, asset_content_url_prefix=f"/api/projects/{project_id}/assets",
+    )
+
+    response = EditorPlaybackManifestResponse(**manifest)
+    lineage_owning_ids = {
+        c.owning_segment_id for c in response.captions if str(c.caption_id).startswith("caption-seg_001")
+    }
+    assert lineage_owning_ids == {left_id, right_id}, (
+        "owning_segment_id가 실제 HTTP 응답 모델(EditorPlaybackManifestResponse)을 "
+        "통과하지 못했다 -- 화면은 이 값을 못 받는다"
+    )
+
+
 def test_visual_overlay_clear_removes_direct_and_related_windows_from_materialized_manifest() -> None:
     from videobox_core_engine.composition_plan import materialize_editing_session_timeline
     from videobox_core_engine.editing_session import clear_segment_visual_overlays
