@@ -482,6 +482,39 @@ def test_media_analysis_can_complete_running_run_as_needs_review(tmp_path: Path)
     assert completed["status"] == MediaAnalysisStatus.NEEDS_REVIEW.value
 
 
+def test_media_analysis_success_writes_scene_tags_back_onto_asset_metadata(tmp_path: Path) -> None:
+    """A directly-succeeded analysis's tags must reach the asset's own `metadata.tags`.
+
+    `review_media_analysis` already does this for the needs-review-then-approved
+    path (owner confirms before tags become searchable). A run that succeeds
+    outright never goes through that endpoint, so without this its tags --
+    e.g. `["park", "riverside_green"]` -- never surface in the editor's
+    filename/tag-only media search (`editorAssetProjection.filterEditorAssets`),
+    even though the analysis clearly succeeded and produced them.
+    """
+    store, project_id = _store(tmp_path)
+    source = tmp_path / "park.mp4"
+    source.write_bytes(b"park-footage")
+    asset = store.register_asset(project_id=project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source)
+    digest = sha256(source.read_bytes()).hexdigest()
+    job = store.create_media_analysis(project_id=project_id, asset_id=asset.asset_id, idempotency_key=f"{digest}:v1", cache_key="cache-v1")
+    claim = store.claim_media_analysis(project_id=project_id, analysis_id=job["analysis_id"])
+    assert claim is not None
+
+    completed = store.complete_media_analysis(
+        project_id=project_id,
+        analysis_id=job["analysis_id"],
+        expected_attempt=claim["attempt"],
+        result={"tags": {"layers": {"scene": ["park", "riverside_green"]}, "summary": "야외공원 산책로"}},
+        status=MediaAnalysisStatus.SUCCEEDED,
+    )
+
+    assert completed is not None
+    refreshed = store.get_asset(project_id=project_id, asset_id=asset.asset_id)
+    assert "park" in refreshed["metadata"].get("tags", [])
+    assert "riverside_green" in refreshed["metadata"].get("tags", [])
+
+
 def test_media_analysis_transitions_to_blocked_and_retriable_failure(tmp_path: Path) -> None:
     store, project_id = _store(tmp_path)
     blocked_job = store.create_media_analysis(
