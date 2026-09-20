@@ -407,6 +407,68 @@ describe("EditorWorkbench", () => {
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "5");
   });
 
+  it("전환 탭이 두 번째 장면을 고른 뒤에도 실제 선택을 그대로 반영한다 (2026-09-20 실물 재현)", () => {
+    const twoSegmentView = {
+      ...view,
+      output: { ...view.output, durationSec: 2 },
+      tracks: [{ trackId: "narration", role: "narration", clips: [
+        { clipId: "n-1", segmentId: "segment-1", type: "narration", assetId: null, assetUri: null, startSec: 0, endSec: 1, controls: {} },
+        { clipId: "n-2", segmentId: "segment-2", type: "narration", assetId: null, assetUri: null, startSec: 1, endSec: 2, controls: {} },
+      ] }],
+      captions: [],
+    } as const;
+    const session = {
+      projectId: "project-a", sessionId: "session-a", timelineId: "timeline-a", expectedRevision: 1,
+      undoCount: 0, redoCount: 0, updatedAt: null, captionLanguage: null, translatedLanguages: [],
+      segments: [
+        { segmentId: "segment-1", cutAction: "keep", bgm: null, sfx: null, transitionIn: null, ttsReplacement: null },
+        { segmentId: "segment-2", cutAction: "keep", bgm: null, sfx: null, transitionIn: null, ttsReplacement: null },
+      ],
+    } as const;
+    render(<EditorWorkbench view={twoSegmentView} session={session as never} />);
+    openMaterialDock();
+
+    fireEvent.click(clipSelectionButton("n-2"));
+    fireEvent.click(screen.getByRole("tab", { name: "전환" }));
+
+    // 두 번째 장면을 골랐으니 앞 장면(segment-1)에서 넘어오는 전환을 걸 수 있어야 한다.
+    // 실물 재현: 트림 손잡이는 두 번째 클립에 뜨는데 이 탭은 여전히 "첫 장면"으로 본다.
+    expect(screen.queryByText("첫 장면에는 넘어올 앞 장면이 없어요.")).not.toBeInTheDocument();
+  });
+
+  it("전환 탭은 배열 순서가 아니라 타임라인 순서로 앞 장면 유무를 판단한다 (2026-09-20 실물 재현)", () => {
+    // **핵심**: `session.segments` 배열 순서가 타임라인 시간순과 어긋난 경우다
+    // (2026-09-19 실물 재현 fixture `outOfOrderNarrationView`와 같은 유형의 어긋남 --
+    // 장면을 나누고 순서를 바꾸면 백엔드 배열 순서가 화면 시간순과 달라진다).
+    // 시간순으로는 segment-second 앞에 segment-first가 있지만, 배열 순서는
+    // segment-second가 index 0이다.
+    const outOfOrderView = {
+      ...view,
+      output: { ...view.output, durationSec: 6 },
+      tracks: [{ trackId: "narration", role: "narration", clips: [
+        { clipId: "n-first", segmentId: "segment-first", type: "narration", assetId: null, assetUri: null, startSec: 0, endSec: 3, controls: {} },
+        { clipId: "n-second", segmentId: "segment-second", type: "narration", assetId: null, assetUri: null, startSec: 3, endSec: 6, controls: {} },
+      ] }],
+      captions: [],
+    } as const;
+    const session = {
+      projectId: "project-a", sessionId: "session-a", timelineId: "timeline-a", expectedRevision: 1,
+      undoCount: 0, redoCount: 0, updatedAt: null, captionLanguage: null, translatedLanguages: [],
+      segments: [
+        { segmentId: "segment-second", cutAction: "keep", bgm: null, sfx: null, transitionIn: null, ttsReplacement: null },
+        { segmentId: "segment-first", cutAction: "keep", bgm: null, sfx: null, transitionIn: null, ttsReplacement: null },
+      ],
+    } as const;
+    render(<EditorWorkbench view={outOfOrderView} session={session as never} />);
+    openMaterialDock();
+
+    // 타임라인에서 시간순 두 번째(3초부터)인 클립을 고른다 -- 앞에 장면이 실제로 있다.
+    fireEvent.click(clipSelectionButton("n-second"));
+    fireEvent.click(screen.getByRole("tab", { name: "전환" }));
+
+    expect(screen.queryByText("첫 장면에는 넘어올 앞 장면이 없어요.")).not.toBeInTheDocument();
+  });
+
   it("replaces only the preview slot with the exact-preview stage while keeping read-only docks and timeline", () => {
     const currentView = {
       ...view,
