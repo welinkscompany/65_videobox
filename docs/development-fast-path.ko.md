@@ -561,6 +561,16 @@ Stop 훅은 "화면에 닿는 파일을 고쳤다"는 **사실만** 알려 주�
 `scripts/start-hermes-yujin.ps1`처럼 `<repo>/.venv`를 직접 찾는 스크립트의 테스트도
 환경 때문에 빨간불이 된다. **그 빨간불을 코드 결함으로 오진하지 마라.**
 
+**주의 — `editor-e2e`가 30초 타임아웃으로 실패하면 포트 점거부터 본다.**
+Playwright가 쓰는 기본 포트(4173, 가짜 API 8000)를 **다른 프로젝트의 유령
+프로세스가 물고 있을 수 있다** — `--strictPort`라 점거되어 있으면 제품과
+무관한 거짓 실패가 난다(2026-09-21 실제 사고: ak-system의 정적 서버가
+4173을 물고 있었다). `Get-NetTCPConnection -State Listen -LocalPort 4173`으로
+점거자를 먼저 확인하고, `PLAYWRIGHT_WEB_PORT`/`PLAYWRIGHT_FAKE_API_PORT`
+환경변수로 흔치 않은 포트를 지정해 다시 돌려서 갈라라(`apps/web/playwright.config.mjs`가
+이미 이 두 변수를 읽는다 — 코드 변경 불필요). 점거자가 남의 프로젝트 프로세스면
+죽이지 말고 보고만 한다.
+
 **표가 낡지 않게 하는 장치.** `tests/test_guard_router_table.py`가 매번 확인한다.
 표가 가리키는 테스트 파일이 실제로 있는지, 패턴이 실제 파일을 가리키는지,
 `docs/oss/editor-ui-source-map.json`에 핀된 반입 파일이 **전부** provenance 가드로
@@ -674,8 +684,21 @@ agent-*`)를 만들어 쓰고 끝나면 병합 후 지운다 — SessionStart �
 backend 검증은 반드시 프로젝트 루트의 venv를 쓴다. bare `pytest`나 시스템 Python은
 근거로 쓰지 않는다. Windows에서 `python`은 Microsoft Store 별칭으로 잡혀 실패한다.
 
+`--ignore=tests/test_mcp_server.py`를 반드시 붙인다 — `mcp` SDK가 uvicorn/starlette
+버전 충돌로 이 `.venv`에 설치가 안 돼 있다(2026-09-08 MCP 착수 이후 계속된 상태,
+회귀 아님). 이 플래그 없이 돌리면 `test_mcp_server.py` 수집 에러로 **테스트가
+한 건도 안 돌고 exit 2로 끝난다** — "실패"가 아니라 "0건 실행"이라 통과처럼
+착각하기 쉽다(2026-09-21 정기 자가 진단에서 실제로 걸림). 실측 기준선(2026-09-21):
+5108 passed·56 skipped·1 xfailed·38분 42초.
+
+**이 플래그는 증상을 가리는 임시 우회이지 해결이 아니다.** `mcp`가 설치되기
+전까지 `services/mcp/`의 코드는 시험이 하나도 지키지 않는 상태로 남는다.
+돌리기 전에 `.venv/Scripts/python.exe -m pip show mcp`로 설치 여부를 먼저
+보고, 설치돼 있으면 이 플래그를 빼서 `test_mcp_server.py`도 같이 돈다 —
+그래야 우회가 저절로 만료된다.
+
 ```bash
-.venv/Scripts/python.exe -m pytest -q
+.venv/Scripts/python.exe -m pytest -q --ignore=tests/test_mcp_server.py
 ```
 
 ```bash
