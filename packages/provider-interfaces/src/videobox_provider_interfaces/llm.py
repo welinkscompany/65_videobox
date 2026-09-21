@@ -31,6 +31,9 @@ class LLMTaskType(str, Enum):
     # 밤사이 대화 기록을 훑어 owner가 승인할 만한 기억 후보를 뽑는다
     # (기억 사서, 2026-09-08 착수). 도구 호출 없이 순수 구조화 응답 한 번뿐.
     MEMORY_LIBRARIAN_DISTILL = "memory_librarian_distill"
+    # 확정된 대본에서 유튜브 제목 후보 여러 개를 뽑는다(제목 선택 게이트,
+    # AK-System Hermes 결재함 큐 W1015, 2026-09-21).
+    TITLE_CANDIDATES = "title_candidates"
 
 
 @dataclass(slots=True, frozen=True)

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 
-from fastapi import APIRouter, File, Form, Response, UploadFile, status
+from fastapi import APIRouter, File, Form, Request, Response, UploadFile, status
 
 from videobox_api.errors import _http_error
 from videobox_api.models import (
@@ -13,6 +14,77 @@ from videobox_api.orchestration import ApiOrchestrator
 from videobox_storage.local_project_store import LocalProjectStore
 
 MAX_CREATION_BRIEF_SCRIPT_BYTES = 1024 * 1024
+
+# CLAUDE.md §8이 못박은 호칭이다 -- 결재함 큐로 나가는 항목도 같은 이름을 쓴다.
+_APPROVAL_TARGET = "루이스 대표님"
+
+_LOGGER = logging.getLogger("uvicorn.error")
+
+
+async def _notify_script_confirmation_queue(
+    request: Request, *, project_id: str, brief: dict[str, object]
+) -> None:
+    """AK-System Hermes 결재함 큐(§10.14 2-D, W1015)에 pending 항목을 넣는다.
+
+    **이 호출이 실패해도 대본 확정 자체는 이미 끝난 뒤다.** 결재함 큐는
+    부가 알림 경로이지 이 승인의 사실 원본이 아니다 -- 큐가 안 켜져 있거나
+    (agent_gateway_client 없음) 응답이 없어도 owner의 실제 승인은
+    creation_briefs 저장소에 이미 반영돼 있다.
+
+    대본 확정과 같은 순간에 **제목 후보도 함께 뽑아 올린다** — 제목 선택도
+    같은 사람 게이트 셋의 하나다. 제목 생성이 실패해도 대본 확정 큐 전송은
+    막지 않는다 — 서로 독립된 최선노력이다.
+    """
+    client = getattr(request.app.state, "agent_gateway_client", None)
+    if client is None:
+        return
+    script_text = str(brief.get("script_text") or "").strip()
+    summary = str(brief.get("summary") or "").strip()
+    if not script_text:
+        return
+    cycle_id = str(brief.get("brief_id") or "")
+    try:
+        await client.submit_script_confirmation(
+            project_id=project_id,
+            cycle_id=cycle_id,
+            script_candidates=[{"index": 0, "text": script_text}],
+            question=summary or "이 대본을 확정해도 될까요?",
+            target=_APPROVAL_TARGET,
+        )
+    except Exception:  # noqa: BLE001 - 결재함 알림은 최선노력이다
+        _LOGGER.warning(
+            "AK-System Hermes 결재함 큐에 대본 확정 항목을 넣지 못했습니다.",
+            exc_info=True,
+        )
+    await _notify_title_candidates_queue(
+        request, project_id=project_id, cycle_id=cycle_id, script_text=script_text,
+    )
+
+
+async def _notify_title_candidates_queue(
+    request: Request, *, project_id: str, cycle_id: str, script_text: str
+) -> None:
+    client = getattr(request.app.state, "agent_gateway_client", None)
+    writer = getattr(request.app.state, "title_candidate_writer", None)
+    if client is None or writer is None:
+        return
+    try:
+        titles = writer.write(project_id=project_id, script_text=script_text)
+        await client.submit_title_candidates(
+            project_id=project_id,
+            cycle_id=cycle_id,
+            title_candidates=[
+                {"index": index, "text": title}
+                for index, title in enumerate(titles)
+            ],
+            question="어느 제목이 좋을까요?",
+            target=_APPROVAL_TARGET,
+        )
+    except Exception:  # noqa: BLE001 - 결재함 알림은 최선노력이다
+        _LOGGER.warning(
+            "AK-System Hermes 결재함 큐에 제목 후보 항목을 넣지 못했습니다.",
+            exc_info=True,
+        )
 
 
 def build_creation_briefs_router(orchestrator: ApiOrchestrator) -> APIRouter:
@@ -119,11 +191,15 @@ def build_creation_briefs_router(orchestrator: ApiOrchestrator) -> APIRouter:
             raise _http_error(exc) from exc
 
     @router.post("/api/projects/{project_id}/creation-briefs/{brief_id}/approve")
-    def approve(project_id: str, brief_id: str, payload: CreationBriefRevisionRequest) -> dict[str, object]:
+    async def approve(
+        project_id: str, brief_id: str, payload: CreationBriefRevisionRequest, request: Request
+    ) -> dict[str, object]:
         try:
-            return store.approve_creation_brief(project_id=project_id, brief_id=brief_id, expected_revision=payload.expected_revision)
+            brief = store.approve_creation_brief(project_id=project_id, brief_id=brief_id, expected_revision=payload.expected_revision)
         except Exception as exc:
             raise _http_error(exc) from exc
+        await _notify_script_confirmation_queue(request, project_id=project_id, brief=brief)
+        return brief
 
     @router.delete("/api/projects/{project_id}/creation-briefs/{brief_id}", status_code=status.HTTP_204_NO_CONTENT)
     def delete(project_id: str, brief_id: str) -> Response:

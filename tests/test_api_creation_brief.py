@@ -204,3 +204,165 @@ def test_creation_brief_api_rejects_blank_upload_and_other_project_script_asset(
     assert blank.status_code == 400
     assert blank.json()["detail"] == "creation_brief_script_empty"
     assert cross_project.status_code == 404
+
+
+def test_approving_a_creation_brief_notifies_the_hermes_script_confirmation_queue(tmp_path: Path) -> None:
+    posts: list[tuple[str, dict]] = []
+
+    class _Response:
+        def __init__(self, payload: dict) -> None:
+            self._payload = payload
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return self._payload
+
+    class _Http:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def post(self, path: str, **kwargs):
+            posts.append((path, kwargs))
+            return _Response({"queued": True, "decision_id": "script-1"})
+
+    client = TestClient(create_app(
+        projects_root=tmp_path,
+        agent_gateway_url="http://videobox-agent-gateway:8081",
+        agent_gateway_service_token="workspace-service-token-that-is-at-least-32",
+        agent_gateway_http_client_factory=lambda **_: _Http(),
+    ))
+    project_id = client.post("/api/projects", json={"name": "Approval"}).json()["project_id"]
+    path = f"/api/projects/{project_id}/creation-briefs"
+    brief = client.post(path, json={
+        "script_filename": "script.txt", "script_text": "소개 영상 전문", "idempotency_key": "approval-queue",
+        "capability_profile": {"ai_execution": "disabled"},
+    }).json()
+    answered = client.post(f"{path}/{brief['brief_id']}/answers", json={
+        "question_id": brief["questions"][0]["question_id"], "answer": "추천해줘", "expected_revision": brief["revision"]
+    })
+    bypassed = client.post(f"{path}/{brief['brief_id']}/bypass", json={"expected_revision": answered.json()["revision"]})
+    edited = client.patch(f"{path}/{brief['brief_id']}", json={
+        "summary": "사용자가 고친 요약", "expected_revision": bypassed.json()["revision"]
+    })
+
+    approved = client.post(f"{path}/{brief['brief_id']}/approve", json={"expected_revision": edited.json()["revision"]})
+
+    assert approved.status_code == 200
+    [(route, kwargs)] = posts
+    assert route == "/internal/approvals/script-confirmation"
+    body = kwargs["json"]
+    assert body["project_id"] == project_id
+    assert body["cycle_id"] == brief["brief_id"]
+    assert body["script_candidates"] == [{"index": 0, "text": "소개 영상 전문"}]
+    assert body["question"] == "사용자가 고친 요약"
+
+
+def test_approving_a_creation_brief_succeeds_even_when_the_queue_is_unavailable(tmp_path: Path) -> None:
+    class _BrokenHttp:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def post(self, path: str, **kwargs):
+            raise RuntimeError("connection refused")
+
+    client = TestClient(create_app(
+        projects_root=tmp_path,
+        agent_gateway_url="http://videobox-agent-gateway:8081",
+        agent_gateway_service_token="workspace-service-token-that-is-at-least-32",
+        agent_gateway_http_client_factory=lambda **_: _BrokenHttp(),
+    ))
+    project_id = client.post("/api/projects", json={"name": "Approval"}).json()["project_id"]
+    path = f"/api/projects/{project_id}/creation-briefs"
+    brief = client.post(path, json={
+        "script_filename": "script.txt", "script_text": "소개 영상 전문", "idempotency_key": "approval-queue-down",
+        "capability_profile": {"ai_execution": "disabled"},
+    }).json()
+    answered = client.post(f"{path}/{brief['brief_id']}/answers", json={
+        "question_id": brief["questions"][0]["question_id"], "answer": "추천해줘", "expected_revision": brief["revision"]
+    })
+    bypassed = client.post(f"{path}/{brief['brief_id']}/bypass", json={"expected_revision": answered.json()["revision"]})
+    edited = client.patch(f"{path}/{brief['brief_id']}", json={
+        "summary": "사용자가 고친 요약", "expected_revision": bypassed.json()["revision"]
+    })
+
+    approved = client.post(f"{path}/{brief['brief_id']}/approve", json={"expected_revision": edited.json()["revision"]})
+
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "approved"
+
+
+def test_approving_a_creation_brief_also_queues_title_candidates(tmp_path: Path) -> None:
+    from videobox_core_engine.title_candidate_writer import TitleCandidateWriter
+
+    posts: list[tuple[str, dict]] = []
+
+    class _Response:
+        def __init__(self, payload: dict) -> None:
+            self._payload = payload
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return self._payload
+
+    class _Http:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def post(self, path: str, **kwargs):
+            posts.append((path, kwargs))
+            return _Response({"queued": True, "decision_id": path.split("/")[-1]})
+
+    class _FakeTitleRuntime:
+        def generate_structured(self, **_kwargs):
+            class _Reply:
+                output_data = {"titles": ["소개 영상 제목 후보 1", "소개 영상 제목 후보 2"]}
+            return _Reply()
+
+    client = TestClient(create_app(
+        projects_root=tmp_path,
+        agent_gateway_url="http://videobox-agent-gateway:8081",
+        agent_gateway_service_token="workspace-service-token-that-is-at-least-32",
+        agent_gateway_http_client_factory=lambda **_: _Http(),
+        title_candidate_writer=TitleCandidateWriter(runtime_service=_FakeTitleRuntime()),
+    ))
+    project_id = client.post("/api/projects", json={"name": "Approval"}).json()["project_id"]
+    path = f"/api/projects/{project_id}/creation-briefs"
+    brief = client.post(path, json={
+        "script_filename": "script.txt", "script_text": "소개 영상 전문", "idempotency_key": "approval-titles",
+        "capability_profile": {"ai_execution": "disabled"},
+    }).json()
+    answered = client.post(f"{path}/{brief['brief_id']}/answers", json={
+        "question_id": brief["questions"][0]["question_id"], "answer": "추천해줘", "expected_revision": brief["revision"]
+    })
+    bypassed = client.post(f"{path}/{brief['brief_id']}/bypass", json={"expected_revision": answered.json()["revision"]})
+    edited = client.patch(f"{path}/{brief['brief_id']}", json={
+        "summary": "사용자가 고친 요약", "expected_revision": bypassed.json()["revision"]
+    })
+
+    approved = client.post(f"{path}/{brief['brief_id']}/approve", json={"expected_revision": edited.json()["revision"]})
+
+    assert approved.status_code == 200
+    routes = [route for route, _ in posts]
+    assert routes == [
+        "/internal/approvals/script-confirmation",
+        "/internal/approvals/title-candidates",
+    ]
+    title_body = posts[1][1]["json"]
+    assert title_body["cycle_id"] == brief["brief_id"]
+    assert title_body["title_candidates"] == [
+        {"index": 0, "text": "소개 영상 제목 후보 1"},
+        {"index": 1, "text": "소개 영상 제목 후보 2"},
+    ]

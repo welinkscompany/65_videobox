@@ -66,6 +66,7 @@ from videobox_api.routers.scene_videos import build_scene_videos_router
 from videobox_api.routers.script_drafts import build_script_drafts_router
 from videobox_core_engine.scene_image_prompt import SceneImagePromptWriter
 from videobox_core_engine.script_draft_writer import ScriptDraftWriter
+from videobox_core_engine.title_candidate_writer import TitleCandidateWriter
 from videobox_core_engine.scene_image_service import SceneImageService
 from videobox_core_engine.scene_video_service import SceneVideoService
 from videobox_api.routers.timeline import build_timeline_router
@@ -971,6 +972,7 @@ def create_app(
     video_generation_config: VideoGenerationConfig | None = None,
     scene_video_provider=None,
     script_draft_writer=None,
+    title_candidate_writer=None,
     capcut_handoff_service=None,
     local_only_runtime_service_factory=None,
     stt_provider=None,
@@ -1268,6 +1270,11 @@ def create_app(
     app.state.script_draft_writer = script_draft_writer or ScriptDraftWriter(
         runtime_service=runtime_service
     )
+    # 대본이 확정되는 순간(§10.14 2-D, W1015) 제목 후보도 함께 결재함에
+    # 올린다 -- 같은 두뇌를 재사용한다.
+    app.state.title_candidate_writer = title_candidate_writer or TitleCandidateWriter(
+        runtime_service=runtime_service
+    )
     # 인포그래픽 전용 런타임. **상한만 늘린 같은 로컬 모델이다** -- 나가는 곳은
     # 그대로라 §10.14 조항 2-B의 경계는 변하지 않는다. 공용 런타임의 30초로는
     # 이 일이 매번 실패한다(한 판 63~115초, 2026-09-07 실측).
@@ -1452,6 +1459,9 @@ def create_app(
             client_kwargs["http_client_factory"] = agent_gateway_http_client_factory
         agent_gateway_client = AgentGatewayClient(**client_kwargs)
         app.state.yujin_memory_service = YujinMemoryService(store=store)
+        # 대본 확정·제목 선택·업로드 요청 결재함 큐(§10.14 2-D)가 이 자리를
+        # 쓴다 -- 유진 채팅용으로 만든 것과 같은 클라이언트를 그대로 재사용한다.
+        app.state.agent_gateway_client = agent_gateway_client
         app.state.hermes_run_service = HermesRunService(
             store=store,
             gateway_client=agent_gateway_client,
@@ -1461,6 +1471,7 @@ def create_app(
     else:
         app.state.hermes_run_service = None
         app.state.yujin_memory_service = YujinMemoryService(store=store)
+        app.state.agent_gateway_client = None
     app.state.hermes_operational_status = HermesOperationalStatusService(
         agent_gateway_client,
         admission_ready=capability_verifier is not None,
