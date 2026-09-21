@@ -482,6 +482,90 @@ class AgentGatewayClient:
                 await self.release_run(run_id=run_id)
             raise
 
+    async def submit_title_candidates(
+        self,
+        *,
+        project_id: str,
+        cycle_id: str,
+        title_candidates: list[dict[str, Any]],
+        question: str,
+        target: str,
+    ) -> dict[str, Any]:
+        return await self._post_approval(
+            "/internal/approvals/title-candidates",
+            {
+                "project_id": project_id,
+                "cycle_id": cycle_id,
+                "title_candidates": title_candidates,
+                "question": question,
+                "target": target,
+            },
+        )
+
+    async def submit_script_confirmation(
+        self,
+        *,
+        project_id: str,
+        cycle_id: str,
+        script_candidates: list[dict[str, Any]],
+        question: str,
+        target: str,
+    ) -> dict[str, Any]:
+        return await self._post_approval(
+            "/internal/approvals/script-confirmation",
+            {
+                "project_id": project_id,
+                "cycle_id": cycle_id,
+                "script_candidates": script_candidates,
+                "question": question,
+                "target": target,
+            },
+        )
+
+    async def submit_upload_request(
+        self,
+        *,
+        project_id: str,
+        cycle_id: str,
+        upload_target: str,
+        upload_scheduled_summary_ko: str,
+        question: str,
+        target: str,
+    ) -> dict[str, Any]:
+        return await self._post_approval(
+            "/internal/approvals/upload-request",
+            {
+                "project_id": project_id,
+                "cycle_id": cycle_id,
+                "upload_target": upload_target,
+                "upload_scheduled_summary_ko": upload_scheduled_summary_ko,
+                "question": question,
+                "target": target,
+            },
+        )
+
+    async def _post_approval(
+        self, path: str, body: dict[str, Any]
+    ) -> dict[str, Any]:
+        try:
+            async with self._factory(
+                base_url=self._base_url, timeout=self._timeout
+            ) as client:
+                response = await client.post(
+                    path,
+                    headers={"Authorization": f"Bearer {self._token}"},
+                    json=body,
+                )
+                response.raise_for_status()
+                payload = response.json()
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            raise AgentGatewayUnavailable(
+                "agent_gateway_unavailable"
+            ) from error
+        return payload if isinstance(payload, dict) else {}
+
     async def release_run(self, *, run_id: str) -> None:
         try:
             async with self._factory(

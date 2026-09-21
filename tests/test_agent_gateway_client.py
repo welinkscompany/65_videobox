@@ -589,3 +589,117 @@ def test_completion_text_must_equal_the_assembled_delta_truth() -> None:
 
     with pytest.raises(AgentGatewayUnavailable):
         asyncio.run(collect())
+
+
+def test_submit_title_candidates_posts_to_the_approval_route() -> None:
+    http = _Http()
+
+    async def post(path, **kwargs):
+        http.calls.append(("POST", path, kwargs))
+        return _PostResponse({"queued": True, "decision_id": "title-1"})
+
+    http.post = post
+    client = AgentGatewayClient(
+        base_url="http://videobox-agent-gateway:8081",
+        service_token=SERVICE_TOKEN,
+        http_client_factory=lambda **_: http,
+    )
+
+    result = asyncio.run(
+        client.submit_title_candidates(
+            project_id="project-a",
+            cycle_id="cycle-1",
+            title_candidates=[{"index": 0, "text": "제목 후보"}],
+            question="어느 제목이 좋을까요?",
+            target="루이스 대표님",
+        )
+    )
+
+    assert result == {"queued": True, "decision_id": "title-1"}
+    [(method, path, kwargs)] = http.calls
+    assert method == "POST"
+    assert path == "/internal/approvals/title-candidates"
+    assert kwargs["headers"]["Authorization"] == f"Bearer {SERVICE_TOKEN}"
+    assert kwargs["json"]["project_id"] == "project-a"
+    assert kwargs["json"]["title_candidates"] == [{"index": 0, "text": "제목 후보"}]
+
+
+def test_submit_script_confirmation_posts_to_the_approval_route() -> None:
+    http = _Http()
+
+    async def post(path, **kwargs):
+        http.calls.append(("POST", path, kwargs))
+        return _PostResponse({"queued": True, "decision_id": "script-1"})
+
+    http.post = post
+    client = AgentGatewayClient(
+        base_url="http://videobox-agent-gateway:8081",
+        service_token=SERVICE_TOKEN,
+        http_client_factory=lambda **_: http,
+    )
+
+    result = asyncio.run(
+        client.submit_script_confirmation(
+            project_id="project-a",
+            cycle_id="cycle-1",
+            script_candidates=[{"index": 0, "text": "대본 전문"}],
+            question="대본 확정할까요?",
+            target="루이스 대표님",
+        )
+    )
+
+    assert result["decision_id"] == "script-1"
+    [(_, path, _kwargs)] = http.calls
+    assert path == "/internal/approvals/script-confirmation"
+
+
+def test_submit_upload_request_posts_to_the_approval_route() -> None:
+    http = _Http()
+
+    async def post(path, **kwargs):
+        http.calls.append(("POST", path, kwargs))
+        return _PostResponse({"queued": True, "decision_id": "upload-1"})
+
+    http.post = post
+    client = AgentGatewayClient(
+        base_url="http://videobox-agent-gateway:8081",
+        service_token=SERVICE_TOKEN,
+        http_client_factory=lambda **_: http,
+    )
+
+    result = asyncio.run(
+        client.submit_upload_request(
+            project_id="project-a",
+            cycle_id="cycle-1",
+            upload_target="youtube",
+            upload_scheduled_summary_ko="1분 30초 셀러 교육 영상",
+            question="업로드해도 될까요?",
+            target="루이스 대표님",
+        )
+    )
+
+    assert result["decision_id"] == "upload-1"
+    [(_, path, _kwargs)] = http.calls
+    assert path == "/internal/approvals/upload-request"
+
+
+def test_approval_submission_transport_failure_raises_agent_gateway_unavailable() -> None:
+    http = _Http()
+
+    async def post(path, **kwargs):
+        raise RuntimeError("connection refused")
+
+    http.post = post
+    client = AgentGatewayClient(
+        base_url="http://videobox-agent-gateway:8081",
+        service_token=SERVICE_TOKEN,
+        http_client_factory=lambda **_: http,
+    )
+
+    with pytest.raises(AgentGatewayUnavailable):
+        asyncio.run(
+            client.submit_upload_request(
+                project_id="p", cycle_id="c", upload_target="youtube",
+                upload_scheduled_summary_ko="s", question="q", target="t",
+            )
+        )

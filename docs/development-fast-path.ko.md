@@ -415,6 +415,34 @@ Codex 시절 세션 단절을 메우던 장치이며, 현재 개발 환경에서
      **2026-08-21에 같이 고쳤다.** 그 문서 §5가 이제 범위 안이라고 적고, 왜 LLM
      provider 경계와 종류가 다른지도 함께 적는다.
 
+2-D. **VideoBox → AK-System Hermes 결재함 큐 경로 — owner 승인 (2026-09-21, W1015).**
+   `videobox-agent-gateway` 컨테이너가 호스트의 AK-System Hermes(별도 저장소)
+   MCP 결재함 커넥터 서버(`127.0.0.1:19680`, 그 저장소의
+   `scripts/videobox-mcp-connector-server.js`)에 연결한다. 승인 배경은 owner가
+   제목 선택·대본 확정·업로드 승인 세 결재함 게이트를 VideoBox와 AK-System
+   양쪽에서 하나로 보고 싶어 하기 때문이다.
+
+   - **이 서버는 아무것도 실행하지 않는다.** 대표님 결재함 큐에 pending
+     항목을 넣기만 한다 — 결정 자체는 그 저장소의 별도 `apply-videobox-*`
+     콜백 워커가 처리하고, 실제 유튜브 업로드 실행은 이 경로의 범위 밖이다
+     (CLAUDE.md §6 "외부 게시·업로드... 개별 업로드 게이트는 유지"와 합치).
+   - **이 경로로 나가는 것은 이 컴퓨터 밖으로 나가지 않는다.** `127.0.0.1`은
+     도커 호스트, 즉 같은 기계다.
+   - 허용 값은 **두 개뿐**이다: `http://127.0.0.1:19680`(로컬 실행)과
+     `http://host.docker.internal:19680`(컨테이너). `hermes_approval_mcp_client.py`의
+     `HermesApprovalMcpClient.__init__`이 그 밖의 값을 거부한다(2-B/2-C와
+     같은 방식 — scheme·port·path를 바꾸거나 자격 증명이 붙은 값은 전부 거부).
+   - 네트워크 경계: `videobox-agent-gateway` 컨테이너를 기존 egress 네트워크
+     `videobox-hermes-provider-egress`(조항 1, `compose.yaml`)에 새로 물렸다
+     (`compose.hermes-yujin.yaml`). 이 네트워크는 호스트·IP를 가리는 보안
+     gateway가 아니다(조항 1과 같은 전제) — 실제 제한은 위 URL 허용값
+     검증(앱 레벨)이 한다.
+   - `project_id`/`cycle_id`는 VideoBox 쪽 값을 그대로 넘긴다 — AK-System은
+     그 값의 의미를 모르고 `decision_id` 조립에만 쓴다
+     (`docs/ak-system/data/videobox-mcp-connector-config.json`, 그 저장소).
+   - 이 승인은 **이 결재함 큐 경로에만** 적용된다. 다른 host bridge의 근거가
+     아니다(조항 4 유지).
+
 3. OAuth device code, account identity, credential contents, auth state와 memory contents는 source, `.env`, status document, verifier 출력에 기록하지 않는다. 검증은 mount/network/image/user/dependency 같은 경계 정보만 출력한다.
 4. 이 local-MVP 경계는 VideoBox asset/file mutation, Telegram intake, egress gateway, host bridge, CapCut bridge의 활성화 근거가 아니다. 각각은 별도 구현·검증으로 닫는다.
 

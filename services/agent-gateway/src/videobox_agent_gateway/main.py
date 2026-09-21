@@ -29,6 +29,10 @@ from videobox_agent_gateway.creator_context import (
     prompt_envelope,
 )
 from videobox_agent_gateway.hermes_rpc_client import HermesRpcClient
+from videobox_agent_gateway.hermes_approval_mcp_client import (
+    HermesApprovalMcpClient,
+    HermesApprovalQueueError,
+)
 
 
 class GatewayReservationRequest(BaseModel):
@@ -40,6 +44,47 @@ class GatewayReservationRequest(BaseModel):
     session_id: str = Field(min_length=1, max_length=256)
     session_revision: int = Field(ge=1, strict=True)
     asset_index_revision: int = Field(ge=0, strict=True)
+
+
+class _ApprovalCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    index: int = Field(ge=0, strict=True)
+    text: str = Field(min_length=1, max_length=20_000)
+
+
+# 셋 다 AK-System Hermes 결재함 큐(W1015)의 required_fields를 그대로 옮긴 것이다
+# -- `docs/ak-system/data/videobox-mcp-connector-config.json`(그 저장소)이 원본이고
+# 여기서 다시 정의하지 않는다(원칙5 준수, 필드 이름만 맞춘다).
+class GatewayTitleCandidatesRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: str = Field(min_length=1, max_length=256)
+    cycle_id: str = Field(min_length=1, max_length=256)
+    title_candidates: list[_ApprovalCandidate] = Field(min_length=1, max_length=10)
+    question: str = Field(min_length=1, max_length=2_000)
+    target: str = Field(min_length=1, max_length=256)
+
+
+class GatewayScriptConfirmationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: str = Field(min_length=1, max_length=256)
+    cycle_id: str = Field(min_length=1, max_length=256)
+    script_candidates: list[_ApprovalCandidate] = Field(min_length=1, max_length=10)
+    question: str = Field(min_length=1, max_length=2_000)
+    target: str = Field(min_length=1, max_length=256)
+
+
+class GatewayUploadRequestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: str = Field(min_length=1, max_length=256)
+    cycle_id: str = Field(min_length=1, max_length=256)
+    upload_target: str = Field(min_length=1, max_length=256)
+    upload_scheduled_summary_ko: str = Field(min_length=1, max_length=2_000)
+    question: str = Field(min_length=1, max_length=2_000)
+    target: str = Field(min_length=1, max_length=256)
 
 
 _ASSIGNMENT_LABEL = (
@@ -614,12 +659,19 @@ def create_app(
     hermes_http_probe: Callable[[], Awaitable[bool]] | None = None,
     operational_clock: Callable[[], datetime] | None = None,
     observation_epoch: str | None = None,
+    approval_client: HermesApprovalMcpClient | None = None,
 ) -> FastAPI:
     if hermes_client is not None and service_token is not None:
         if not _valid_service_token(service_token):
             raise ValueError("gateway_service_token_invalid")
         if context_ledger is None and capability_issuer is None:
             raise ValueError("gateway_capability_issuer_required")
+    if (
+        approval_client is not None
+        and service_token is not None
+        and not _valid_service_token(service_token)
+    ):
+        raise ValueError("gateway_service_token_invalid")
     app = FastAPI(
         title="VideoBox Agent Gateway",
         docs_url=None,
@@ -829,7 +881,94 @@ def create_app(
             ledger.release(run_id=run_id)
             return Response(status_code=204)
 
+    if approval_client is not None and service_token:
+        # AK-System Hermes 결재함 큐(W1015)로 pending 항목을 넣기만 한다.
+        # 이 서버는 결정하지 않는다 -- 대표님 결정은 그 저장소의 별도
+        # apply-* 콜백 워커가 처리한다(`docs/development-fast-path.ko.md`
+        # §10.14 2-D).
+        def _approval_response(structured: dict[str, object]) -> dict[str, object]:
+            return {"queued": True, **structured}
+
+        @app.post("/internal/approvals/title-candidates")
+        async def submit_title_candidates(
+            body: GatewayTitleCandidatesRequest,
+            authorization: str | None = Header(default=None),
+        ) -> dict[str, object]:
+            require_service_token(authorization)
+            try:
+                structured = await approval_client.submit_title_candidates(
+                    project_id=body.project_id,
+                    cycle_id=body.cycle_id,
+                    title_candidates=[
+                        item.model_dump() for item in body.title_candidates
+                    ],
+                    question=body.question,
+                    target=body.target,
+                )
+            except HermesApprovalQueueError as error:
+                raise HTTPException(
+                    status_code=502, detail=str(error)
+                ) from error
+            return _approval_response(structured)
+
+        @app.post("/internal/approvals/script-confirmation")
+        async def submit_script_confirmation(
+            body: GatewayScriptConfirmationRequest,
+            authorization: str | None = Header(default=None),
+        ) -> dict[str, object]:
+            require_service_token(authorization)
+            try:
+                structured = await approval_client.submit_script_confirmation(
+                    project_id=body.project_id,
+                    cycle_id=body.cycle_id,
+                    script_candidates=[
+                        item.model_dump() for item in body.script_candidates
+                    ],
+                    question=body.question,
+                    target=body.target,
+                )
+            except HermesApprovalQueueError as error:
+                raise HTTPException(
+                    status_code=502, detail=str(error)
+                ) from error
+            return _approval_response(structured)
+
+        @app.post("/internal/approvals/upload-request")
+        async def submit_upload_request(
+            body: GatewayUploadRequestRequest,
+            authorization: str | None = Header(default=None),
+        ) -> dict[str, object]:
+            require_service_token(authorization)
+            try:
+                structured = await approval_client.submit_upload_request(
+                    project_id=body.project_id,
+                    cycle_id=body.cycle_id,
+                    upload_target=body.upload_target,
+                    upload_scheduled_summary_ko=(
+                        body.upload_scheduled_summary_ko
+                    ),
+                    question=body.question,
+                    target=body.target,
+                )
+            except HermesApprovalQueueError as error:
+                raise HTTPException(
+                    status_code=502, detail=str(error)
+                ) from error
+            return _approval_response(structured)
+
     return app
+
+
+def _approval_client_from_environment() -> HermesApprovalMcpClient | None:
+    # 유진 채팅(HERMES_YUJIN_*)과는 독립된 별도 다리다 -- 하나가 안 켜져
+    # 있어도 다른 하나는 켜질 수 있어야 한다(§10.14 2-D, W1015).
+    url = os.environ.get("VIDEOBOX_HERMES_APPROVAL_MCP_URL", "")
+    if not url:
+        return None
+    try:
+        return HermesApprovalMcpClient(base_url=url)
+    except ValueError:
+        return None
 
 
 def _app_from_environment() -> FastAPI:
@@ -842,6 +981,7 @@ def _app_from_environment() -> FastAPI:
         "",
     )
     key_id = os.environ.get("VIDEOBOX_HERMES_CAPABILITY_KEY_ID", "")
+    approval_client = _approval_client_from_environment()
     if not all(
         (
             url,
@@ -852,7 +992,12 @@ def _app_from_environment() -> FastAPI:
             key_id,
         )
     ):
-        return create_app()
+        # 결재함 큐 경로는 서비스 토큰만 있으면 유진 채팅 설정과 무관하게 켤
+        # 수 있다 -- 인증은 여전히 같은 `VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN`을 쓴다.
+        return create_app(
+            service_token=token or None,
+            approval_client=approval_client,
+        )
     try:
         private_key = _parse_capability_private_key(private_key_b64)
         _validate_capability_key_id(key_id)
@@ -864,7 +1009,10 @@ def _app_from_environment() -> FastAPI:
             ),
         )
     except (TypeError, ValueError):
-        return create_app()
+        return create_app(
+            service_token=token or None,
+            approval_client=approval_client,
+        )
     hermes_client = HermesRpcClient(
         base_url=url, username=username, password=password
     )
@@ -873,6 +1021,7 @@ def _app_from_environment() -> FastAPI:
         service_token=token,
         capability_issuer=capability_issuer,
         hermes_http_probe=hermes_client.probe_http_ready,
+        approval_client=approval_client,
     )
 
 

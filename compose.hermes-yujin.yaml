@@ -43,12 +43,19 @@ services:
       VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN: ${VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN:?set in .env.container}
       VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64: ${VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64:?set in .env.container}
       VIDEOBOX_HERMES_CAPABILITY_KEY_ID: ${VIDEOBOX_HERMES_CAPABILITY_KEY_ID:?set in .env.container}
+      # AK-System Hermes 결재함 큐 MCP 커넥터 (§10.14 2-D, owner 승인 2026-09-21).
+      # 유진 채팅 설정과 독립이다 -- 비어 있으면 이 다리만 조용히 꺼진다.
+      # host.docker.internal 은 Docker Desktop 이 자동으로 넣어 준다.
+      VIDEOBOX_HERMES_APPROVAL_MCP_URL: ${VIDEOBOX_HERMES_APPROVAL_MCP_URL:-}
     depends_on:
       videobox-hermes-yujin:
         condition: service_healthy
       videobox-workspace:
         condition: service_healthy
-    networks: [videobox-agent-gateway-api-network, videobox-agent-gateway-network]
+    # `videobox-hermes-provider-egress`는 §10.14 2-D의 host-bridge다 --
+    # 이 컴퓨터 밖으로 안 나간다(127.0.0.1/host.docker.internal만 허용값으로
+    # 앱 레벨에서 잠긴다, HermesApprovalMcpClient 참고).
+    networks: [videobox-agent-gateway-api-network, videobox-agent-gateway-network, videobox-hermes-provider-egress]
     user: "10001:10001"
     read_only: true
     tmpfs: [/tmp]
