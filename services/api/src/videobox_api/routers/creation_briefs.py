@@ -54,7 +54,11 @@ async def _notify_script_confirmation_queue(
         await client.submit_script_confirmation(
             project_id=project_id,
             cycle_id=cycle_id,
-            script_candidates=[{"index": 0, "text": script_text}],
+            # AK-System Hermes 결재함 계약(videobox-mcp-connector-config.json)이
+            # index를 1부터 요구한다 -- 0으로 보내면 append 스크립트가
+            # videobox_mcp_append_candidate_index_invalid로 거부한다(실물 검증,
+            # 2026-09-25).
+            script_candidates=[{"index": 1, "text": script_text}],
             question=summary or "이 대본을 확정해도 될까요?",
             target=_APPROVAL_TARGET,
         )
@@ -86,7 +90,7 @@ async def _notify_title_candidates_queue(
             cycle_id=cycle_id,
             title_candidates=[
                 {"index": index, "text": title}
-                for index, title in enumerate(titles)
+                for index, title in enumerate(titles, start=1)
             ],
             question="어느 제목이 좋을까요?",
             target=_APPROVAL_TARGET,

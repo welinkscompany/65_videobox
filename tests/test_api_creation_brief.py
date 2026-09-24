@@ -258,7 +258,7 @@ def test_approving_a_creation_brief_notifies_the_hermes_script_confirmation_queu
     body = kwargs["json"]
     assert body["project_id"] == project_id
     assert body["cycle_id"] == brief["brief_id"]
-    assert body["script_candidates"] == [{"index": 0, "text": "소개 영상 전문"}]
+    assert body["script_candidates"] == [{"index": 1, "text": "소개 영상 전문"}]
     assert body["question"] == "사용자가 고친 요약"
 
 
@@ -363,6 +363,6 @@ def test_approving_a_creation_brief_also_queues_title_candidates(tmp_path: Path)
     title_body = posts[1][1]["json"]
     assert title_body["cycle_id"] == brief["brief_id"]
     assert title_body["title_candidates"] == [
-        {"index": 0, "text": "소개 영상 제목 후보 1"},
-        {"index": 1, "text": "소개 영상 제목 후보 2"},
+        {"index": 1, "text": "소개 영상 제목 후보 1"},
+        {"index": 2, "text": "소개 영상 제목 후보 2"},
     ]
