@@ -1100,8 +1100,18 @@ if ($Mode -ceq "Start") {
         # 빠르다. 2026-08-20에 이 둘을 같은 180초로 재다가 **181초짜리 멀쩡한
         # 빌드가 잘려 거짓 FAIL**이 났다 -- 손으로 같은 명령을 돌리면 성공했다.
         # 거짓 FAIL은 다음 사람이 진짜 실패와 구분할 수 없어서 더 나쁘다.
+        #
+        # 2026-09-25: `videobox-agent-gateway`는 이 목록에 한 번도 없었다 --
+        # `-WithYujinMemory` 스택에서만 뜨는 이미지라 기본 목록에 넣으면 그
+        # 서비스가 compose 구성에 없는 상태에서 build가 실패한다. 그 결과
+        # 이 컨테이너는 owner-ready.ps1로는 **어떤 옵션으로도 다시 만들어진
+        # 적이 없었다** -- W1015 결재함 큐 코드가 8월 27일 이미지 그대로
+        # 남아 있다가 실물 검증에서 404로 드러났다
+        # (`docs/handoffs/2026-09-25-hermes-approval-queue-live-verification-and-index-fix.ko.md`).
+        $rebuildImages = @("videobox-workspace")
+        if ($WithYujinMemory) { $rebuildImages += "videobox-agent-gateway" }
         $rebuildResult = Invoke-CapturedProcess -FilePath $DockerExecutable -CommandTimeoutSec ([Math]::Max($TimeoutSec, 900)) -Arguments @(
-            @("compose") + $composeFileArguments + @("--env-file", $EnvFile) + $composeProfileArguments + @("build", "--pull=false", "videobox-workspace")
+            @("compose") + $composeFileArguments + @("--env-file", $EnvFile) + $composeProfileArguments + @("build", "--pull=false") + $rebuildImages
         )
         $rebuildStatus = if ($rebuildResult.ExitCode -eq 0) { "pass" } else { "fail" }
         # 실패 안내가 "빌드 로그를 확인하세요"인데 로그를 아무 데도 안 남기면 그
