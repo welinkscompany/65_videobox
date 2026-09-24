@@ -1,5 +1,8 @@
 # AK-System Hermes 결재함 큐 다리 배선 (W1015, 2026-09-24)
 
+**대체됨:** `2026-09-25-hermes-approval-queue-live-verification-and-index-fix.ko.md`가
+이 문서를 대체한다.
+
 **대체됨 표시 대상:** `2026-09-21-self-diagnostics-first-run-and-fixes.ko.md`가
 이 문서로 이어진다.
 
