@@ -3096,6 +3096,16 @@ export const api = {
     request<FinalRenderJob>(`/api/projects/${projectId}/final-renders/${jobId}/verdict`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
     }),
+  // AK-System Hermes 결재함 큐(§10.14 2-D, W1015) -- 아무것도 실행하지 않는다.
+  // 대표님 결재함에 대기 항목을 넣기만 한다.
+  requestUploadApproval: (
+    projectId: string,
+    jobId: string,
+    payload: { upload_target?: string; upload_scheduled_summary_ko: string },
+  ) =>
+    request<{ queued: boolean }>(`/api/projects/${projectId}/final-renders/${jobId}/request-upload-approval`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
   startCapcutDraftExport: (projectId: string, payload: OutputJobRequest) =>
     request<{ job_id: string; status: string }>(
       `/api/projects/${projectId}/jobs/capcut-draft-export`,

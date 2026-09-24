@@ -135,7 +135,7 @@ body:has(.vb-product-shell) { margin: 0; }
    아쉬워요`(y 2458)가 정확히 맞닿아 있었다. 어제 고친
    `.vb-timeline-edit-toolbar`와 같은 결함이고, 같은 무늬(세로 묶음 + 척도
    간격)로 맞춘다. */
-.vb-final-verdict, .vb-final-format { display:flex; flex-direction:column; align-items:flex-start; gap: var(--vb-space-2); }
+.vb-final-verdict, .vb-final-format, .vb-upload-approval { display:flex; flex-direction:column; align-items:flex-start; gap: var(--vb-space-2); }
 /* 같은 자리에서 나온 별개의 결함이었다: 포맷 이름 입력칸이 제 칸을 26px
    넘어갔다. 원인은 이 화면이 아니라 문서 전체의 `box-sizing`이라
    `ui-system.css`의 전역 `border-box`가 없앤다(owner 승인 2026-09-04) --

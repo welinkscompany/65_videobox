@@ -826,6 +826,65 @@ describe("OutputsPage", () => {
     expect(await screen.findByText("좋았다고 기록했어요.")).toBeVisible();
   });
 
+  it("lets the owner ask 대표님 결재함 to approve uploading the finished video", async () => {
+    // W1015: AK-System Hermes 결재함 큐. 이 버튼은 아무것도 실행하지 않고
+    // 결재함에 대기 항목을 넣기만 한다 -- 큐가 켜져 있으면 queued:true.
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-approval", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final.mp4",
+        status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true,
+      },
+    });
+    const requestUploadApproval = vi.spyOn(api, "requestUploadApproval").mockResolvedValue({ queued: true });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    const summaryInput = await screen.findByLabelText("언제 무엇을 올릴지 한 줄로");
+    fireEvent.change(summaryInput, { target: { value: "이번 주 목요일에 유튜브로 올릴 예정입니다." } });
+    fireEvent.click(screen.getByRole("button", { name: "업로드 승인 요청" }));
+
+    await waitFor(() =>
+      expect(requestUploadApproval).toHaveBeenCalledWith("project_a", currentFinalJob.job_id, {
+        upload_scheduled_summary_ko: "이번 주 목요일에 유튜브로 올릴 예정입니다.",
+      }),
+    );
+    expect(await screen.findByText("대표님 결재함에 올렸어요. 승인하시면 업로드를 진행할 수 있어요.")).toBeVisible();
+  });
+
+  it("tells the owner plainly when the approval queue is not turned on yet", async () => {
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-approval-off", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final.mp4",
+        status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true,
+      },
+    });
+    vi.spyOn(api, "requestUploadApproval").mockResolvedValue({ queued: false });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    fireEvent.change(await screen.findByLabelText("언제 무엇을 올릴지 한 줄로"), { target: { value: "다음 주에 올릴 예정입니다." } });
+    fireEvent.click(screen.getByRole("button", { name: "업로드 승인 요청" }));
+
+    expect(await screen.findByText("결재함 큐가 아직 안 켜져 있어요. 이 완성본은 준비돼 있으니 켜지면 다시 요청해 주세요.")).toBeVisible();
+  });
+
+  it("does not swallow a failed approval request -- the owner just pressed it themselves", async () => {
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-approval-fail", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final.mp4",
+        status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true,
+      },
+    });
+    vi.spyOn(api, "requestUploadApproval").mockRejectedValue(new Error("upload_approval_queue_unavailable"));
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    fireEvent.change(await screen.findByLabelText("언제 무엇을 올릴지 한 줄로"), { target: { value: "다음 주에 올릴 예정입니다." } });
+    fireEvent.click(screen.getByRole("button", { name: "업로드 승인 요청" }));
+
+    expect(await screen.findByText("결재함에 넣지 못했어요. 잠시 뒤 다시 시도해 주세요.")).toBeVisible();
+  });
+
   it("lets the owner make a preview share link for a colleague and shows the url", async () => {
     // owner 요청(2026-08-28): 프리뷰 공유 링크. 동료가 앱 없이 이 링크만으로 완성본을
     // 볼 수 있어야 하니, 만든 뒤에는 화면에 그 주소가 그대로 보여야 한다.

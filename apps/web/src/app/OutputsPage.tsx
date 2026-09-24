@@ -385,6 +385,13 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   const [verdictProjectId, setVerdictProjectId] = useState<string | null>(null);
   const [verdictSaved, setVerdictSaved] = useState<"good" | "bad" | null>(null);
   const [isSavingVerdict, setIsSavingVerdict] = useState(false);
+  // AK-System Hermes 결재함 큐(§10.14 2-D, W1015) -- 아무것도 실행하지 않는다.
+  // 대표님 결재함에 대기 항목을 넣기만 한다. 결과는 프로젝트별로 기억한다.
+  const [uploadApprovalSummary, setUploadApprovalSummary] = useState("");
+  const [isRequestingUploadApproval, setIsRequestingUploadApproval] = useState(false);
+  const [uploadApprovalProjectId, setUploadApprovalProjectId] = useState<string | null>(null);
+  const [uploadApprovalQueued, setUploadApprovalQueued] = useState<boolean | null>(null);
+  const [uploadApprovalErrorProjectId, setUploadApprovalErrorProjectId] = useState<string | null>(null);
   const [isExportingCapcutDraft, setIsExportingCapcutDraft] = useState(false);
   const [capcutErrorProjectId, setCapcutErrorProjectId] = useState<string | null>(null);
   const [capcutRejectedReason, setCapcutRejectedReason] = useState<string | null>(null);
@@ -1001,6 +1008,30 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
       if (currentProjectId.current === submissionProjectId) setIsSavingVerdict(false);
     }
   };
+  // 이 완성본을 두고 대표님 결재함(업로드 게이트)에 승인을 요청한다. 아무것도
+  // 실행하지 않는다 -- 실제 유튜브 업로드는 승인 이후에도 여전히 VideoBox
+  // 쪽 책임이다(CLAUDE.md §6). 요청 실패는 owner가 지금 막 누른 것이라
+  // 화면에 그대로 알린다(대본 확정 알림과 다르게 최선노력이 아니다).
+  const handleRequestUploadApproval = async () => {
+    const submissionProjectId = projectId;
+    const summary = uploadApprovalSummary.trim();
+    if (!finalRender?.job_id || !summary || isRequestingUploadApproval) return;
+    setIsRequestingUploadApproval(true);
+    setUploadApprovalErrorProjectId(null);
+    try {
+      const result = await api.requestUploadApproval(submissionProjectId, finalRender.job_id, {
+        upload_scheduled_summary_ko: summary,
+      });
+      if (currentProjectId.current !== submissionProjectId) return;
+      setUploadApprovalProjectId(submissionProjectId);
+      setUploadApprovalQueued(result.queued);
+    } catch {
+      if (currentProjectId.current !== submissionProjectId) return;
+      setUploadApprovalErrorProjectId(submissionProjectId);
+    } finally {
+      if (currentProjectId.current === submissionProjectId) setIsRequestingUploadApproval(false);
+    }
+  };
   // owner 요청(2026-08-28): 프리뷰 공유 링크 — 토큰 링크 방식 승인. 이 앱은
   // 지금까지 인증이 전혀 없었다는 점을 밝혀 둔다. 링크 하나가 이 완성본 하나에만 닿는다.
   const handleCreatePreviewShare = async () => {
@@ -1447,6 +1478,29 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
               : <p>이 완성본이 어땠는지 남겨 주시면 다음 추천이 좋아져요.</p>}
             <Button disabled={isSavingVerdict} onClick={() => void handleVerdict("good")}>이 완성본 좋아요</Button>
             <Button disabled={isSavingVerdict} onClick={() => void handleVerdict("bad")}>이 완성본 아쉬워요</Button>
+          </div> : null}
+          {currentFinal ? <div className="vb-upload-approval">
+            {uploadApprovalProjectId === projectId && uploadApprovalQueued === true
+              ? <p>대표님 결재함에 올렸어요. 승인하시면 업로드를 진행할 수 있어요.</p>
+              : uploadApprovalProjectId === projectId && uploadApprovalQueued === false
+                ? <p>결재함 큐가 아직 안 켜져 있어요. 이 완성본은 준비돼 있으니 켜지면 다시 요청해 주세요.</p>
+                : <p>이 완성본을 업로드해도 될지 대표님 결재함에 물어보세요.</p>}
+            {uploadApprovalErrorProjectId === projectId
+              ? <p>결재함에 넣지 못했어요. 잠시 뒤 다시 시도해 주세요.</p>
+              : null}
+            <label htmlFor="upload-approval-summary">언제 무엇을 올릴지 한 줄로</label>
+            <Input
+              id="upload-approval-summary"
+              value={uploadApprovalSummary}
+              placeholder="예: 이번 주 목요일에 유튜브로 올릴 예정입니다."
+              onChange={(event) => setUploadApprovalSummary(event.target.value)}
+            />
+            <Button
+              disabled={isRequestingUploadApproval || !uploadApprovalSummary.trim()}
+              onClick={() => void handleRequestUploadApproval()}
+            >
+              {isRequestingUploadApproval ? "요청하는 중" : "업로드 승인 요청"}
+            </Button>
           </div> : null}
           {currentFinal ? <div className="vb-final-format">
             {formatSavedProjectId === projectId
