@@ -128,6 +128,9 @@ def _rendered_model(
                     "HERMES_YUJIN_GATEWAY_USERNAME": gateway_username,
                     "HERMES_YUJIN_URL": "http://videobox-hermes-yujin:9120",
                     "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN": gateway_service_token,
+                    # §10.14 2-D(W1015): AK-System Hermes 결재함 큐 브릿지 --
+                    # 안 켜도(빈 문자열) compose는 이 이름을 여전히 내보낸다.
+                    "VIDEOBOX_HERMES_APPROVAL_MCP_URL": "",
                     "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64": (
                         capability_private_key_b64
                     ),

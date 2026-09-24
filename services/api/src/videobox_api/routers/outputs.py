@@ -35,8 +35,13 @@ from videobox_api.models import (
     StartJobResponse,
     SubtitleArtifactResponse,
     SubtitleJobResponse,
+    UploadApprovalRequest,
+    UploadApprovalResponse,
 )
 from videobox_api.orchestration import ApiOrchestrator
+
+# CLAUDE.md §8이 못박은 호칭이다 -- 결재함 큐로 나가는 항목도 같은 이름을 쓴다.
+_APPROVAL_TARGET = "루이스 대표님"
 
 # 경로 구분자(`/`, `\`)·따옴표·제어문자(줄바꿈 포함)를 거른다. 프로젝트 이름은
 # 사용자가 짓는 값이라 그대로 헤더에 실으면 HTTP 응답 분할(줄바꿈으로 다른
@@ -373,6 +378,49 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
             status=result["status"],
             render=FinalRenderArtifactResponse(**result["render"]),
         )
+
+    @router.post("/api/projects/{project_id}/final-renders/{job_id}/request-upload-approval")
+    async def request_upload_approval(
+        project_id: str, job_id: str, payload: UploadApprovalRequest, request: Request
+    ) -> UploadApprovalResponse:
+        """완성본을 두고 대표님 결재함(업로드 게이트)에 승인을 요청한다.
+
+        **아무것도 실행하지 않는다.** AK-System Hermes 결재함 큐(§10.14 2-D,
+        W1015)에 pending 항목을 넣기만 한다 -- 실제 유튜브 업로드는 승인
+        이후에도 여전히 VideoBox 쪽 책임이고 이 경로의 범위 밖이다
+        (CLAUDE.md §6). 완성본이 아직 없으면(렌더 진행 중이거나 실패) 아무
+        영상도 없이 승인을 요청하는 셈이라 거절한다.
+        """
+        try:
+            result = orchestrator.get_final_render_result(project_id=project_id, job_id=job_id)
+            if not result.get("render"):
+                raise KeyError(f"Final render has no artifact yet: {job_id}")
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        client = getattr(request.app.state, "agent_gateway_client", None)
+        if client is None:
+            return UploadApprovalResponse(queued=False)
+        try:
+            await client.submit_upload_request(
+                project_id=project_id,
+                cycle_id=job_id,
+                upload_target=payload.upload_target,
+                upload_scheduled_summary_ko=payload.upload_scheduled_summary_ko,
+                question="이 완성본을 업로드해도 될까요?",
+                target=_APPROVAL_TARGET,
+            )
+        except Exception as exc:  # noqa: BLE001 - 결재함 알림 실패를 화면에 알린다
+            # 대본 확정과 달리 이 요청은 **owner가 지금 막 누른 것**이다 --
+            # 승인이 이미 끝난 뒤 뒤늦게 실패하는 것과 달리, 지금 실패를
+            # 숨기면 owner는 결재함에 아무것도 안 올라간 걸 모르고 기다린다.
+            _LOGGER.warning(
+                "AK-System Hermes 결재함 큐에 업로드 승인 요청을 넣지 못했습니다.",
+                exc_info=True,
+            )
+            raise _http_error(
+                ValueError("upload_approval_queue_unavailable")
+            ) from exc
+        return UploadApprovalResponse(queued=True)
 
     @router.get("/api/projects/{project_id}/final-renders/{job_id}/content")
     def get_final_render_content(project_id: str, job_id: str, request: Request):

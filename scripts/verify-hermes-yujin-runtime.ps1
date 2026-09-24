@@ -176,7 +176,7 @@ Assert-True (
     $hermes.environment.HERMES_TUI_TOOLSETS -ceq "context_engine"
 ) "Hermes must use the pinned zero-schema context_engine toolset."
 Assert-Networks $hermes @($hermesNetwork, $providerNetwork) "videobox-hermes-yujin"
-Assert-Networks $gateway @($gatewayApiNetwork, $hermesNetwork) "videobox-agent-gateway"
+Assert-Networks $gateway @($gatewayApiNetwork, $hermesNetwork, $providerNetwork) "videobox-agent-gateway"
 Assert-Networks $workspace @("videobox-edge", "videobox-internal", $gatewayApiNetwork) "videobox-workspace"
 
 Assert-True ($rendered.networks.$gatewayApiNetwork.internal -eq $true) "Gateway API network must be internal."
@@ -199,6 +199,7 @@ Assert-True (
             "HERMES_YUJIN_GATEWAY_USERNAME"
             "HERMES_YUJIN_URL"
             "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN"
+            "VIDEOBOX_HERMES_APPROVAL_MCP_URL"
             "VIDEOBOX_HERMES_CAPABILITY_KEY_ID"
             "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64"
         ) -join "|"

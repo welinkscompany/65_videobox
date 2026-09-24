@@ -2166,6 +2166,20 @@ class FinalRenderVerdictRequest(BaseModel):
     note: str | None = None
 
 
+class UploadApprovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    #: AK-System Hermes 결재함 큐(§10.14 2-D, W1015)가 정한 이름 그대로다.
+    upload_target: str = Field(default="youtube", min_length=1, max_length=256)
+    upload_scheduled_summary_ko: str = Field(min_length=1, max_length=2_000)
+
+
+class UploadApprovalResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    queued: bool
+
+
 class FinalRenderJobResponse(StartJobResponse):
     render: FinalRenderArtifactResponse | None = None
     error_message: str | None = None

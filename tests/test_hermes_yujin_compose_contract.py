@@ -240,7 +240,11 @@ def test_hermes_yujin_receives_only_hashed_auth_and_has_honest_http_health() -> 
     assert hermes["logging"]["driver"] == "local"
 
 
-def test_gateway_bridges_api_hermes_and_memory_without_provider_egress() -> None:
+def test_gateway_bridges_api_hermes_and_the_hermes_approval_queue_bridge() -> None:
+    # §10.14 2-D(W1015, owner 승인)로 provider-egress 망이 gateway에도 열렸다 --
+    # AK-System Hermes 결재함 큐(127.0.0.1:19680)에 닿는 유일한 경로다. 예전
+    # 이름(without_provider_egress)이 지키던 "gateway는 밖으로 안 나간다"는
+    # 가정은 이 승인으로 끝났다 -- 이 망은 자격증명 없이 로컬호스트만 향한다.
     compose = _overlay()
     gateway = compose["services"]["videobox-agent-gateway"]
     workspace = compose["services"]["videobox-workspace"]
@@ -252,12 +256,12 @@ def test_gateway_bridges_api_hermes_and_memory_without_provider_egress() -> None
     assert gateway["networks"] == [
         GATEWAY_API_NETWORK,
         HERMES_NETWORK,
+        PROVIDER_EGRESS_NETWORK,
     ]
     assert workspace["networks"] == [GATEWAY_API_NETWORK]
     assert compose["networks"][GATEWAY_API_NETWORK] == {"internal": True}
     assert compose["networks"][HERMES_NETWORK] == {"internal": True}
 
-    assert PROVIDER_EGRESS_NETWORK not in gateway["networks"]
     assert "videobox-edge" not in gateway["networks"]
     assert "videobox-internal" not in gateway["networks"]
     assert HERMES_NETWORK not in workspace["networks"]
@@ -292,6 +296,7 @@ def test_gateway_gets_plaintext_auth_but_workspace_never_gets_hermes_secrets() -
         "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN": (
             "${VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN:?set in .env.container}"
         ),
+        "VIDEOBOX_HERMES_APPROVAL_MCP_URL": "${VIDEOBOX_HERMES_APPROVAL_MCP_URL:-}",
         "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64": (
             "${VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64:"
             "?set in .env.container}"
