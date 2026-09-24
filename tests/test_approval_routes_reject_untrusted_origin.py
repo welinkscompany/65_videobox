@@ -108,3 +108,18 @@ def test_trusted_dev_origin_is_not_rejected(tmp_path: Path) -> None:
     )
 
     assert response.status_code != 403
+
+
+def test_local_dev_server_port_is_also_trusted(tmp_path: Path) -> None:
+    # `.claude/launch.json`의 로컬 dev 웹 서버는 5199다 -- 컨테이너 웹(5173)과
+    # 일부러 다른 포트를 써서 로컬 파일 저장소/컨테이너 Postgres 저장소가
+    # 섞여 보이는 사고(2026-08-08)를 막는다. 실물 검증(2026-09-24, W1015)에서
+    # 이 포트가 화이트리스트에 없어 검토 승인이 조용히 403으로 막히는 걸 찾았다.
+    client = _client(tmp_path)
+
+    response = client.post(
+        "/api/projects/does-not-exist/review-approvals/does-not-exist/approve",
+        headers={"origin": "http://127.0.0.1:5199"},
+    )
+
+    assert response.status_code != 403

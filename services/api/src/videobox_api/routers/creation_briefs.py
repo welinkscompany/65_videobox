@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
-from fastapi import APIRouter, File, Form, Request, Response, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, File, Form, Request, Response, UploadFile, status
+from starlette.applications import Starlette
 
 from videobox_api.errors import _http_error
 from videobox_api.models import (
@@ -22,7 +24,7 @@ _LOGGER = logging.getLogger("uvicorn.error")
 
 
 async def _notify_script_confirmation_queue(
-    request: Request, *, project_id: str, brief: dict[str, object]
+    app: Starlette, *, project_id: str, brief: dict[str, object]
 ) -> None:
     """AK-System Hermes 결재함 큐(§10.14 2-D, W1015)에 pending 항목을 넣는다.
 
@@ -34,8 +36,13 @@ async def _notify_script_confirmation_queue(
     대본 확정과 같은 순간에 **제목 후보도 함께 뽑아 올린다** — 제목 선택도
     같은 사람 게이트 셋의 하나다. 제목 생성이 실패해도 대본 확정 큐 전송은
     막지 않는다 — 서로 독립된 최선노력이다.
+
+    코드리뷰(2026-09-24): 이 알림은 `approve()`가 이미 저장을 끝낸 뒤에
+    붙는 부가 경로라서, 응답을 기다리게 하지 않고 `BackgroundTasks`로
+    돈다 -- owner의 "대본 확정" 클릭이 LLM/네트워크 왕복만큼 느려지지
+    않는다.
     """
-    client = getattr(request.app.state, "agent_gateway_client", None)
+    client = getattr(app.state, "agent_gateway_client", None)
     if client is None:
         return
     script_text = str(brief.get("script_text") or "").strip()
@@ -57,19 +64,23 @@ async def _notify_script_confirmation_queue(
             exc_info=True,
         )
     await _notify_title_candidates_queue(
-        request, project_id=project_id, cycle_id=cycle_id, script_text=script_text,
+        app, project_id=project_id, cycle_id=cycle_id, script_text=script_text,
     )
 
 
 async def _notify_title_candidates_queue(
-    request: Request, *, project_id: str, cycle_id: str, script_text: str
+    app: Starlette, *, project_id: str, cycle_id: str, script_text: str
 ) -> None:
-    client = getattr(request.app.state, "agent_gateway_client", None)
-    writer = getattr(request.app.state, "title_candidate_writer", None)
+    client = getattr(app.state, "agent_gateway_client", None)
+    writer = getattr(app.state, "title_candidate_writer", None)
     if client is None or writer is None:
         return
     try:
-        titles = writer.write(project_id=project_id, script_text=script_text)
+        # 코드리뷰(2026-09-24): `write()`는 로컬 LLM을 동기로 부른다 --
+        # 실측상 GPU 경합 시 수십 초까지 걸린다(§10.14 관련 메모). 이 함수는
+        # 백그라운드 태스크로 도는 이벤트 루프 위에서 실행되므로, 스레드로
+        # 안 빼면 그동안 다른 owner 요청까지 같이 멈춘다.
+        titles = await asyncio.to_thread(writer.write, project_id=project_id, script_text=script_text)
         await client.submit_title_candidates(
             project_id=project_id,
             cycle_id=cycle_id,
@@ -191,14 +202,15 @@ def build_creation_briefs_router(orchestrator: ApiOrchestrator) -> APIRouter:
             raise _http_error(exc) from exc
 
     @router.post("/api/projects/{project_id}/creation-briefs/{brief_id}/approve")
-    async def approve(
-        project_id: str, brief_id: str, payload: CreationBriefRevisionRequest, request: Request
+    def approve(
+        project_id: str, brief_id: str, payload: CreationBriefRevisionRequest,
+        request: Request, background_tasks: BackgroundTasks,
     ) -> dict[str, object]:
         try:
             brief = store.approve_creation_brief(project_id=project_id, brief_id=brief_id, expected_revision=payload.expected_revision)
         except Exception as exc:
             raise _http_error(exc) from exc
-        await _notify_script_confirmation_queue(request, project_id=project_id, brief=brief)
+        background_tasks.add_task(_notify_script_confirmation_queue, request.app, project_id=project_id, brief=brief)
         return brief
 
     @router.delete("/api/projects/{project_id}/creation-briefs/{brief_id}", status_code=status.HTTP_204_NO_CONTENT)

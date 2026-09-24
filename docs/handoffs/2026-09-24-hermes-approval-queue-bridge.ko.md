@@ -150,6 +150,78 @@ PASS로 새는) 상황이었다.
   후보라는 새 산출물), 업로드 승인 라우트(기존에 없던 사람 게이트).
 - **제외**: 결제·정산·PII·업로드 실행 도구 — 요청 자체가 명시적으로 배제.
 
+## CSRF 포트 불일치 — 5199를 5173으로 되돌리는 대신 화이트리스트를 넓혔다
+
+owner에게 "5199를 5173으로 되돌릴까, 화이트리스트에 5199를 추가할까"를
+물었다. **화이트리스트 추가를 골랐다** — `docs/development-fast-path.ko.md`
+"데이터 폴더가 두 벌이다" 절이 5199/5173을 의도적으로 분리해 둔 이유(같은
+포트를 쓰면 로컬 파일 저장소와 컨테이너 Postgres 저장소가 섞여 보이는
+사고가 2026-08-08에 실제로 났다)를 되돌리면 다시 살아나기 때문이다.
+`services/api/src/videobox_api/csrf_guard.py`의 `TRUSTED_ORIGINS`에
+`http://127.0.0.1:5199`/`http://localhost:5199`를 추가하고,
+`tests/test_approval_routes_reject_untrusted_origin.py`에 회귀 테스트를
+더했다(실물로도 재확인 — 아래 절).
+
+## 코드리뷰 (8각도, 이번 세션 커밋 4개 + 이 CSRF 수정)
+
+`git diff 34852456c...HEAD` + working tree를 8개 독립 각도로 리뷰했다.
+확정 결함 3개, 정확한 지적 1개는 **바로 고쳤다**:
+
+1. **[correctness, 고침]** `creation_briefs.py`의 `approve()`가
+   `async def`였는데, 그 안에서 로컬 LLM을 동기 호출하는
+   `title_candidate_writer.write()`를 직접 `await`했다 -- GPU 경합 시
+   수십 초까지 걸리는 이 호출이 그동안 **같은 프로세스의 다른 모든 요청**을
+   막았다. `BackgroundTasks`로 응답과 분리하고, `write()` 자체도
+   `asyncio.to_thread`로 스레드에 넘겼다. `approve()`는 더는 async가 아니어도
+   돼서 일반 `def`로 되돌렸다(FastAPI가 자동으로 스레드풀에 태운다 --
+   `script_drafts.py`가 이미 쓰는 방식과 같아졌다).
+2. **[conventions, 고침]** 업로드 승인 화면 문구에 내부 용어 "큐"가 그대로
+   노출됐다(CLAUDE.md §8). "결재함이 아직 연결돼 있지 않아요"로 고쳤다.
+3. **[correctness, 고침]** 업로드 승인 큐 연결 실패가 400(Bad Request)으로
+   나가 owner 입력이 잘못됐다는 뜻처럼 보였다 -- 실제로는 상류(Hermes 다리)
+   문제라 502로 고쳤다.
+4. **[conventions, 고침]** `compose.hermes-yujin.yaml`의 network 주석이
+   "이 컴퓨터 밖으로 안 나간다"고 **망 자체의 속성**인 것처럼 적혀 있었다.
+   실제로는 이 망(`videobox-hermes-provider-egress`)이 `internal: true`가
+   **아니고** 유진 컨테이너의 외부 provider egress에도 쓰이는 진짜 망이며,
+   보장은 `HermesApprovalMcpClient` 하나의 앱 레벨 URL 잠금에서만 나온다는
+   걸 주석에 명시했다 -- 나중에 이 gateway 프로세스에 다른 아웃바운드
+   호출이 생기면 이 망으로 실제 인터넷에 나갈 수 있다는 경고도 남겼다.
+
+**의도적으로 안 고친 것 3개** (모두 순수 리팩터, CLAUDE.md "관련 없는 코드와
+구조는 건드리지 않는다"에 따라 이번 범위 밖으로 남김 -- `ReportFindings`에
+`skipped`로 기록):
+- 한글 검증 정규식이 `title_candidate_writer.py`/`script_draft_writer.py`
+  둘에 복제됨.
+- HTTP 클라이언트 팩토리 + "loopback만 허용" URL 검증 패턴이
+  `hermes_approval_mcp_client.py`/`hermes_rpc_client.py` 둘에 복제됨.
+- agent-gateway의 승인 엔드포인트 3개가 거의 동일한 보일러플레이트를 반복.
+
+## 갭검증 (원래 요청 대조)
+
+owner의 원래 지시(3가지: 새 MCP 클라이언트, 세 도구 배선, project_id/cycle_id
+그대로 전달 + 결제·PII·업로드실행 도구 금지)를 다시 한 줄씩 대조했다 -- 셋 다
+됐고, 금지 항목은 안 만들었다. `docs/implementation-plan.ko.md`에는 이
+작업이 번호 붙은 Task로 없다(owner가 대화로 직접 지시한 범위 밖 요청이라
+공식 계획서 항목이 아니다) -- 그래서 갭검증은 계획서 대조가 아니라 원래
+지시문 대조로 했다.
+
+## 역방향 동작검증 (코드리뷰 수정 반영 후)
+
+- CSRF 수정: 브라우저(포트 5199)에서 실제 `fetch`로 존재하지 않는
+  프로젝트의 검토 승인을 호출 -- 이전엔 403(untrusted_origin)이었는데
+  지금은 500(내부 오류, 프로젝트가 없어서 정상)으로 나왔다. 즉 CSRF는
+  통과하고 실제 핸들러까지 도달한다.
+- `approve()` 백그라운드 태스크 전환: `tests/test_api_creation_brief.py`
+  12개 전부 그대로 통과 -- `TestClient`는 응답을 돌려주기 전에 백그라운드
+  태스크를 실제로 실행하므로, 알림이 여전히 나가는지는 시험이 계속 지킨다.
+- 502 상태코드 변경: `tests/test_upload_approval_request.py`의 실패 시험을
+  `>= 400`에서 **정확히 502**로 좁혀 재확인.
+- 전체 backend pytest(`--ignore=tests/test_mcp_server.py`) 재실행:
+  **5143 passed · 56 skipped · 1 xfailed, 37분 38초.** 회귀 없음(이번
+  코드리뷰 수정 다섯 개를 반영한 새 실행 기준).
+- 프론트 `OutputsPage.test.tsx` 123개 전부 통과, `tsc --noEmit` 클린.
+
 ## 다음 세션에 남는 것
 
 1. `.env.container`에 실제 owner가 `VIDEOBOX_HERMES_APPROVAL_MCP_URL`을
@@ -157,6 +229,3 @@ PASS로 새는) 상황이었다.
    상태에서 실제 결재함에 항목이 뜨는지 **눈으로** 확인 — 이번 세션은
    화면·백엔드 배선은 실물로 확인했지만(위 절), 큐 자체가 켜진 상태의
    확인은 아직 못 했다(그 서버가 지금 안 떠 있음).
-2. CSRF 화이트리스트(`csrf_guard.py` `TRUSTED_ORIGINS`)와
-   `.claude/launch.json`의 dev 포트(5199)가 어긋난 문제 — owner 판단 필요
-   (위 "덤으로 잡은 것" 참조).

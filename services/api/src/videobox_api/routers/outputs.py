@@ -5,7 +5,7 @@ import re
 import threading
 from urllib.parse import quote
 
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import FileResponse
 
 from videobox_core_engine.audio_export import extract_audio_only
@@ -417,8 +417,13 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
                 "AK-System Hermes 결재함 큐에 업로드 승인 요청을 넣지 못했습니다.",
                 exc_info=True,
             )
-            raise _http_error(
-                ValueError("upload_approval_queue_unavailable")
+            # 코드리뷰(2026-09-24): owner 입력이 잘못된 게 아니라 상류(agent
+            # gateway/Hermes MCP 커넥터)가 안 닿은 것이다 -- `_http_error`로
+            # 보내면 ValueError가 400(Bad Request)으로 나가 "요청 자체가
+            # 틀렸다"는 뜻이 되어 버린다. 502로 구분해 둔다.
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"reason": "upload_approval_queue_unavailable"},
             ) from exc
         return UploadApprovalResponse(queued=True)
 

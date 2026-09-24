@@ -1483,7 +1483,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
             {uploadApprovalProjectId === projectId && uploadApprovalQueued === true
               ? <p>대표님 결재함에 올렸어요. 승인하시면 업로드를 진행할 수 있어요.</p>
               : uploadApprovalProjectId === projectId && uploadApprovalQueued === false
-                ? <p>결재함 큐가 아직 안 켜져 있어요. 이 완성본은 준비돼 있으니 켜지면 다시 요청해 주세요.</p>
+                ? <p>결재함이 아직 연결돼 있지 않아요. 이 완성본은 준비돼 있으니 연결되면 다시 요청해 주세요.</p>
                 : <p>이 완성본을 업로드해도 될지 대표님 결재함에 물어보세요.</p>}
             {uploadApprovalErrorProjectId === projectId
               ? <p>결재함에 넣지 못했어요. 잠시 뒤 다시 시도해 주세요.</p>

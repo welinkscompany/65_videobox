@@ -865,7 +865,7 @@ describe("OutputsPage", () => {
     fireEvent.change(await screen.findByLabelText("언제 무엇을 올릴지 한 줄로"), { target: { value: "다음 주에 올릴 예정입니다." } });
     fireEvent.click(screen.getByRole("button", { name: "업로드 승인 요청" }));
 
-    expect(await screen.findByText("결재함 큐가 아직 안 켜져 있어요. 이 완성본은 준비돼 있으니 켜지면 다시 요청해 주세요.")).toBeVisible();
+    expect(await screen.findByText("결재함이 아직 연결돼 있지 않아요. 이 완성본은 준비돼 있으니 연결되면 다시 요청해 주세요.")).toBeVisible();
   });
 
   it("does not swallow a failed approval request -- the owner just pressed it themselves", async () => {

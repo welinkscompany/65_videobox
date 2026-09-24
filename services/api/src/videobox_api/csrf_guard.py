@@ -24,10 +24,18 @@ from fastapi import HTTPException, Request, status
 
 #: 개발 서버·컨테이너가 화면을 내주는 자리(`docker/workspace-nginx.conf`).
 #: Tauri 셸이 다른 origin(예: `tauri://`)으로 뜨게 되면 여기 추가해야 한다.
+#: 5199는 로컬 dev 서버(`.claude/launch.json`)다 -- 컨테이너 웹(5173)과 일부러
+#: 다른 포트를 쓴다. 둘을 같은 포트로 두면 로컬 파일 저장소와 컨테이너
+#: Postgres 저장소가 섞여 보이는 사고가 재현된다(2026-08-08,
+#: `development-fast-path.ko.md` "데이터 폴더가 두 벌이다" 절) -- 그래서 포트를
+#: 합치는 대신 이 화이트리스트에 5199를 추가한다(2026-09-24, W1015 업로드
+#: 승인 요청 실물 검증 중 5199에서 검토 승인이 조용히 403으로 막히는 걸 발견).
 TRUSTED_ORIGINS = frozenset(
     {
         "http://127.0.0.1:5173",
         "http://localhost:5173",
+        "http://127.0.0.1:5199",
+        "http://localhost:5199",
     }
 )
 

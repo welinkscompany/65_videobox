@@ -52,9 +52,16 @@ services:
         condition: service_healthy
       videobox-workspace:
         condition: service_healthy
-    # `videobox-hermes-provider-egress`는 §10.14 2-D의 host-bridge다 --
-    # 이 컴퓨터 밖으로 안 나간다(127.0.0.1/host.docker.internal만 허용값으로
-    # 앱 레벨에서 잠긴다, HermesApprovalMcpClient 참고).
+    # `videobox-hermes-provider-egress`는 §10.14 2-D의 host-bridge다 -- 이
+    # 컨테이너에 host.docker.internal 경로를 열어 준다. **이 망 자체는
+    # `internal: true`가 아니다**(videobox-hermes-yujin이 외부 provider에
+    # 나가는 데도 같이 쓰는 진짜 egress 망이다) -- "이 컴퓨터 밖으로 안
+    # 나간다"는 보장은 이 컨테이너 안에서 실제로 호출하는
+    # `HermesApprovalMcpClient`가 127.0.0.1/host.docker.internal:19680만
+    # 받도록 앱 레벨에서 잠그기 때문이지, 망 자체가 막아 주는 게 아니다
+    # (코드리뷰 2026-09-24). 이 gateway 프로세스에 다른 아웃바운드 호출이
+    # 생기면 이 망을 통해 실제로 인터넷에 나갈 수 있다는 뜻이라 새 코드를
+    # 더할 때 유의한다.
     networks: [videobox-agent-gateway-api-network, videobox-agent-gateway-network, videobox-hermes-provider-egress]
     user: "10001:10001"
     read_only: true

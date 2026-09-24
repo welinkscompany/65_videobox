@@ -172,7 +172,9 @@ def test_upload_approval_surfaces_a_failure_when_the_hermes_bridge_is_down(
         json={"upload_scheduled_summary_ko": "이번 주 목요일에 올릴 예정입니다."},
     )
 
-    assert response.status_code >= 400
+    # 코드리뷰(2026-09-24): owner 입력이 아니라 상류(Hermes 결재함 다리)가
+    # 안 닿은 것이므로 400이 아니라 502여야 한다.
+    assert response.status_code == 502
     assert "upload_approval_queue_unavailable" in response.text
 
 
