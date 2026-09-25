@@ -1,5 +1,8 @@
 # AK-System Hermes 결재함 큐 실물 검증 + index 결함 수정 (2026-09-25)
 
+**대체됨:** `2026-09-26-approval-connector-persistence-blocked-on-ak-hermes-policy.ko.md`가
+이 문서를 대체한다.
+
 **대체됨 표시 대상:** `2026-09-24-hermes-approval-queue-bridge.ko.md`가
 이 문서로 이어진다.
 
