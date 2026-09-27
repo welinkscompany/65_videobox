@@ -270,6 +270,16 @@ starlette/uvicorn을 FastAPI보다 새 버전으로 요구한다** -- `requireme
 다음: `list_project_assets` 결정(§6-3) 뒤 §3.2(자산 넣기), 이어서 §3.3
 나머지(시작류 도구)·§3.4(타임라인)·§3.5(결과물).
 
+## 9.1 착수함 (2026-09-27) — HTTP 전송 + `ask_yujin`
+
+AK-System Hermes가 같은 컴퓨터에서 MCP로 붙을 수 있도록 `streamable-http`
+전송(Bearer 인증)을 추가했다. 타임라인 직접 조작 대신 `ask_yujin`
+하나만 열었다 -- 유진을 우회하지 않는다는 §1.1 원칙을 그대로 지킨다.
+실패 시 1회 재시도 후 `services/mcp/data/ask-yujin-escalations.jsonl`에
+기록하고 그대로 올려보낸다. 상세:
+`docs/superpowers/specs/2026-09-27-mcp-http-endpoint-for-ak-hermes-design.ko.md`,
+`docs/videobox-mcp-http-setup.ko.md`.
+
 ## 7. 완료의 정의
 
 `CLAUDE.md` §4를 그대로 적용한다. **API 단건 확인은 완료가 아니다.**
