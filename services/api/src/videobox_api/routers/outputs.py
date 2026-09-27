@@ -147,6 +147,26 @@ def _final_render_content_disposition(
     return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(utf8_name, safe="")}'
 
 
+def _library_assets_with_unconfirmed_rights(request: Request, project_id: str) -> list[str]:
+    """이 프로젝트가 쓴 대표님 자료실 자산 중 권리를 아직 안 적은 것 (AK W1215-4).
+
+    자료실 자산이 프로젝트에 들어갈 때마다 남는 참조(`library_project_references`)로
+    센다 -- 완성본 타임라인에서 빠진 것까지 셀 수 있어 **더 많이 막는 쪽**이다.
+    자료실이 없는 실행(시험용 앱 등)은 막을 것이 없다.
+    """
+    library = getattr(request.app.state, "media_library_store", None)
+    user_assets = getattr(library, "user_asset_store", None)
+    if user_assets is None:
+        return []
+    unconfirmed: list[str] = []
+    for reference in user_assets.list_project_references(project_id=project_id):
+        asset_id = str(reference["library_asset_id"])
+        asset = user_assets.get_asset(asset_id)
+        if asset is not None and not asset.cleared_for_monetized_use and asset_id not in unconfirmed:
+            unconfirmed.append(asset_id)
+    return unconfirmed
+
+
 def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
     router = APIRouter()
 
@@ -406,6 +426,15 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={"reason": "upload_already_decided", "status": decided["status"]},
+            )
+        unconfirmed = _library_assets_with_unconfirmed_rights(request, project_id)
+        if unconfirmed:
+            # AK W1215-4: 누가 만들었는지 모르는(기본값 `unknown`) 대표님 자산이 이
+            # 프로젝트에 쓰였다. 업로드할 채널은 수익 채널이라 권리를 적기 전에는
+            # 결재함에 올리지 않는다. 자료실 미리보기에서 적으면 풀린다.
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"reason": "asset_rights_unconfirmed", "library_asset_ids": unconfirmed},
             )
         client = getattr(request.app.state, "agent_gateway_client", None)
         if client is None:

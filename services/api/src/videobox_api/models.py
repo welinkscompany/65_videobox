@@ -1655,6 +1655,15 @@ class MaterializeLibraryAssetRequest(BaseModel):
     project_id: str
 
 
+class UpdateLibraryAssetRightsRequest(BaseModel):
+    """자산을 누가 만들었고 써도 되는가 (AK W1215-4). 남의 것은 허락 내용을 적는다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rights_source: str = Field(min_length=1, max_length=32)
+    license_note: str | None = Field(default=None, max_length=2_000)
+
+
 class CorrectLibraryAssetMediaTypeRequest(BaseModel):
     """자료실에서 종류를 고친다 (owner 결정 2026-09-07).
 

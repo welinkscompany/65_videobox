@@ -229,3 +229,47 @@ def test_a_render_the_founder_already_decided_is_not_sent_for_approval_again(
     assert "upload_already_decided" in response.text
     assert founder_status in response.text
     assert calls == []
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_upload_approval_is_blocked_while_a_used_library_asset_has_unknown_rights(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AK W1215-4: an owner library asset with unknown rights (the safe default) must
+    not reach a monetized channel. The upload approval request is that door."""
+    app, client, project_id, render_job_id = _build_real_completed_render(tmp_path, monkeypatch)
+    user_assets = app.state.media_library_store.user_asset_store
+    user_assets.register_asset(
+        library_asset_id="user_rights_probe",
+        media_type="broll",
+        origin="user",
+        content_sha256="e" * 64,
+        managed_relative_path="assets/broll/ee/eee.mp4",
+        byte_count=10,
+        mime_type="video/mp4",
+        lifecycle="ready",
+    )
+    user_assets.add_project_reference(project_id=project_id, library_asset_id="user_rights_probe")
+    calls: list[dict[str, object]] = []
+
+    class _FakeApprovalClient:
+        async def submit_upload_request(self, **kwargs: object) -> dict[str, object]:
+            calls.append(kwargs)
+            return {"queued": True}
+
+    app.state.agent_gateway_client = _FakeApprovalClient()
+    url = f"/api/projects/{project_id}/final-renders/{render_job_id}/request-upload-approval"
+    body = {"upload_scheduled_summary_ko": "이번 주에 올릴 예정입니다."}
+
+    blocked = client.post(url, json=body)
+
+    assert blocked.status_code == 409
+    assert "asset_rights_unconfirmed" in blocked.text
+    assert "user_rights_probe" in blocked.text
+    assert calls == []
+
+    assert client.patch("/api/library/assets/user_rights_probe/rights", json={"rights_source": "own_footage"}).status_code == 200
+    allowed = client.post(url, json=body)
+
+    assert allowed.status_code == 200, allowed.text
+    assert len(calls) == 1

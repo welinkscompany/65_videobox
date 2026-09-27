@@ -1043,6 +1043,8 @@ export type LibraryAssetLifecycle = "processing" | "ready" | "needs_attention" |
 export type LibraryAssetOrigin = "builtin" | "user";
 
 /** Public, path-safe representation returned by the personal library API. */
+export type LibraryAssetRights = "unknown" | "own_footage" | "ai_generated" | "third_party_licensed";
+
 export type LibraryAsset = {
   library_asset_id: string;
   asset_id?: string | null;
@@ -1066,6 +1068,10 @@ export type LibraryAsset = {
   preview_url?: string | null;
   thumbnail_url?: string | null;
   waveform_url?: string | null;
+  /** 누가 만들었고 써도 되는가(AK W1215-4). 기본은 모름(`unknown`)이다. */
+  rights_source?: LibraryAssetRights;
+  rights_license_note?: string | null;
+  cleared_for_monetized_use?: boolean;
   /** 의미검색 결과에만 실려 온다 — 목록 조회에는 없다. */
   score?: number;
   semantic_match?: boolean;
@@ -1353,7 +1359,8 @@ export class CapcutDraftHandoffInProgressError extends Error {
 // 무엇이 잘못됐든 한 문장으로만 말할 수 있었다 -- 켜지 않은 기능과 실패한 호출이
 // 같은 말을 했다. 기존 `catch`는 그대로 돈다: 여전히 Error다.
 export class ApiRequestError extends Error {
-  constructor(readonly detail: string | null, readonly status: number, path: string) {
+  // `reason`: 서버가 `{"reason": "..."}` 모양으로 이유를 보냈을 때 그 이름(문자열 detail이면 그것).
+  constructor(readonly detail: string | null, readonly status: number, path: string, readonly reason: string | null = null) {
     super(`Request failed: ${path} (${status})`);
     this.name = "ApiRequestError";
   }
@@ -1373,7 +1380,11 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     if (response.status === 409 && payload?.latest_session !== undefined) {
       throw new ApiConflictError(payload.latest_session, path);
     }
-    throw new ApiRequestError(typeof payload?.detail === "string" ? payload.detail : null, response.status, path);
+    const detailText = typeof payload?.detail === "string" ? payload.detail : null;
+    const detailReason = payload?.detail && typeof payload.detail === "object" && typeof (payload.detail as { reason?: unknown }).reason === "string"
+      ? (payload.detail as { reason: string }).reason
+      : detailText;
+    throw new ApiRequestError(detailText, response.status, path, detailReason);
   }
   // 204에는 본문이 없다. 읽으려 들면 성공한 요청이 실패로 보인다 -- 대화
   // 삭제가 실제로는 지워졌는데 화면은 "지우지 못했어요"를 띄웠다.
@@ -2322,6 +2333,12 @@ export const api = {
     request<{ asset: LibraryAsset }>(
       `/api/library/assets/${encodeURIComponent(libraryAssetId)}/media-type`,
       { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ media_type: mediaType }) },
+    ),
+  /** 누가 만들었고 써도 되는가를 적는다(AK W1215-4). 남의 것은 허락 내용이 있어야 한다. */
+  updateLibraryAssetRights: (libraryAssetId: string, rightsSource: LibraryAssetRights, licenseNote: string | null) =>
+    request<{ asset: LibraryAsset }>(
+      `/api/library/assets/${encodeURIComponent(libraryAssetId)}/rights`,
+      { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rights_source: rightsSource, license_note: licenseNote }) },
     ),
   permanentDeleteLibraryAsset: (libraryAssetId: string) =>
     request<void>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}/permanent`, { method: "DELETE" }),

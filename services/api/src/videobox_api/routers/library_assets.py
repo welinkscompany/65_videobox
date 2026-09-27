@@ -25,6 +25,7 @@ from starlette.background import BackgroundTask
 from videobox_api.errors import _http_error
 from videobox_api.models import (
     CorrectLibraryAssetMediaTypeRequest,
+    UpdateLibraryAssetRightsRequest,
     LibraryIngestPathRequest,
     MaterializeLibraryAssetRequest,
 )
@@ -656,6 +657,24 @@ def build_library_assets_router(
         if target is asset.media_type:
             return {"asset": public_user(asset)}
         return {"asset": public_user(user_asset_store.update_media_type(asset_id, target))}
+
+    @router.patch("/api/library/assets/{asset_id}/rights")
+    def update_library_asset_rights(asset_id: str, payload: UpdateLibraryAssetRightsRequest) -> dict[str, Any]:
+        """누가 만들었고 써도 되는가를 owner가 적는다 (AK W1215-4, 2026-09-28).
+
+        기본은 모른다(`unknown`)이고, 모르는 자산을 쓴 완성본은 업로드 승인 요청에서
+        막힌다(`outputs.py`). 기본 소재팩은 이미 라이선스 증거가 있어 고칠 대상이 아니다.
+        """
+        asset, builtin = find_asset(asset_id)
+        if builtin is not None:
+            raise HTTPException(status_code=409, detail={"code": "builtin_asset_immutable"})
+        try:
+            updated = user_asset_store.update_rights(
+                asset_id, rights_source=payload.rights_source, license_note=payload.license_note
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"asset": public_user(updated)}
 
     @router.post("/api/library/assets/{asset_id}/restore")
     def restore_library_asset(asset_id: str) -> dict[str, Any]:

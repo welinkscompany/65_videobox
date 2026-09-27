@@ -30,6 +30,33 @@ class LibraryAssetOrigin(StrEnum):
     USER = "user"
 
 
+class LibraryAssetRights(StrEnum):
+    """이 자산을 누가 만들었고 써도 되는가 (AK W1215-4, 2026-09-28).
+
+    **기본은 `UNKNOWN`이다.** 값을 지어내지 않는다 -- 모르면 모른다고 두고, 모르는
+    자산은 수익 채널로 나가는 업로드 승인 요청에서 막힌다. 남의 것
+    (`THIRD_PARTY_LICENSED`)은 허락 내용을 `rights_license_note`에 적어야 한다.
+    """
+
+    UNKNOWN = "unknown"
+    OWN_FOOTAGE = "own_footage"
+    AI_GENERATED = "ai_generated"
+    THIRD_PARTY_LICENSED = "third_party_licensed"
+
+
+def resolve_library_asset_rights(
+    rights_source: "LibraryAssetRights | str", license_note: str | None
+) -> tuple["LibraryAssetRights", str | None]:
+    try:
+        resolved = LibraryAssetRights(rights_source)
+    except ValueError as error:
+        raise ValueError("rights_source_invalid") from error
+    note = (license_note or "").strip() or None
+    if resolved is LibraryAssetRights.THIRD_PARTY_LICENSED and note is None:
+        raise ValueError("rights_license_note_required")
+    return resolved, note
+
+
 class LibraryAssetLifecycle(StrEnum):
     PROCESSING = "processing"
     READY = "ready"
@@ -75,6 +102,17 @@ class LibraryUserAsset:
     created_at: datetime
     updated_at: datetime
     trashed_at: datetime | None = None
+    rights_source: LibraryAssetRights = LibraryAssetRights.UNKNOWN
+    rights_license_note: str | None = None
+
+    @property
+    def cleared_for_monetized_use(self) -> bool:
+        """수익 채널에 내보내도 되는가. 모르면(`unknown`) 아니다."""
+        if self.rights_source is LibraryAssetRights.UNKNOWN:
+            return False
+        if self.rights_source is LibraryAssetRights.THIRD_PARTY_LICENSED:
+            return bool(self.rights_license_note)
+        return True
 
     @classmethod
     def create(
@@ -95,6 +133,8 @@ class LibraryUserAsset:
         created_at: datetime | None = None,
         updated_at: datetime | None = None,
         trashed_at: datetime | None = None,
+        rights_source: LibraryAssetRights | str = LibraryAssetRights.UNKNOWN,
+        rights_license_note: str | None = None,
     ) -> "LibraryUserAsset":
         if not isinstance(library_asset_id, str) or not library_asset_id.strip():
             raise ValueError("library_asset_id is required")
@@ -123,6 +163,7 @@ class LibraryUserAsset:
         path_parts = PurePosixPath(normalized_path).parts
         if windows_path.drive or normalized_path.startswith("/") or any(part in {"", ".", ".."} for part in path_parts):
             raise ValueError("managed_relative_path must be a safe relative path")
+        resolved_rights, resolved_note = resolve_library_asset_rights(rights_source, rights_license_note)
         now = created_at or _utc_now()
         return cls(
             library_asset_id=library_asset_id.strip(),
@@ -140,6 +181,8 @@ class LibraryUserAsset:
             created_at=now,
             updated_at=updated_at or now,
             trashed_at=trashed_at,
+            rights_source=resolved_rights,
+            rights_license_note=resolved_note,
         )
 
     @classmethod
@@ -167,6 +210,9 @@ class LibraryUserAsset:
             created_at=parse_timestamp(row["created_at"]),
             updated_at=parse_timestamp(row["updated_at"]),
             trashed_at=parse_timestamp(row.get("trashed_at")),
+            # 칸이 생기기 전 기록은 모른다(`unknown`) -- 값을 지어내지 않는다.
+            rights_source=str(row.get("rights_source") or LibraryAssetRights.UNKNOWN.value),
+            rights_license_note=row.get("rights_license_note"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -186,6 +232,9 @@ class LibraryUserAsset:
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
             "trashed_at": self.trashed_at.isoformat() if self.trashed_at else None,
+            "rights_source": self.rights_source.value,
+            "rights_license_note": self.rights_license_note,
+            "cleared_for_monetized_use": self.cleared_for_monetized_use,
         }
 
 

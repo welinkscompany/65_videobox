@@ -394,6 +394,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   const [uploadApprovalQueued, setUploadApprovalQueued] = useState<boolean | null>(null);
   const [uploadApprovalErrorProjectId, setUploadApprovalErrorProjectId] = useState<string | null>(null);
   // AK W1215-2: 결재함에서 돌아온 대표님 결정. 어느 프로젝트 것인지 같이 기억한다.
+  const [rightsBlockedProjectId, setRightsBlockedProjectId] = useState<string | null>(null);
   const [founderDecisions, setFounderDecisions] = useState<{ projectId: string; decisions: FounderApprovalDecision[] } | null>(null);
   const [isExportingCapcutDraft, setIsExportingCapcutDraft] = useState(false);
   const [capcutErrorProjectId, setCapcutErrorProjectId] = useState<string | null>(null);
@@ -1036,6 +1037,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
     if (!finalRender?.job_id || !summary || isRequestingUploadApproval) return;
     setIsRequestingUploadApproval(true);
     setUploadApprovalErrorProjectId(null);
+    setRightsBlockedProjectId(null);
     try {
       const result = await api.requestUploadApproval(submissionProjectId, finalRender.job_id, {
         upload_scheduled_summary_ko: summary,
@@ -1043,8 +1045,13 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
       if (currentProjectId.current !== submissionProjectId) return;
       setUploadApprovalProjectId(submissionProjectId);
       setUploadApprovalQueued(result.queued);
-    } catch {
+    } catch (error) {
       if (currentProjectId.current !== submissionProjectId) return;
+      // AK W1215-4: 누가 만들었는지 모르는 자료가 쓰였으면 막힌다. 풀 곳을 알려 준다.
+      if (error instanceof ApiRequestError && error.reason === "asset_rights_unconfirmed") {
+        setRightsBlockedProjectId(submissionProjectId);
+        return;
+      }
       setUploadApprovalErrorProjectId(submissionProjectId);
     } finally {
       if (currentProjectId.current === submissionProjectId) setIsRequestingUploadApproval(false);
@@ -1510,6 +1517,9 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
                 : <p>이 완성본을 업로드해도 될지 대표님 결재함에 물어보세요.</p>}
             {uploadApprovalErrorProjectId === projectId
               ? <p>결재함에 넣지 못했어요. 잠시 뒤 다시 시도해 주세요.</p>
+              : null}
+            {rightsBlockedProjectId === projectId
+              ? <p>누가 만들었는지 아직 적지 않은 자료가 쓰였어요. 자료실 미리보기에서 출처를 적으면 올릴 수 있어요.</p>
               : null}
             <label htmlFor="upload-approval-summary">언제 무엇을 올릴지 한 줄로</label>
             <Input

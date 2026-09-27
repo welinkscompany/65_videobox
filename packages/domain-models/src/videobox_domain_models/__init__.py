@@ -4,6 +4,7 @@ from videobox_domain_models.media_analysis import MediaAnalysisStatus
 from videobox_domain_models.library_assets import (
     LibraryAssetLifecycle,
     LibraryAssetOrigin,
+    LibraryAssetRights,
     LibraryAssetState,
     LibraryAssetStatus,
     LibraryAssetType,
@@ -43,6 +44,7 @@ __all__ = [
     "MediaAnalysisStatus",
     "LibraryAssetLifecycle",
     "LibraryAssetOrigin",
+    "LibraryAssetRights",
     "LibraryAssetState",
     "LibraryAssetStatus",
     "LibraryAssetType",

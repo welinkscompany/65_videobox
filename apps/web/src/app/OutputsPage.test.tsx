@@ -878,6 +878,27 @@ describe("OutputsPage", () => {
     expect(screen.queryByRole("button", { name: "업로드 승인 요청" })).toBeNull();
   });
 
+  it("says which step is missing when an asset's rights are still unknown", async () => {
+    // AK W1215-4: 누가 만들었는지 모르는 자료가 쓰였으면 서버가 409로 막는다. 막혔다는 것만이
+    // 아니라 어디서 풀면 되는지를 말해야 한다.
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-rights", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final.mp4",
+        status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true,
+      },
+    });
+    vi.spyOn(api, "requestUploadApproval").mockRejectedValue(
+      new ApiRequestError(null, 409, "/request-upload-approval", "asset_rights_unconfirmed"),
+    );
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    fireEvent.change(await screen.findByLabelText("언제 무엇을 올릴지 한 줄로"), { target: { value: "다음 주에 올릴 예정입니다." } });
+    fireEvent.click(screen.getByRole("button", { name: "업로드 승인 요청" }));
+
+    expect(await screen.findByText("누가 만들었는지 아직 적지 않은 자료가 쓰였어요. 자료실 미리보기에서 출처를 적으면 올릴 수 있어요.")).toBeVisible();
+  });
+
   it("tells the owner plainly when the approval queue is not turned on yet", async () => {
     stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
     vi.spyOn(api, "getFinalRender").mockResolvedValue({

@@ -17,8 +17,10 @@ from uuid import uuid4
 from videobox_domain_models.library_assets import (
     LibraryAssetLifecycle,
     LibraryAssetOrigin,
+    LibraryAssetRights,
     LibraryMediaType,
     LibraryUserAsset,
+    resolve_library_asset_rights,
 )
 
 
@@ -38,7 +40,9 @@ CREATE TABLE IF NOT EXISTS library_user_assets (
     provenance_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    trashed_at TEXT
+    trashed_at TEXT,
+    rights_source TEXT NOT NULL DEFAULT 'unknown' CHECK (rights_source IN ('unknown', 'own_footage', 'ai_generated', 'third_party_licensed')),
+    rights_license_note TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_library_user_assets_type_lifecycle
     ON library_user_assets (media_type, lifecycle, updated_at);
@@ -105,7 +109,25 @@ def ensure_library_user_asset_schema(connection: sqlite3.Connection) -> None:
         connection.execute("ALTER TABLE library_ingest_items ADD COLUMN content_sha256 TEXT")
     if "media_type" not in columns:
         connection.execute("ALTER TABLE library_ingest_items ADD COLUMN media_type TEXT")
+    _add_rights_columns(connection)
     _widen_media_type_check(connection)
+
+
+def _add_rights_columns(connection: sqlite3.Connection) -> None:
+    """권리 칸을 더한다 (AK W1215-4, 2026-09-28).
+
+    있던 기록은 **`unknown`으로만** 채운다 -- 누가 찍었는지 모르는데 값을
+    지어내지 않는다. `ADD COLUMN`은 표를 다시 만들지 않으므로 촬영본 트리거를
+    건드리지 않는다.
+    """
+    columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(library_user_assets)")}
+    if "rights_source" not in columns:
+        connection.execute(
+            "ALTER TABLE library_user_assets ADD COLUMN rights_source TEXT NOT NULL DEFAULT 'unknown'"
+            " CHECK (rights_source IN ('unknown', 'own_footage', 'ai_generated', 'third_party_licensed'))"
+        )
+    if "rights_license_note" not in columns:
+        connection.execute("ALTER TABLE library_user_assets ADD COLUMN rights_license_note TEXT")
 
 
 def _widen_media_type_check(connection: sqlite3.Connection) -> None:
@@ -133,10 +155,14 @@ def _widen_media_type_check(connection: sqlite3.Connection) -> None:
         "library_asset_id", "media_type", "origin", "lifecycle", "content_sha256",
         "managed_relative_path", "byte_count", "mime_type", "technical_json",
         "machine_json", "user_json", "provenance_json", "created_at", "updated_at",
-        "trashed_at",
+        "trashed_at", "rights_source", "rights_license_note",
     ]
     existing = {str(row[1]) for row in connection.execute("PRAGMA table_info(library_user_assets)")}
-    selected = ", ".join(name if name in existing else "NULL" for name in target_columns)
+    # 권리 칸이 없던 라이브러리라면 모른다(`unknown`)로 옮긴다 -- NULL은 NOT NULL에 걸린다.
+    missing_default = {"rights_source": "'unknown'"}
+    selected = ", ".join(
+        name if name in existing else missing_default.get(name, "NULL") for name in target_columns
+    )
     # Derivatives cascade and project references restrict on this table.  With
     # the guard left on, dropping the old parent would take the owner's
     # thumbnails with it or refuse outright, so it is off for the swap only.
@@ -224,8 +250,9 @@ class LibraryUserAssetStore:
                 INSERT INTO library_user_assets (
                     library_asset_id, media_type, origin, lifecycle, content_sha256,
                     managed_relative_path, byte_count, mime_type, technical_json,
-                    machine_json, user_json, provenance_json, created_at, updated_at, trashed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    machine_json, user_json, provenance_json, created_at, updated_at, trashed_at,
+                    rights_source, rights_license_note
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     asset.library_asset_id, asset.media_type.value, asset.origin.value,
@@ -234,6 +261,7 @@ class LibraryUserAssetStore:
                     _json(asset.machine_metadata), _json(asset.user_metadata), _json(asset.provenance),
                     asset.created_at.isoformat(), asset.updated_at.isoformat(),
                     asset.trashed_at.isoformat() if asset.trashed_at else None,
+                    asset.rights_source.value, asset.rights_license_note,
                 ),
             )
             connection.commit()
@@ -308,6 +336,32 @@ class LibraryUserAssetStore:
                 raise ValueError("builtin assets cannot be trashed")
             trashed_at = _now() if target is LibraryAssetLifecycle.TRASHED else None
             connection.execute("UPDATE library_user_assets SET lifecycle = ?, trashed_at = ?, updated_at = ? WHERE library_asset_id = ?", (target.value, trashed_at, _now(), library_asset_id))
+            updated = connection.execute("SELECT * FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+            connection.commit()
+            assert updated is not None
+            return LibraryUserAsset.from_row(dict(updated))
+        except Exception:
+            connection.rollback(); raise
+        finally:
+            connection.close()
+
+    def update_rights(
+        self, library_asset_id: str, *, rights_source: LibraryAssetRights | str, license_note: str | None = None
+    ) -> LibraryUserAsset:
+        """누가 만들었고 써도 되는가를 적는다 (AK W1215-4). owner만 안다 -- 추측해 채우지 않는다."""
+        resolved, note = resolve_library_asset_rights(rights_source, license_note)
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT origin FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+            if row is None:
+                raise KeyError(library_asset_id)
+            if str(row["origin"]) == LibraryAssetOrigin.BUILTIN.value:
+                raise ValueError("builtin_asset_immutable")
+            connection.execute(
+                "UPDATE library_user_assets SET rights_source = ?, rights_license_note = ?, updated_at = ? WHERE library_asset_id = ?",
+                (resolved.value, note, _now(), library_asset_id),
+            )
             updated = connection.execute("SELECT * FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
             connection.commit()
             assert updated is not None

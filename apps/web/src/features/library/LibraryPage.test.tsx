@@ -580,4 +580,47 @@ describe("자료실의 `음악·효과음` 갈래", () => {
     expect(within(preview).queryByRole("button", { name: /그림으로 옮기기/ })).toBeNull();
     expect(within(preview).getByRole("button", { name: /효과음으로 옮기기/ })).toBeInTheDocument();
   });
+  /**
+   * AK W1215-4 (2026-09-28): 대표님 자산에 "누가 만들었고 써도 되는가" 칸이 없었다.
+   * 기본은 모름이고, 모르는 자산을 쓴 완성본은 업로드 승인 요청에서 막힌다 --
+   * 그러니 푸는 길이 화면에 있어야 한다.
+   */
+  it("대표님 자산의 출처를 화면에서 적는다", async () => {
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({
+      assets: [asset({ library_asset_id: "r1", rights_source: "unknown", cleared_for_monetized_use: false })],
+      total: 1,
+    });
+    vi.spyOn(api, "getLibraryAssetUsage").mockResolvedValue({ library_asset_id: "r1", locations: [] });
+    const update = vi.spyOn(api, "updateLibraryAssetRights").mockResolvedValue({
+      asset: asset({ library_asset_id: "r1", rights_source: "own_footage", cleared_for_monetized_use: true }),
+    });
+    render(<LibraryPage initialFilter="video" />);
+
+    fireEvent.click(await screen.findByText("walk.mp4"));
+    const preview = screen.getByTestId("library-preview");
+    expect(within(preview).getByText("아직 몰라요 · 수익 채널에 못 올려요")).toBeInTheDocument();
+    fireEvent.change(within(preview).getByLabelText("출처"), { target: { value: "own_footage" } });
+    fireEvent.click(within(preview).getByRole("button", { name: "출처 저장" }));
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith("r1", "own_footage", null));
+  });
+
+  it("남의 자료는 사용 허락을 적어야 저장된다", async () => {
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({
+      assets: [asset({ library_asset_id: "r2", rights_source: "unknown", cleared_for_monetized_use: false })],
+      total: 1,
+    });
+    vi.spyOn(api, "getLibraryAssetUsage").mockResolvedValue({ library_asset_id: "r2", locations: [] });
+    const update = vi.spyOn(api, "updateLibraryAssetRights").mockResolvedValue({ asset: asset({ library_asset_id: "r2" }) });
+    render(<LibraryPage initialFilter="video" />);
+
+    fireEvent.click(await screen.findByText("walk.mp4"));
+    const preview = screen.getByTestId("library-preview");
+    fireEvent.change(within(preview).getByLabelText("출처"), { target: { value: "third_party_licensed" } });
+    expect(within(preview).getByRole("button", { name: "출처 저장" })).toBeDisabled();
+    fireEvent.change(within(preview).getByLabelText("사용 허락 내용"), { target: { value: "Pexels 라이선스" } });
+    fireEvent.click(within(preview).getByRole("button", { name: "출처 저장" }));
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith("r2", "third_party_licensed", "Pexels 라이선스"));
+  });
 });

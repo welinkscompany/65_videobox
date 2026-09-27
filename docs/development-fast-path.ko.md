@@ -162,6 +162,7 @@ review-action family의 maintenance나 rollback hardening만 다시 볼 때는 �
 2. `final render` 모드는 승인된 현재 타임라인만 FFmpeg MP4로 만든다. project-local SHA/revision 및 권리 경고 provenance를 다시 확인하고, user-owned unknown 권리는 로컬 출력은 허용하되 MP4 metadata에 저작권 확인 경고를 기록한다.
 3. `CapCut draft` 모드는 같은 현재 타임라인을 real draft JSON으로 만든다. 동일 SHA/revision 검증과 `videobox_output_metadata` 권리 경고를 기록하며, CapCut Desktop을 자동 실행하지 않는다.
 4. 자동 acceptance는 API contract, SHA/freshness, preview, FFmpeg, draft JSON, Korean SRT, warning metadata까지다. Desktop CapCut open/edit/export 사용성, publish 전 실제 권리 확인, 사람의 영상·음향 품질 판단은 human acceptance로 남긴다.
+5. **대표님 자료실 자산의 권리 칸(AK W1215-4, 2026-09-28).** `library_user_assets.rights_source` = `unknown`(기본·기존 기록 전부) / `own_footage` / `ai_generated` / `third_party_licensed`(허락 내용 필수). 로컬 출력(미리보기·완성본·CapCut)은 위 2·3항 그대로 허용한다. **수익 채널로 가는 문인 업로드 승인 요청만** 프로젝트가 쓴(`library_project_references`) 자산 중 `unknown`이 하나라도 있으면 409 `asset_rights_unconfirmed`로 막는다. 푸는 곳은 자료실 미리보기의 `출처` 칸이다. 이관은 값을 지어내지 않는다 — 누가 찍었는지는 owner만 안다.
 
 ### 10.1 작업 목표와 우선순위
 
