@@ -395,8 +395,18 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
             result = orchestrator.get_final_render_result(project_id=project_id, job_id=job_id)
             if not result.get("render"):
                 raise KeyError(f"Final render has no artifact yet: {job_id}")
+            decided = orchestrator.store.get_founder_gate_decision(
+                project_id=project_id, kind="upload", cycle_id=job_id
+            )
         except Exception as exc:
             raise _http_error(exc) from exc
+        if decided is not None:
+            # AK W1215-2: 대표님 결정이 이미 돌아왔다. 다시 올리면 AK가 같은 결정
+            # 번호를 거절해 502가 될 뿐이라, 무엇이 이미 정해졌는지를 말한다.
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"reason": "upload_already_decided", "status": decided["status"]},
+            )
         client = getattr(request.app.state, "agent_gateway_client", None)
         if client is None:
             return UploadApprovalResponse(queued=False)

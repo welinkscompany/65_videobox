@@ -2180,6 +2180,25 @@ class UploadApprovalResponse(BaseModel):
     queued: bool
 
 
+class FounderApprovalDecisionRequest(BaseModel):
+    """AK 결재함에서 돌아온 대표님 결정 하나 (AK W1215-2).
+
+    필드 이름은 AK 레지스트리(`videobox-*-approval-registry.json`)를 따른다.
+    `selected_text`는 제목이면 `selected_title`, 대본이면 `selected_script`다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision_id: str = Field(min_length=1, max_length=512)
+    kind: Literal["title", "script", "upload"]
+    cycle_id: str = Field(min_length=1, max_length=256)
+    status: str = Field(min_length=1, max_length=64)
+    selected_index: int | None = Field(default=None, ge=1)
+    selected_text: str | None = Field(default=None, max_length=1_000_000)
+    decided_at: str | None = Field(default=None, max_length=64)
+    decided_via: str | None = Field(default=None, max_length=64)
+
+
 class FinalRenderJobResponse(StartJobResponse):
     render: FinalRenderArtifactResponse | None = None
     error_message: str | None = None

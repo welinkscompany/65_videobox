@@ -711,4 +711,28 @@ PROJECT_SCHEMA_STATEMENTS = (
     CREATE INDEX IF NOT EXISTS idx_hermes_capability_audit_run_time
     ON hermes_capability_audit (project_id, run_id, occurred_at)
     """,
+    """
+    -- AK W1215-2 (2026-09-28): 대표님이 AK 결재함에서 내린 결과(제목 선택·대본
+    -- 확정·업로드 승인)를 VideoBox가 되읽어 한 번만 반영한 기록. 결정 번호는 AK가
+    -- 만든 것(vb-<kind>-<project>-<cycle>)을 그대로 쓴다 -- 같은 결정이 다시
+    -- 와도 이 키 하나로 두 번 반영되지 않는다.
+    CREATE TABLE IF NOT EXISTS founder_approval_decisions (
+        project_id TEXT NOT NULL,
+        decision_id TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('title', 'script', 'upload')),
+        cycle_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        outcome TEXT NOT NULL CHECK (outcome IN ('approved', 'rejected')),
+        selected_index INTEGER,
+        selected_text TEXT,
+        decided_at TEXT,
+        decided_via TEXT,
+        applied_at TEXT NOT NULL,
+        PRIMARY KEY (project_id, decision_id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_founder_approval_decisions_gate
+    ON founder_approval_decisions (project_id, kind, cycle_id)
+    """,
 )

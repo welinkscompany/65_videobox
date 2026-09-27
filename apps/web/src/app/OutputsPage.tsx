@@ -7,6 +7,7 @@ import {
   type EditingSession,
   type EditorPlaybackManifest,
   type FinalRenderJob,
+  type FounderApprovalDecision,
   type JobRecord,
   type OutputVariant,
   type ReviewApproval,
@@ -392,6 +393,8 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   const [uploadApprovalProjectId, setUploadApprovalProjectId] = useState<string | null>(null);
   const [uploadApprovalQueued, setUploadApprovalQueued] = useState<boolean | null>(null);
   const [uploadApprovalErrorProjectId, setUploadApprovalErrorProjectId] = useState<string | null>(null);
+  // AK W1215-2: 결재함에서 돌아온 대표님 결정. 어느 프로젝트 것인지 같이 기억한다.
+  const [founderDecisions, setFounderDecisions] = useState<{ projectId: string; decisions: FounderApprovalDecision[] } | null>(null);
   const [isExportingCapcutDraft, setIsExportingCapcutDraft] = useState(false);
   const [capcutErrorProjectId, setCapcutErrorProjectId] = useState<string | null>(null);
   const [capcutRejectedReason, setCapcutRejectedReason] = useState<string | null>(null);
@@ -696,6 +699,21 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   }, [projectId, currentState]);
   // 만드는 중인 완성본이 있는가. 아래 이른 반환(로딩·오류)보다 앞에 둔다 --
   // 후크는 조건 없이 매번 불러야 한다(위 주석과 같은 규칙).
+  const finalRenderJobId = currentState?.finalRender?.job_id ?? null;
+  useEffect(() => {
+    if (!finalRenderJobId) return;
+    const loadProjectId = projectId;
+    // 못 읽으면 결정이 없는 것처럼 보이게 두지 않는다 -- 그냥 아무 결정도 표시하지 않고
+    // 승인 요청 버튼을 그대로 둔다. 다시 누르면 서버가 이미 결정됐는지 409로 말한다.
+    api.listFounderApprovalDecisions(loadProjectId)
+      .then((result) => {
+        if (currentProjectId.current === loadProjectId) setFounderDecisions({ projectId: loadProjectId, decisions: result.decisions });
+      })
+      .catch(() => undefined);
+  }, [projectId, finalRenderJobId]);
+  const founderUploadDecision = founderDecisions?.projectId === projectId
+    ? founderDecisions.decisions.find((item) => item.kind === "upload" && item.cycle_id === finalRenderJobId) ?? null
+    : null;
   const hasPendingFinal = currentState?.finalJobs.some((job) => job.status === "pending" || job.status === "running") === true;
   // 완성본을 만드는 동안 화면이 스스로 상태를 다시 읽는다. **본보기**:
   // `EditorWorkbenchRoute.tsx:698-711`의 정확한 미리보기 재확인과 같은 모양이다 --
@@ -1479,7 +1497,12 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
             <Button disabled={isSavingVerdict} onClick={() => void handleVerdict("good")}>이 완성본 좋아요</Button>
             <Button disabled={isSavingVerdict} onClick={() => void handleVerdict("bad")}>이 완성본 아쉬워요</Button>
           </div> : null}
-          {currentFinal ? <div className="vb-upload-approval">
+          {currentFinal && founderUploadDecision ? <div className="vb-upload-approval">
+            <p>{founderUploadDecision.outcome === "approved"
+              ? "대표님이 이 완성본 업로드를 승인하셨어요."
+              : "대표님이 이 완성본 업로드를 반려하셨어요."}</p>
+          </div> : null}
+          {currentFinal && !founderUploadDecision ? <div className="vb-upload-approval">
             {uploadApprovalProjectId === projectId && uploadApprovalQueued === true
               ? <p>대표님 결재함에 올렸어요. 승인하시면 업로드를 진행할 수 있어요.</p>
               : uploadApprovalProjectId === projectId && uploadApprovalQueued === false

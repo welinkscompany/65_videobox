@@ -189,3 +189,43 @@ def test_upload_approval_refuses_a_render_that_does_not_exist_yet(tmp_path: Path
     )
 
     assert response.status_code >= 400
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+@pytest.mark.parametrize("founder_status", ["upload_approved", "upload_rejected"])
+def test_a_render_the_founder_already_decided_is_not_sent_for_approval_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, founder_status: str
+) -> None:
+    """AK W1215-2: once the founder's upload decision has come back, asking again
+    would only hit AK's duplicate-decision guard as a 502. Say what happened."""
+    app, client, project_id, render_job_id = _build_real_completed_render(tmp_path, monkeypatch)
+    calls: list[dict[str, object]] = []
+
+    class _FakeApprovalClient:
+        async def submit_upload_request(self, **kwargs: object) -> dict[str, object]:
+            calls.append(kwargs)
+            return {"queued": True}
+
+    app.state.agent_gateway_client = _FakeApprovalClient()
+    recorded = client.post(
+        f"/api/projects/{project_id}/founder-approval-decisions",
+        json={
+            "decision_id": f"vb-upload-{project_id}-{render_job_id}",
+            "kind": "upload",
+            "cycle_id": render_job_id,
+            "status": founder_status,
+            "decided_at": "2026-09-28T09:00:00+09:00",
+            "decided_via": "telegram",
+        },
+    )
+    assert recorded.status_code == 200, recorded.text
+
+    response = client.post(
+        f"/api/projects/{project_id}/final-renders/{render_job_id}/request-upload-approval",
+        json={"upload_scheduled_summary_ko": "다시 올려도 될까요?"},
+    )
+
+    assert response.status_code == 409
+    assert "upload_already_decided" in response.text
+    assert founder_status in response.text
+    assert calls == []

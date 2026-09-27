@@ -1216,6 +1216,21 @@ export type FinalRenderArtifact = {
   owner_verdict_at?: string | null;
 };
 
+/** 대표님이 AK 결재함에서 내린 결정 하나(AK W1215-2). 호스트 동기화가 되읽어 반영한 것이다. */
+export type FounderApprovalDecision = {
+  project_id: string;
+  decision_id: string;
+  kind: "title" | "script" | "upload";
+  cycle_id: string;
+  status: string;
+  outcome: "approved" | "rejected";
+  selected_index: number | null;
+  selected_text: string | null;
+  decided_at: string | null;
+  decided_via: string | null;
+  applied_at: string;
+};
+
 export type FinalRenderJob = {
   job_id: string;
   status: string;
@@ -3106,6 +3121,9 @@ export const api = {
     request<{ queued: boolean }>(`/api/projects/${projectId}/final-renders/${jobId}/request-upload-approval`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
     }),
+  // AK W1215-2: 결재함에서 돌아온 대표님 결정 목록. 읽기만 한다.
+  listFounderApprovalDecisions: (projectId: string) =>
+    request<{ decisions: FounderApprovalDecision[] }>(`/api/projects/${projectId}/founder-approval-decisions`),
   startCapcutDraftExport: (projectId: string, payload: OutputJobRequest) =>
     request<{ job_id: string; status: string }>(
       `/api/projects/${projectId}/jobs/capcut-draft-export`,

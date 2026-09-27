@@ -442,6 +442,18 @@ Codex 시절 세션 단절을 메우던 장치이며, 현재 개발 환경에서
      (`docs/ak-system/data/videobox-mcp-connector-config.json`, 그 저장소).
    - 이 승인은 **이 결재함 큐 경로에만** 적용된다. 다른 host bridge의 근거가
      아니다(조항 4 유지).
+   - **돌아오는 길(2026-09-28, AK W1215-2).** 대표님 결정은 AK 레지스트리
+     파일(`videobox-*-approval-registry.json`)의 `status`에 남는다. 호스트에서
+     도는 `videobox_mcp.ak_decision_sync`(`scripts/sync-ak-founder-decisions.ps1`)가
+     그 파일을 **읽기만** 하고, 결정이 난 항목을 VideoBox API
+     `POST /api/projects/{id}/founder-approval-decisions`로 보낸다. API는 AK 결정
+     번호로 **한 번만** 반영한다(같은 번호에 다른 결과면 409). 효과: 대본 반려면
+     그 기획서로 초안을 더 만들지 않고, 업로드가 결정된 완성본은 다시 승인을
+     요청하지 않으며(409 `upload_already_decided`) 결과 화면에 승인/반려가 보인다.
+     **업로드 승인이 와도 유튜브에 올리지 않는다** — 업로드 실행기는 없다.
+     상시 실행(예약 작업)은 아직 없다 — owner 결정 사항이다. 새 네트워크 경로는
+     없다: 컨테이너는 AK 폴더를 보지 않고, 호스트 동기화가 이미 열린
+     `127.0.0.1:5173`으로 들어온다.
 
 3. OAuth device code, account identity, credential contents, auth state와 memory contents는 source, `.env`, status document, verifier 출력에 기록하지 않는다. 검증은 mount/network/image/user/dependency 같은 경계 정보만 출력한다.
 4. 이 local-MVP 경계는 VideoBox asset/file mutation, Telegram intake, egress gateway, host bridge, CapCut bridge의 활성화 근거가 아니다. 각각은 별도 구현·검증으로 닫는다.

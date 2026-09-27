@@ -57,6 +57,7 @@ from videobox_storage._store_yujin_memory import (
 )
 from videobox_storage._store_output_variants import OutputVariantMixin
 from videobox_storage._store_preview_shares import PreviewShareMixin
+from videobox_storage._store_founder_approvals import FounderApprovalMixin
 
 _LOGGER = logging.getLogger(__name__)
 from videobox_core_engine.creation_interview import (
@@ -508,7 +509,7 @@ def _timeline_summary_json(payload: dict[str, Any]) -> str:
 _PROJECT_ID_SHAPE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
-class LocalProjectStore(OutputVariantMixin, PreviewShareMixin, YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMixin):
+class LocalProjectStore(OutputVariantMixin, PreviewShareMixin, YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMixin, FounderApprovalMixin):
     def __init__(
         self,
         projects_root: Path,
@@ -1992,9 +1993,17 @@ class LocalProjectStore(OutputVariantMixin, PreviewShareMixin, YujinMemoryMixin,
         return {"script_segments": segments, "caption_texts": [item["text"] for item in segments], "narration": narration,
                 "broll_candidates": broll, "bgm": choice(AssetType.BGM, "배경음"), "sfx": choice(AssetType.SFX, "효과음"), "gap_slots": gaps, "source_snapshot": snapshots}
 
+    def _raise_if_founder_rejected_script(self, *, project_id: str, brief_id: str) -> None:
+        # AK W1215-2: 대표님이 결재함에서 이 기획서의 대본을 반려했으면 여기서 멈춘다.
+        # 확정·미결정은 그대로 진행한다 -- VideoBox 안의 승인 클릭이 이미 사람 게이트다.
+        decision = self.get_founder_gate_decision(project_id=project_id, kind="script", cycle_id=brief_id)
+        if decision is not None and decision["outcome"] == "rejected":
+            raise ValueError("founder_rejected_script")
+
     def start_draft_readiness(self, *, project_id: str, brief_id: str, narration_choice: dict[str, Any], idempotency_key: str, expected_brief_revision: int, capability: dict[str, Any] | None = None, defer: bool = True) -> dict[str, Any]:
         brief = self.get_creation_brief(project_id=project_id, brief_id=brief_id)
         if brief["status"] != "approved": raise ValueError("draft_readiness_brief_not_approved")
+        self._raise_if_founder_rejected_script(project_id=project_id, brief_id=brief_id)
         if brief["revision"] != expected_brief_revision: raise ValueError("draft_readiness_brief_revision_conflict")
         kind = str(narration_choice.get("kind") or "")
         if kind not in {"silent", "existing", "source_video"}: raise ValueError("draft_readiness_narration_invalid")
@@ -2094,6 +2103,7 @@ class LocalProjectStore(OutputVariantMixin, PreviewShareMixin, YujinMemoryMixin,
         brief = self.get_creation_brief(project_id=project_id, brief_id=brief_id)
         readiness = self.get_draft_readiness(project_id=project_id, readiness_id=readiness_id)
         if brief["status"] != "approved": raise ValueError("atomic_draft_bundle_brief_not_approved")
+        self._raise_if_founder_rejected_script(project_id=project_id, brief_id=brief_id)
         if int(brief["revision"]) != int(expected_brief_revision): raise ValueError("atomic_draft_bundle_brief_revision_conflict")
         if readiness["brief_id"] != brief_id: raise ValueError("atomic_draft_bundle_brief_mismatch")
         if int(readiness["revision"]) != int(expected_readiness_revision): raise ValueError("atomic_draft_bundle_readiness_revision_conflict")

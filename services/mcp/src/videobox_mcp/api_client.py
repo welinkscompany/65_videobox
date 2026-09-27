@@ -77,6 +77,14 @@ class VideoBoxApiClient:
     async def get_home_summary(self, *, project_id: str) -> dict[str, Any]:
         return await self._request("GET", f"/api/projects/{project_id}/home-summary")
 
+    async def apply_founder_approval_decision(
+        self, *, project_id: str, decision: dict[str, Any]
+    ) -> dict[str, Any]:
+        """AK 결재함에서 돌아온 결정 하나를 반영한다(AK W1215-2). 같은 결정은 한 번만 반영된다."""
+        return await self._request(
+            "POST", f"/api/projects/{project_id}/founder-approval-decisions", json=decision
+        )
+
     async def get_job(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         return await self._request("GET", f"/api/projects/{project_id}/jobs/{job_id}")
 

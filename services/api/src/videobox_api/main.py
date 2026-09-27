@@ -36,6 +36,7 @@ from videobox_api.response_normalizers import (
 )
 from videobox_api.routers.assets import build_assets_router
 from videobox_api.routers.creation_briefs import build_creation_briefs_router
+from videobox_api.routers.founder_approvals import build_founder_approvals_router
 from videobox_api.routers.draft_readiness import build_draft_readiness_router
 from videobox_api.routers.atomic_draft_bundles import build_atomic_draft_bundles_router
 from videobox_api.routers.editing_session import build_editing_session_router
@@ -1499,6 +1500,7 @@ def create_app(
             )
         )
     app.include_router(build_creation_briefs_router(orchestrator))
+    app.include_router(build_founder_approvals_router(store))
     app.include_router(build_draft_readiness_router(orchestrator, ingest_service=app.state.library_ingest_service))
     app.include_router(build_atomic_draft_bundles_router(orchestrator))
     app.include_router(

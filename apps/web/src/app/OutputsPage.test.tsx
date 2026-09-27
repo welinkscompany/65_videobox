@@ -106,6 +106,7 @@ function stubCanonicalSubtitleApi({
 } = {}) {
   vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(editingSession as never);
   vi.spyOn(api, "listJobs").mockResolvedValue(jobs as never);
+  vi.spyOn(api, "listFounderApprovalDecisions").mockResolvedValue({ decisions: [] });
   vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue(playbackManifest({
     exactPreview: {
       status: "unavailable",
@@ -849,6 +850,32 @@ describe("OutputsPage", () => {
       }),
     );
     expect(await screen.findByText("대표님 결재함에 올렸어요. 승인하시면 업로드를 진행할 수 있어요.")).toBeVisible();
+  });
+
+  it.each([
+    ["upload_approved", "approved", "대표님이 이 완성본 업로드를 승인하셨어요."],
+    ["upload_rejected", "rejected", "대표님이 이 완성본 업로드를 반려하셨어요."],
+  ])("shows the founder's %s decision that came back from the approval inbox", async (status, outcome, message) => {
+    // AK W1215-2: 결재함 결과가 VideoBox로 돌아온다. 결정이 났으면 다시 묻는 버튼 대신 그 결과를 보여 준다.
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-decided", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final.mp4",
+        status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true,
+      },
+    });
+    vi.spyOn(api, "listFounderApprovalDecisions").mockResolvedValue({
+      decisions: [{
+        project_id: "project_a", decision_id: `vb-upload-project_a-${currentFinalJob.job_id}`, kind: "upload",
+        cycle_id: currentFinalJob.job_id, status, outcome, selected_index: null, selected_text: null,
+        decided_at: "2026-09-28T09:00:00+09:00", decided_via: "telegram", applied_at: "2026-09-28T09:01:00+09:00",
+      }],
+    } as never);
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    expect(await screen.findByText(message)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "업로드 승인 요청" })).toBeNull();
   });
 
   it("tells the owner plainly when the approval queue is not turned on yet", async () => {
