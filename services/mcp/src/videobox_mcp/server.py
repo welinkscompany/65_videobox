@@ -15,6 +15,7 @@ import functools
 import os
 from typing import Any
 
+import httpx
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
@@ -35,6 +36,13 @@ def _translate_errors(fn):
             return await fn(*args, **kwargs)
         except VideoBoxApiError as exc:
             raise ToolError(f"videobox_api_error status={exc.status_code} detail={exc.detail!r}") from exc
+        except httpx.HTTPError as exc:
+            # HTTP 응답 자체가 없는 네트워크 수준 실패(타임아웃·연결 끊김 등)다
+            # -- `VideoBoxApiError`는 응답이 왔을 때만 던져진다. 실물 점검
+            # (Task 7, 백엔드가 안 뜬 상태)에서 이 exception이 그대로 새어
+            # 나가 MCP 프레임워크가 처리 못 한 파이썬 예외로 떨어졌다 --
+            # "이유 있는 오류"(§7) 원칙과 정반대다.
+            raise ToolError(f"videobox_api_network_error {exc!r}") from exc
 
     return wrapped
 

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
+
 from .api_client import VideoBoxApiClient, VideoBoxApiError
 from .escalation_log import log_ask_yujin_escalation
 
@@ -70,12 +72,19 @@ async def ask_yujin(client: VideoBoxApiClient, *, project_id: str, message: str)
     정확히 1회만 재시도하고, 그래도 실패하면 성공한 척하지 않고 그대로
     올려보낸다(§7) -- 대표님이 확인한 정책: "재시도 1번 -> 사람에게
     에스컬레이션, 절대 우회하지 않기".
+
+    재시도 대상은 `VideoBoxApiError`(응답은 왔지만 4xx/5xx)만이 아니다.
+    `httpx.HTTPError`(타임아웃·연결 끊김처럼 응답 자체가 없는 네트워크
+    실패)도 같이 잡는다 -- 실물 점검(Task 7, 백엔드가 안 뜬 상태)에서
+    `httpx.ReadTimeout`이 재시도·로그를 그대로 건너뛰고 새어 나간 적이
+    있다. 유진(LLM) 백엔드가 느리거나 안 떠 있는 상황은 흔하고, 이
+    경로야말로 재시도·에스컬레이션 설계가 지켜야 할 자리다.
     """
-    last_error: VideoBoxApiError | None = None
+    last_error: Exception | None = None
     for _ in range(2):
         try:
             return await _ask_yujin_once(client, project_id=project_id, message=message)
-        except VideoBoxApiError as exc:
+        except (VideoBoxApiError, httpx.HTTPError) as exc:
             last_error = exc
     assert last_error is not None
     log_ask_yujin_escalation(

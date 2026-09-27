@@ -266,6 +266,80 @@ def test_ask_yujin_retries_once_then_logs_and_raises(
     assert logged[0]["project_id"] == "does-not-matter"
 
 
+def test_ask_yujin_retries_once_on_network_failure_then_logs_and_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`httpx.ReadTimeout`처럼 응답 자체가 없는 네트워크 실패도
+    `VideoBoxApiError`와 똑같이 재시도·로그·올려보내기 대상이어야 한다 --
+    실물 점검(Task 7, 백엔드가 안 뜬 상태)에서 이 경로가 재시도·로그를
+    건너뛰고 조용히 새어 나간 적이 있다(§7 위반)."""
+    from videobox_mcp import tools
+
+    client = _client_and_app_for(tmp_path)
+
+    call_count = {"n": 0}
+
+    async def always_times_out(self: VideoBoxApiClient, *, project_id: str) -> dict[str, Any]:
+        call_count["n"] += 1
+        raise httpx.ReadTimeout("simulated timeout")
+
+    monkeypatch.setattr(VideoBoxApiClient, "get_latest_editing_session", always_times_out)
+
+    logged: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        tools,
+        "log_ask_yujin_escalation",
+        lambda **kwargs: logged.append(kwargs),
+    )
+
+    import asyncio
+
+    async def run() -> None:
+        await tools.ask_yujin(client, project_id="does-not-matter", message="아무 말")
+
+    with pytest.raises(httpx.HTTPError):
+        asyncio.run(run())
+
+    assert call_count["n"] == 2  # 최초 시도 + 1회 재시도, 그 이상은 없다 -- VideoBoxApiError와 같은 정책
+    assert len(logged) == 1
+    assert logged[0]["retry_count"] == 1
+    assert logged[0]["project_id"] == "does-not-matter"
+
+
+def test_ask_yujin_network_failure_becomes_a_tool_error_not_a_raw_exception(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`server.py`의 `_translate_errors`가 `httpx.HTTPError`도 잡아야 한다 --
+    안 잡으면 외부 MCP 호출자(AK-Hermes)에게 원문 파이썬 예외가 그대로
+    새어 나간다. "이유 있는 오류"(§7)는 `ToolError`로 번역된 오류를
+    말하지, 처리 안 된 예외를 말하지 않는다."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    client = _client_for(tmp_path)
+    server = build_server(client)
+
+    async def always_times_out(self: VideoBoxApiClient, *, project_id: str) -> dict[str, Any]:
+        raise httpx.ReadTimeout("simulated timeout")
+
+    monkeypatch.setattr(VideoBoxApiClient, "get_latest_editing_session", always_times_out)
+
+    import asyncio
+
+    async def run() -> None:
+        await server.call_tool(
+            "ask_yujin", {"project_id": "does-not-matter", "message": "아무 말"}
+        )
+
+    with pytest.raises(ToolError) as excinfo:
+        asyncio.run(run())
+    # 통짜 `UnexpectedToolError`(MCP 프레임워크가 처리 못 한 예외에 붙이는
+    # 이름)가 아니라 `_translate_errors`가 실제로 httpx 예외를 알아보고
+    # 지은 이유 있는 메시지인지까지 본다 -- 그래야 "그냥 프레임워크가
+    # 아무 예외나 감쌌다"와 "우리 코드가 네트워크 실패를 알아챘다"가
+    # 구별된다.
+    assert "videobox_api_network_error" in str(excinfo.value)
+
+
 def test_ask_yujin_is_registered_as_a_tool(tmp_path: Path) -> None:
     client = _client_for(tmp_path)
     server = build_server(client)
