@@ -491,6 +491,20 @@ class TTSEngineConfig:
             if not self.elevenlabs_voice_id.strip():
                 raise ValueError("tts_engine_config.elevenlabs_voice_id is required for the elevenlabs engine.")
 
+    @property
+    def commercial_use_is_unrestricted(self) -> bool | None:
+        """상업 이용이 열려 있는가. **모르면 `None`** -- 그림 모델과 같은 모양이다.
+
+        `local_xtts`는 Coqui CPML **비상업용**이라 수익 채널에 쓰면 안 된다(AK W1215-1,
+        owner 결정 2026-09-28: 목소리 복제 기본은 chatterbox). `host_bridge`는 호스트
+        다리가 어느 엔진으로 떴는지에 달렸고, 그건 다리의 `/health`가 말한다.
+        """
+        if self.engine == "chatterbox":
+            return True
+        if self.engine == "local_xtts":
+            return False
+        return None
+
 
 @dataclass(slots=True, frozen=True)
 class AutoCutConfig:

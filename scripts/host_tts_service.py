@@ -13,8 +13,10 @@ owner가 2026-09-02에 승인했다.
 worktree의 `.venv`가 아니다(거기엔 torch가 없다).
 
 ```
-COQUI_TOS_AGREED=1 <저장소루트>/.venv/Scripts/python.exe scripts/host_tts_service.py
+<저장소루트>/.venv-chatterbox/Scripts/python.exe scripts/host_tts_service.py
 ```
+
+보통은 `scripts/start-voice.ps1`(VideoBox를 켜면 `owner-ready.ps1`이 창 없이 부른다)로 띄운다.
 
 ## 밖으로 안 나간다
 
@@ -24,12 +26,17 @@ COQUI_TOS_AGREED=1 <저장소루트>/.venv/Scripts/python.exe scripts/host_tts_s
 ## 엔진은 갈아 끼울 수 있다
 
 `VIDEOBOX_HOST_TTS_ENGINE`으로 고른다. **라이선스가 다르므로**(XTTS는 비상업용,
-chatterbox는 MIT) 무엇으로 돌고 있는지 시작할 때 찍어 준다.
+chatterbox는 MIT) 무엇으로 돌고 있는지 시작할 때 찍고 `/health`로도 알려 준다.
 
 | 엔진 | 띄우는 파이썬 | 라이선스 |
 |---|---|---|
-| `local_xtts` (기본) | 저장소 루트 `.venv` | Coqui CPML (비상업용) |
-| `chatterbox` | 저장소 루트 `.venv-chatterbox` | MIT |
+| `chatterbox` (기본) | 저장소 루트 `.venv-chatterbox` | MIT |
+| `local_xtts` | 저장소 루트 `.venv` | Coqui CPML (비상업용) |
+
+**기본은 chatterbox다**(owner 결정 2026-09-28, AK W1215-1). 예전에는 엔진을 안
+주면 XTTS가 떴고, 이름을 잘못 적어도 XTTS로 떨어졌다. VideoBox는 어느 채널이
+수익 채널인지 모르므로, 비상업용 XTTS는 `VIDEOBOX_ALLOW_NON_COMMERCIAL_TTS=1`로
+**켜는 사람이 직접 비상업 사용임을 밝혀야만** 뜬다. 모르는 엔진 이름은 오류다.
 
 **둘은 한 환경에 못 넣는다.** chatterbox는 torch 2.6을 요구해서 같은 venv에
 넣으면 torch가 내려가고 XTTS가 깨진다(2026-09-02 실측). 그래서 venv를 나눈다.
@@ -50,6 +57,8 @@ VIDEOBOX_HOST_TTS_ENGINE=chatterbox .venv-chatterbox/Scripts/python scripts/host
 from __future__ import annotations
 
 import base64
+from collections.abc import Mapping
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -73,22 +82,62 @@ PORT = 8199
 MAX_BODY_BYTES = 32 * 1024 * 1024
 
 
-def _build_provider():
-    engine = os.environ.get("VIDEOBOX_HOST_TTS_ENGINE", "local_xtts").strip() or "local_xtts"
+DEFAULT_ENGINE = "chatterbox"
+#: 비상업용 엔진을 켜려면 켜는 사람이 이 값을 `1`로 세워 비상업 사용임을 밝힌다.
+NON_COMMERCIAL_ACK_ENV = "VIDEOBOX_ALLOW_NON_COMMERCIAL_TTS"
+
+
+@dataclass(frozen=True)
+class EngineChoice:
+    engine: str
+    licence: str
+    commercial_use: bool
+
+
+_ENGINES = {
+    "chatterbox": EngineChoice("chatterbox", "MIT (상업적으로 써도 됩니다)", True),
+    # XTTS는 Coqui CPML이라 **비상업용**이다. 수익 채널에 쓰면 안 된다.
+    "local_xtts": EngineChoice("local_xtts", "Coqui CPML (비상업용 - 수익 채널 금지)", False),
+}
+
+
+def resolve_engine(environ: Mapping[str, str]) -> EngineChoice:
+    """켤 엔진을 고른다. 모르는 이름·밝히지 않은 비상업 엔진은 조용히 넘기지 않고 오류다."""
+    name = str(environ.get("VIDEOBOX_HOST_TTS_ENGINE", "") or "").strip() or DEFAULT_ENGINE
+    choice = _ENGINES.get(name)
+    if choice is None:
+        raise ValueError(f"unknown_tts_engine: {name!r} (고를 수 있는 것: {sorted(_ENGINES)})")
+    if not choice.commercial_use and str(environ.get(NON_COMMERCIAL_ACK_ENV, "")).strip() != "1":
+        raise ValueError(
+            f"non_commercial_tts_engine_requires_acknowledgement: {name}은(는) 비상업용이라 "
+            f"수익 채널에 쓸 수 없습니다. 비상업 용도로만 쓸 때 {NON_COMMERCIAL_ACK_ENV}=1 로 켜세요."
+        )
+    return choice
+
+
+def health_payload(choice: EngineChoice) -> dict[str, object]:
+    return {
+        "status": "ok",
+        "engine": choice.engine,
+        "licence": choice.licence,
+        "commercial_use": choice.commercial_use,
+    }
+
+
+def _build_provider(choice: EngineChoice):
     language = os.environ.get("VIDEOBOX_TTS_LANGUAGE", "ko").strip() or "ko"
-    if engine == "chatterbox":
+    if choice.engine == "chatterbox":
         from videobox_provider_interfaces.chatterbox_tts_provider import ChatterboxTTSProvider
 
-        return ChatterboxTTSProvider(language=language), engine, "MIT"
+        return ChatterboxTTSProvider(language=language)
     from videobox_provider_interfaces.local_xtts_provider import LocalXTTSProvider
 
-    # XTTS는 Coqui CPML이라 **비상업용**이다. 상업적으로 쓰려면 chatterbox로 바꾼다.
-    return LocalXTTSProvider(language=language), engine, "Coqui CPML (비상업용)"
+    return LocalXTTSProvider(language=language)
 
 
 class _Handler(BaseHTTPRequestHandler):
     provider = None
-    engine_name = ""
+    engine_choice: EngineChoice | None = None
     #: 목소리 모델은 **여러 갈래로 동시에 못 쓴다.** 요청은 각자 다른 실에서
     #: 오는데 모델은 하나뿐이라, 두 요청이 겹치면 소리가 섞이거나 죽는다
     #: (코드리뷰 2026-09-02). 읽는 일(`/health`)은 이 자물쇠를 안 지난다.
@@ -110,7 +159,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self._send(
             200,
-            json.dumps({"status": "ok", "engine": self.engine_name}).encode("utf-8"),
+            json.dumps(health_payload(self.engine_choice), ensure_ascii=False).encode("utf-8"),
             "application/json",
         )
 
@@ -172,10 +221,10 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    provider, engine, licence = _build_provider()
-    _Handler.provider = provider
-    _Handler.engine_name = engine
-    print(f"[voice-bridge] 엔진: {engine} · 라이선스: {licence}")
+    choice = resolve_engine(os.environ)
+    _Handler.provider = _build_provider(choice)
+    _Handler.engine_choice = choice
+    print(f"[voice-bridge] 엔진: {choice.engine} · 라이선스: {choice.licence}")
     print(f"[voice-bridge] http://{HOST}:{PORT} 에서 기다립니다. 컨테이너에서는 host.docker.internal:{PORT}")
     ThreadingHTTPServer((HOST, PORT), _Handler).serve_forever()
 

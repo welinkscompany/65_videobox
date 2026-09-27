@@ -5,10 +5,13 @@
 .DESCRIPTION
     목소리를 복제하는 엔진은 컨테이너가 아니라 **이 컴퓨터**에 깔려 있다
     (그림 생성이 ComfyUI를 이 컴퓨터에서 부르는 것과 같다). 이 스크립트는
-    깔려 있는 것 중 나은 것을 골라 켠다.
+    기본은 chatterbox 하나다(owner 결정 2026-09-28).
 
-      1) .venv-chatterbox  -- chatterbox, MIT. 상업적으로 써도 된다.
-      2) .venv             -- XTTS, 비상업용. chatterbox가 없을 때만.
+      1) .venv-chatterbox  -- chatterbox, MIT. 상업적으로 써도 된다. 기본.
+      2) .venv             -- XTTS, 비상업용. `-Engine local_xtts`로 이름을 대고
+                              고를 때만 뜬다. chatterbox가 없다고 저절로 XTTS로
+                              넘어가지 않는다 -- 수익 채널에 비상업 목소리가
+                              섞이는 것을 막기 위해서다.
 
     둘은 한 환경에 못 넣는다(chatterbox가 torch를 내려 XTTS를 깨뜨린다).
     그래서 환경을 나눠 두고 여기서 고른다.
@@ -37,10 +40,16 @@ $xtts       = Join-Path $installRoot '.venv\Scripts\python.exe'
 
 switch ($Engine) {
     'chatterbox' { $python = $chatterbox; $chosen = 'chatterbox' }
-    'local_xtts' { $python = $xtts;       $chosen = 'local_xtts' }
+    'local_xtts' {
+        # XTTS is Coqui CPML: non-commercial. Only when asked for by name.
+        Write-Host "주의: XTTS는 비상업용입니다. 수익 채널 영상에는 쓰면 안 됩니다." -ForegroundColor Yellow
+        $python = $xtts; $chosen = 'local_xtts'
+        $env:VIDEOBOX_ALLOW_NON_COMMERCIAL_TTS = '1'
+    }
     default {
-        if (Test-Path $chatterbox) { $python = $chatterbox; $chosen = 'chatterbox' }
-        else                       { $python = $xtts;       $chosen = 'local_xtts' }
+        # auto picks chatterbox (MIT) only. No silent fallback to non-commercial
+        # XTTS (owner decision 2026-09-28, AK W1215-1).
+        $python = $chatterbox; $chosen = 'chatterbox'
     }
 }
 

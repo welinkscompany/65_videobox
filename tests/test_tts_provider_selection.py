@@ -49,3 +49,16 @@ def test_host_bridge_builds_the_bridge_provider_and_nothing_else() -> None:
     # base_url을 그대로 전달한다 -- 다른 엔진의 기본값으로 슬쩍 바뀌면 다리가
     # 안 켜져 있을 때 엉뚱한 주소에 물으며 실패 이유가 헷갈린다.
     assert provider.base_url == "http://127.0.0.1:8199"
+
+
+def test_the_engine_says_whether_commercial_use_is_open() -> None:
+    """AK W1215-1: wherever an engine can be chosen, XTTS reads as non-commercial.
+
+    Same shape as the image model (`ImageGenerationConfig.commercial_use_is_unrestricted`):
+    True when known open, False when known closed, None when this code does not
+    know -- it does not guess.
+    """
+    assert TTSEngineConfig(engine="chatterbox").commercial_use_is_unrestricted is True
+    assert TTSEngineConfig(engine="local_xtts").commercial_use_is_unrestricted is False
+    # The bridge reports its own licence on /health; the container cannot know it.
+    assert TTSEngineConfig(engine="host_bridge").commercial_use_is_unrestricted is None
