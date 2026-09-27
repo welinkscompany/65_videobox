@@ -10,6 +10,7 @@ core engine이나 storage 계층을 한 줄도 import하지 않는다(아래 첫
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -163,3 +164,103 @@ def test_editing_session_and_yujin_proposal_client_methods(tmp_path: Path) -> No
     created, fetched = asyncio.run(create_blank_then_fetch())
     assert created["session_id"] == fetched["session_id"]
     assert fetched["project_id"] == project_id
+
+
+def _client_and_app_for(tmp_path: Path, *, runtime_factory=None) -> VideoBoxApiClient:
+    from videobox_api.main import create_app
+
+    kwargs: dict[str, Any] = {"projects_root": tmp_path}
+    if runtime_factory is not None:
+        kwargs["local_only_runtime_service_factory"] = runtime_factory
+    app = create_app(**kwargs)
+    transport = httpx.ASGITransport(app=app)
+    return VideoBoxApiClient(base_url="http://testserver", transport=transport)
+
+
+def test_ask_yujin_creates_session_then_applies_the_proposal(tmp_path: Path) -> None:
+    import re
+
+    from videobox_provider_interfaces.llm import StructuredLLMResponse
+    from videobox_mcp import tools
+
+    class FixedEditingRuntime:
+        def generate_structured(self, **kwargs: Any) -> StructuredLLMResponse:
+            # 빈 편집판(`create_blank_editing_session`)은 장면 하나를 자동
+            # 생성한 id(`{timeline_id}:001`)로 연다 -- 고정 문자열("scene-2")을
+            # 미리 알 수 없으므로, 검증기가 실제로 통과하도록 프롬프트에 실린
+            # "현재 장면: 1번 장면=<id>." 표에서 그 id를 그대로 읽어 쓴다.
+            prompt = str(kwargs.get("prompt") or "")
+            match = re.search(r"1번 장면=([^,.]+)", prompt)
+            segment_id = match.group(1).strip() if match else "scene-2"
+            return StructuredLLMResponse(
+                provider_name="local",
+                model_name="fixture",
+                output_data={
+                    "schema_version": "videobox.yujin-editing-response.v1",
+                    "reply_text": "두 번째 장면을 두 배로 빠르게 했어요.",
+                    "proposal": {
+                        "proposal_id": "fixture-proposal",
+                        "base_session_revision": 1,
+                        "operations": [
+                            {"intent": "set_scene_speed", "segment_id": segment_id, "rate": 2}
+                        ],
+                    },
+                },
+                raw_text="{}",
+                metadata={},
+            )
+
+    client = _client_and_app_for(tmp_path, runtime_factory=lambda _: FixedEditingRuntime())
+
+    import asyncio
+
+    async def run() -> dict[str, Any]:
+        project = await client.create_project(name="유진에게 말하기 시험")
+        return await tools.ask_yujin(
+            client, project_id=project["project_id"], message="두 번째 장면을 두 배로 빠르게 해줘"
+        )
+
+    result = asyncio.run(run())
+
+    assert result["applied"] is True
+    assert result["status"] == "applied"
+    # 서버가 진짜 저장 id를 새로 발급한다(`director_proposals.py`가
+    # `yujin-edit-{uuid4().hex}`로 짓는다) -- 유진의 응답에 실린
+    # "fixture-proposal"은 그대로 돌아오지 않는다. 값이 실제로 있는지만 본다.
+    assert isinstance(result["proposal_id"], str) and result["proposal_id"]
+
+
+def test_ask_yujin_retries_once_then_logs_and_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from videobox_mcp import tools
+
+    client = _client_and_app_for(tmp_path)
+
+    call_count = {"n": 0}
+
+    async def always_fails(self: VideoBoxApiClient, *, project_id: str) -> dict[str, Any]:
+        call_count["n"] += 1
+        raise VideoBoxApiError(status_code=500, detail="boom", path="/fake")
+
+    monkeypatch.setattr(VideoBoxApiClient, "get_latest_editing_session", always_fails)
+
+    logged: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        tools,
+        "log_ask_yujin_escalation",
+        lambda **kwargs: logged.append(kwargs),
+    )
+
+    import asyncio
+
+    async def run() -> None:
+        await tools.ask_yujin(client, project_id="does-not-matter", message="아무 말")
+
+    with pytest.raises(VideoBoxApiError):
+        asyncio.run(run())
+
+    assert call_count["n"] == 2  # 최초 시도 + 1회 재시도, 그 이상은 없다
+    assert len(logged) == 1
+    assert logged[0]["retry_count"] == 1
+    assert logged[0]["project_id"] == "does-not-matter"
