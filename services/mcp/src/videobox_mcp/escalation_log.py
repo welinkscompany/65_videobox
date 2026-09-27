@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-DEFAULT_LOG_PATH = Path(__file__).resolve().parent.parent / "data" / "ask-yujin-escalations.jsonl"
+DEFAULT_LOG_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "ask-yujin-escalations.jsonl"
 
 
 def log_ask_yujin_escalation(

@@ -50,3 +50,29 @@ def test_log_ask_yujin_escalation_creates_parent_directory(tmp_path: Path) -> No
     )
 
     assert log_path.exists()
+
+
+def test_log_ask_yujin_escalation_uses_env_var_when_path_not_provided(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """환경변수 VIDEOBOX_MCP_ESCALATION_LOG_PATH를 사용하는지 확인."""
+    env_log_path = tmp_path / "env-log.jsonl"
+    monkeypatch.setenv("VIDEOBOX_MCP_ESCALATION_LOG_PATH", str(env_log_path))
+
+    log_ask_yujin_escalation(
+        project_id="project_004",
+        message="환경변수로 경로를 지정했어",
+        error="test error",
+        retry_count=2,
+    )
+
+    assert env_log_path.exists()
+    lines = env_log_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+
+    record = json.loads(lines[0])
+    assert record["project_id"] == "project_004"
+    assert record["message"] == "환경변수로 경로를 지정했어"
+    assert record["retry_count"] == 2
+    assert "test error" in record["error"]
+    assert "timestamp" in record
