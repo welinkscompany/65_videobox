@@ -30,6 +30,8 @@ x-videobox-hermes-capability-authority:
 services:
   videobox-postgres:
     image: postgres:16-alpine
+    # 재부팅 뒤 저절로 다시 뜬다(AK W1215-5). 손으로 멈춘 것은 그대로 둔다.
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-videobox}
       POSTGRES_USER: ${POSTGRES_USER:-videobox}
@@ -53,6 +55,8 @@ services:
         max-file: "3"
 
   videobox-workspace:
+    # 재부팅 뒤 저절로 다시 뜬다(AK W1215-5). 손으로 멈춘 것은 그대로 둔다.
+    restart: unless-stopped
     build:
       context: .
       dockerfile: docker/workspace.Dockerfile
@@ -260,6 +264,8 @@ services:
   videobox-hermes-agent:
     image: nousresearch/hermes-agent@sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09
     profiles: [hermes-preauth]
+    # 매일 도는 스택이 아니라 필요할 때만 켜는 도구라 재부팅 뒤 자동으로 안 띄운다.
+    restart: "no"
     command: ["sleep", "infinity"]
     network_mode: none
     volumes:
@@ -291,6 +297,8 @@ services:
   videobox-hermes-oauth-bootstrap:
     image: nousresearch/hermes-agent@sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09
     profiles: [hermes-oauth-bootstrap]
+    # 매일 도는 스택이 아니라 필요할 때만 켜는 도구라 재부팅 뒤 자동으로 안 띄운다.
+    restart: "no"
     command: ["sleep", "infinity"]
     volumes:
       - videobox_hermes_oauth_state:/opt/data
@@ -320,6 +328,8 @@ services:
   videobox-hermes-dashboard:
     image: nousresearch/hermes-agent@sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09
     profiles: [hermes-dashboard]
+    # 매일 도는 스택이 아니라 필요할 때만 켜는 도구라 재부팅 뒤 자동으로 안 띄운다.
+    restart: "no"
     command: ["dashboard", "--host", "0.0.0.0", "--port", "9119", "--insecure", "--no-open"]
     ports:
       - "127.0.0.1:9119:9119"

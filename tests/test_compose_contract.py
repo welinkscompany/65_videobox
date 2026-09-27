@@ -475,3 +475,41 @@ def test_the_proxy_waits_longer_than_judging_a_short_inside_one_request() -> Non
     assert BACKGROUND_BUDGET_SECONDS > proxy_seconds, (
         "뒤에서 도는 예산이 프록시 벽보다 작으면 비동기로 옮긴 이유가 없어진다"
     )
+
+
+# AK W1215-5 (2026-09-28): every service had no `restart:` key, so Docker's
+# default `no` applied and a Windows reboot (Windows Update reboots this
+# machine inside the night window) left VideoBox down until the owner logged in
+# and ran `scripts/owner-ready.ps1`. The stack the owner runs every day now
+# comes back on its own; `unless-stopped` still honours a deliberate stop
+# (`owner-ready.ps1 -Mode Stop`). The Hermes pre-auth, OAuth-bootstrap and
+# dashboard containers stay manual on purpose: they are profile-gated tools
+# the owner opens for a login or a look, not part of the daily stack, and the
+# OAuth bootstrap is an interactive one-shot. GPU-heavy work (LM Studio, the
+# voice bridge, ComfyUI) runs on the host, not in these containers.
+#
+# Every service must appear here, so a new service has to decide.
+_EXPECTED_RESTART_POLICY = {
+    "videobox-postgres": "unless-stopped",
+    "videobox-workspace": "unless-stopped",
+    "videobox-agent-gateway": "unless-stopped",
+    "videobox-hermes-yujin": "unless-stopped",
+    "videobox-hermes-agent": "no",
+    "videobox-hermes-oauth-bootstrap": "no",
+    "videobox-hermes-dashboard": "no",
+}
+
+
+def test_every_service_declares_its_restart_policy_and_the_daily_stack_survives_a_reboot() -> None:
+    base = yaml.safe_load(Path("compose.yaml").read_text(encoding="utf-8"))
+    overlay = yaml.safe_load(Path("compose.hermes-yujin.yaml").read_text(encoding="utf-8"))
+
+    declared: dict[str, object] = {}
+    for services in (base["services"], overlay["services"]):
+        for name, service in services.items():
+            if "restart" in service:
+                declared[name] = service["restart"]
+
+    all_services = set(base["services"]) | set(overlay["services"])
+    assert all_services == set(_EXPECTED_RESTART_POLICY), "a service has no restart decision"
+    assert declared == _EXPECTED_RESTART_POLICY
