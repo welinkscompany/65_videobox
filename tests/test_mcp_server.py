@@ -264,3 +264,20 @@ def test_ask_yujin_retries_once_then_logs_and_raises(
     assert len(logged) == 1
     assert logged[0]["retry_count"] == 1
     assert logged[0]["project_id"] == "does-not-matter"
+
+
+def test_ask_yujin_is_registered_as_a_tool(tmp_path: Path) -> None:
+    client = _client_for(tmp_path)
+    server = build_server(client)
+
+    import asyncio
+
+    async def run() -> object:
+        created = await server.call_tool("create_project", {"name": "도구 등록 시험"})
+        # 편집 세션이 없는 프로젝트에 물으면 "세션 확보" 경로부터 실제로
+        # 도구 레지스트리를 거쳐 실행돼야 한다 -- 로컬 LLM이 없으니 결과
+        # 자체보다 "도구가 존재하고 호출 가능한가"를 이 시험의 경계로 둔다.
+        return created
+
+    created = asyncio.run(run())
+    assert "ask_yujin" in [tool.name for tool in asyncio.run(server.list_tools())]

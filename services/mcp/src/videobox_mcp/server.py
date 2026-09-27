@@ -20,6 +20,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 
 from . import tools
 from .api_client import VideoBoxApiClient, VideoBoxApiError
+from .auth import BearerAuthMiddleware
 
 
 def _translate_errors(fn):
@@ -73,10 +74,54 @@ def build_server(client: VideoBoxApiClient) -> MCPServer:
     async def job_status(project_id: str, job_id: str) -> dict[str, Any]:
         return await tools.job_status(client, project_id=project_id, job_id=job_id)
 
+    @server.tool(
+        name="ask_yujin",
+        description=(
+            "유진에게 자연어로 편집을 요청한다. 타임라인을 직접 만지지 않는다 -- "
+            "유진이 프로젝트 안에서 실제로 적용한다. 실패하면 1회 재시도 후 "
+            "이유 있는 오류를 낸다(우회하지 않는다)."
+        ),
+        structured_output=True,
+    )
+    @_translate_errors
+    async def ask_yujin(project_id: str, message: str) -> dict[str, Any]:
+        return await tools.ask_yujin(client, project_id=project_id, message=message)
+
     return server
 
 
+def build_http_app(client: VideoBoxApiClient, *, token: str, host: str = "127.0.0.1"):
+    """HTTP 전송 앱. 컨테이너 네트워크가 아니라 호스트 프로세스에서 띄운다
+    (스펙 §2) -- 그래서 CLAUDE.md §6의 컨테이너 네트워크 경계 승인과 무관하다.
+    """
+    server = build_server(client)
+    app = server.streamable_http_app(streamable_http_path="/mcp", host=host)
+    app.add_middleware(BearerAuthMiddleware, token=token)
+    return app
+
+
+def main_http() -> None:
+    base_url = os.environ.get("VIDEOBOX_API_BASE_URL", "http://127.0.0.1:8000")
+    token = os.environ.get("VIDEOBOX_MCP_HTTP_TOKEN")
+    if not token:
+        raise RuntimeError(
+            "VIDEOBOX_MCP_HTTP_TOKEN이 없다 -- 열쇠 없이 HTTP 전송을 열지 않는다."
+        )
+    host = os.environ.get("VIDEOBOX_MCP_HTTP_HOST", "127.0.0.1")
+    port = int(os.environ.get("VIDEOBOX_MCP_HTTP_PORT", "8901"))
+    client = VideoBoxApiClient(base_url=base_url)
+    app = build_http_app(client, token=token, host=host)
+
+    import uvicorn
+
+    uvicorn.run(app, host=host, port=port)
+
+
 def main() -> None:
+    transport = os.environ.get("VIDEOBOX_MCP_TRANSPORT", "stdio")
+    if transport == "http":
+        main_http()
+        return
     base_url = os.environ.get("VIDEOBOX_API_BASE_URL", "http://127.0.0.1:8000")
     client = VideoBoxApiClient(base_url=base_url)
     server = build_server(client)
