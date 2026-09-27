@@ -70,3 +70,28 @@ class VideoBoxApiClient:
 
     async def get_job(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         return await self._request("GET", f"/api/projects/{project_id}/jobs/{job_id}")
+
+    async def get_latest_editing_session(self, *, project_id: str) -> dict[str, Any]:
+        return await self._request("GET", f"/api/projects/{project_id}/editing-sessions/latest")
+
+    async def create_blank_editing_session(self, *, project_id: str) -> dict[str, Any]:
+        return await self._request("POST", f"/api/projects/{project_id}/editing-sessions/blank")
+
+    async def create_yujin_editing_proposal(
+        self, *, project_id: str, session_id: str, instruction: str
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            f"/api/projects/{project_id}/editing-sessions/{session_id}/yujin-editing-proposals",
+            json={"instruction": instruction},
+        )
+
+    async def apply_yujin_editing_proposal(
+        self, *, project_id: str, session_id: str, proposal_id: str, expected_revision: int
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            f"/api/projects/{project_id}/editing-sessions/{session_id}"
+            f"/yujin-editing-proposals/{proposal_id}/apply",
+            json={"expected_revision": expected_revision},
+        )

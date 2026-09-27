@@ -134,3 +134,32 @@ def test_api_client_raises_a_named_error_with_the_status_code(tmp_path: Path) ->
     with pytest.raises(VideoBoxApiError) as excinfo:
         asyncio.run(run())
     assert excinfo.value.status_code == 404
+
+
+def test_editing_session_and_yujin_proposal_client_methods(tmp_path: Path) -> None:
+    client = _client_for(tmp_path)
+
+    import asyncio
+
+    async def run() -> dict:
+        # 프로젝트만 있고 세션이 없으면 latest가 404를 내야 한다.
+        return await client.create_project(name="세션 시험")
+
+    project = asyncio.run(run())
+    project_id = project["project_id"]
+
+    async def latest_missing() -> None:
+        await client.get_latest_editing_session(project_id=project_id)
+
+    with pytest.raises(VideoBoxApiError) as excinfo:
+        asyncio.run(latest_missing())
+    assert excinfo.value.status_code == 404
+
+    async def create_blank_then_fetch() -> tuple[dict, dict]:
+        created = await client.create_blank_editing_session(project_id=project_id)
+        fetched = await client.get_latest_editing_session(project_id=project_id)
+        return created, fetched
+
+    created, fetched = asyncio.run(create_blank_then_fetch())
+    assert created["session_id"] == fetched["session_id"]
+    assert fetched["project_id"] == project_id
