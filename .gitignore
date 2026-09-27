@@ -33,6 +33,7 @@ artifacts/
 tmp/
 .tmp/
 cache/
+services/mcp/data/*.jsonl
 
 # Playwright is invoked from the repository root by the web package script.
 /test-results/
