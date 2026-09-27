@@ -20,7 +20,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from . import tools
-from .api_client import VideoBoxApiClient, VideoBoxApiError
+from .api_client import DEFAULT_API_BASE_URL, VideoBoxApiClient, VideoBoxApiError
 from .auth import BearerAuthMiddleware
 
 
@@ -109,7 +109,7 @@ def build_http_app(client: VideoBoxApiClient, *, token: str, host: str = "127.0.
 
 
 def main_http() -> None:
-    base_url = os.environ.get("VIDEOBOX_API_BASE_URL", "http://127.0.0.1:8000")
+    base_url = os.environ.get("VIDEOBOX_API_BASE_URL", DEFAULT_API_BASE_URL)
     token = os.environ.get("VIDEOBOX_MCP_HTTP_TOKEN")
     if not token:
         raise RuntimeError(
@@ -130,7 +130,7 @@ def main() -> None:
     if transport == "http":
         main_http()
         return
-    base_url = os.environ.get("VIDEOBOX_API_BASE_URL", "http://127.0.0.1:8000")
+    base_url = os.environ.get("VIDEOBOX_API_BASE_URL", DEFAULT_API_BASE_URL)
     client = VideoBoxApiClient(base_url=base_url)
     server = build_server(client)
     server.run(transport="stdio")

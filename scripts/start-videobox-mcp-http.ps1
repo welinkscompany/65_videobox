@@ -3,7 +3,7 @@ VideoBox MCP HTTP 전송을 호스트 프로세스로 띄운다 (컨테이너 �
 AK-System Hermes 쪽 .mcp.json이 http://127.0.0.1:8901/mcp로 붙는다.
 #>
 param(
-    [string]$VideoBoxApiBaseUrl = "http://127.0.0.1:8000",
+    [string]$VideoBoxApiBaseUrl = "http://127.0.0.1:5173",
     [string]$BindHost = "127.0.0.1",
     [int]$Port = 8901
 )

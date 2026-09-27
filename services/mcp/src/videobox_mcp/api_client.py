@@ -30,11 +30,20 @@ class VideoBoxApiError(Exception):
         super().__init__(f"{status_code} on {path}: {detail!r}")
 
 
+#: 매일 쓰는 컨테이너 스택이 호스트에 여는 **유일한** 문(`compose.yaml`의
+#: `127.0.0.1:${VIDEOBOX_WEB_PORT:-5173}`). nginx가 `/api/`를 안쪽 8000으로 넘긴다.
+#: 예전 기본값 8000은 컨테이너 **안쪽** 포트라 호스트에서는 아무것도 안 받는다
+#: (2026-09-28 실측: 5173 `GET /api/projects` 200, 8000 응답 없음). 개발 서버
+#: (`.claude/launch.json`, api 8000)로 돌릴 때만 `VIDEOBOX_API_BASE_URL`로 바꾼다.
+#: `tests/test_mcp_api_base_url_default.py`가 compose 값과의 관계를 지킨다.
+DEFAULT_API_BASE_URL = "http://127.0.0.1:5173"
+
+
 @dataclass
 class VideoBoxApiClient:
     """`docs/videobox-mcp-scope.ko.md` §3.1·§3.3이 정한 첫 도구 셋이 부르는 문만 감싼다."""
 
-    base_url: str = "http://127.0.0.1:8000"
+    base_url: str = DEFAULT_API_BASE_URL
     transport: httpx.AsyncBaseTransport | None = None
     timeout: float = 30.0
 
