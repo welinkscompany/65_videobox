@@ -712,21 +712,12 @@ agent-*`)를 만들어 쓰고 끝나면 병합 후 지운다 — SessionStart �
 backend 검증은 반드시 프로젝트 루트의 venv를 쓴다. bare `pytest`나 시스템 Python은
 근거로 쓰지 않는다. Windows에서 `python`은 Microsoft Store 별칭으로 잡혀 실패한다.
 
-`--ignore=tests/test_mcp_server.py`를 반드시 붙인다 — `mcp` SDK가 uvicorn/starlette
-버전 충돌로 이 `.venv`에 설치가 안 돼 있다(2026-09-08 MCP 착수 이후 계속된 상태,
-회귀 아님). 이 플래그 없이 돌리면 `test_mcp_server.py` 수집 에러로 **테스트가
-한 건도 안 돌고 exit 2로 끝난다** — "실패"가 아니라 "0건 실행"이라 통과처럼
-착각하기 쉽다(2026-09-21 정기 자가 진단에서 실제로 걸림). 실측 기준선(2026-09-21):
-5108 passed·56 skipped·1 xfailed·38분 42초.
-
-**이 플래그는 증상을 가리는 임시 우회이지 해결이 아니다.** `mcp`가 설치되기
-전까지 `services/mcp/`의 코드는 시험이 하나도 지키지 않는 상태로 남는다.
-돌리기 전에 `.venv/Scripts/python.exe -m pip show mcp`로 설치 여부를 먼저
-보고, 설치돼 있으면 이 플래그를 빼서 `test_mcp_server.py`도 같이 돈다 —
-그래야 우회가 저절로 만료된다.
+**2026-09-27에 `mcp`를 `.venv`에 설치했다** — 더 이상 `--ignore`가 필요 없다.
+`test_mcp_server.py`도 일반 스위트에 포함해 돈다. 설치 확인:
+`.venv/Scripts/python.exe -m pip show mcp`.
 
 ```bash
-.venv/Scripts/python.exe -m pytest -q --ignore=tests/test_mcp_server.py
+.venv/Scripts/python.exe -m pytest -q
 ```
 
 ```bash
