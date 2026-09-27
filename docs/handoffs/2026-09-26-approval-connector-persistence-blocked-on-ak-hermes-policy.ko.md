@@ -143,3 +143,34 @@ VideoBox 쪽 "결재함 다리는 상시로" 지시가 충돌한다 — 어느 �
   WindowStyle·WorkingDirectory 전부 의도대로).
 - 못 함: 실제 Windows 예약 작업 등록(위 이유 둘 다), 등록 후 3시간
   주기로 실제 재시작이 동작하는지의 실물 확인(등록 자체가 안 됐으므로).
+
+## 2026-09-27 후속 — 대표님 결정: AK-Hermes 파이썬 전환 대기
+
+위 "다음 세션이 할 일"에서 대표님께 여쭤본 결과, **2번(AK-Hermes 파이썬
+전환을 기다린다)** 으로 확정됐다. 이번 세션에서 한 일:
+
+1. **`videobox-approval-connector-watchdog`의 Windows 예약 작업 등록은
+   하지 않았다.** `100_ak-system-hermes`의 로컬 커밋(`5d57ca81`)도
+   그대로 두었다(되돌리지 않음, 참고용 원본으로 보존) — push는 여전히
+   안 함.
+2. **AK-Hermes 쪽 마이그레이션 계획 문서에 요청을 남겼다** —
+   `100_ak-system-hermes/docs/superpowers/plans/2026-09-25-01-data-and-execution-layer-python-postgres-migration.md`
+   Task 3 Step 6 바로 아래에 인용 블록으로 추가: "다음 파도 대상을
+   §0-A에 따라 실제로 정할 때 `videobox-approval-connector-watchdog`을
+   후보로 검토해 달라"는 내용, 이 문서 자체가 파도 범위를 미리 정하는
+   것은 아니라고 명시(그 저장소 §0-A가 "다음 파도 대상은 지금 미리
+   적지 않는다"고 정해둔 규칙을 존중).
+3. **그 문서를 커밋하지는 않았다.** `100_ak-system-hermes` 저장소가
+   지금 다른 자율 세션(직원 20명 자동화)들이 실시간으로 수백 개 파일을
+   고치고 있는 상태라(`git status`로 확인, 이 요청과 무관한 변경 다수),
+   이 VideoBox 세션이 그 저장소에 커밋을 내는 것은 위험 범위 밖이라고
+   판단했다. **편집만 파일에 남아 있다** — 그쪽 세션이 자기 커밋
+   규약(W번호, 계획서 행 등록 등, `100_ak-system-hermes/CLAUDE.md` §0-A)
+   대로 커밋해야 한다.
+
+### 다음 AK-Hermes 세션이 할 일
+
+- 위 문서의 Task 3 Step 6 아래 요청 인용 블록을 확인한다.
+- 다음 파도 Task를 등록할 때 `videobox-approval-connector-watchdog`을
+  후보에 포함할지 정식으로 판단한다.
+- 이 편집(및 `65_videobox` 관련 없음)을 그 저장소 규약대로 커밋한다.
