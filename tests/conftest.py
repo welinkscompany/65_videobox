@@ -169,6 +169,22 @@ def _overlay_font_for_tests() -> None:
             return
 
 
+@pytest.fixture(autouse=True)
+def _isolate_ask_yujin_escalation_log(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """ask_yujin 실패 기록을 실제 파일(`services/mcp/data/ask-yujin-escalations.jsonl`)이
+    아니라 시험마다 새 임시 파일로 보낸다.
+
+    2026-09-28에 실제 파일의 다섯 줄이 전부 시험 데이터였다 -- 로거를 막지 않고
+    `ask_yujin`을 서버째 부르는 시험 하나가 매 실행마다 한 줄씩 남겼다. 시험마다
+    로거를 막는 것은 잊기 쉬우므로, 막지 않은 시험도 실제 파일에 못 닿게 여기서
+    환경변수 하나로 돌려 둔다(`tests/test_mcp_escalation_log.py`가 지킨다).
+    """
+    target = tmp_path_factory.mktemp("ask-yujin-escalations") / "ask-yujin-escalations.jsonl"
+    monkeypatch.setenv("VIDEOBOX_MCP_ESCALATION_LOG_PATH", str(target))
+
+
 def wait_for(predicate, *, timeout_seconds: float = 5.0, interval_seconds: float = 0.01) -> None:
     """조건이 될 때까지 기다린다. **뒤에서 도는 패스를 고정 sleep으로 기다리지 마라.**
 

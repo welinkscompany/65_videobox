@@ -76,3 +76,36 @@ def test_log_ask_yujin_escalation_uses_env_var_when_path_not_provided(
     assert record["retry_count"] == 2
     assert "test error" in record["error"]
     assert "timestamp" in record
+
+
+def test_a_test_that_forgets_to_patch_the_logger_never_writes_the_real_escalation_log() -> None:
+    """Tests must never append to the owner's real escalation log.
+
+    2026-09-28: all five lines in `services/mcp/data/ask-yujin-escalations.jsonl`
+    were test data (`project_id="does-not-matter"`, `message="아무 말"`,
+    `simulated timeout`). They came from
+    `test_ask_yujin_network_failure_becomes_a_tool_error_not_a_raw_exception`,
+    which drives `ask_yujin` through the server without patching the logger.
+    A later reader of that file could not tell a real escalation from a test.
+
+    The guard lives in `tests/conftest.py` (an autouse fixture that points
+    `VIDEOBOX_MCP_ESCALATION_LOG_PATH` at a per-test temp file), so a test
+    that calls the logger with no path -- exactly what the real tool does --
+    lands in the temp file and the real log stays byte-identical.
+    """
+    import os
+
+    from videobox_mcp.escalation_log import DEFAULT_LOG_PATH
+
+    before = DEFAULT_LOG_PATH.read_bytes() if DEFAULT_LOG_PATH.exists() else None
+
+    log_ask_yujin_escalation(
+        project_id="escalation-guard-probe", message="m", error="e", retry_count=1
+    )
+
+    after = DEFAULT_LOG_PATH.read_bytes() if DEFAULT_LOG_PATH.exists() else None
+    assert after == before, "a test wrote into the real ask_yujin escalation log"
+
+    redirected = Path(os.environ["VIDEOBOX_MCP_ESCALATION_LOG_PATH"])
+    assert redirected.resolve() != DEFAULT_LOG_PATH.resolve()
+    assert "escalation-guard-probe" in redirected.read_text(encoding="utf-8")
