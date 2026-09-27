@@ -53,7 +53,9 @@ ask_yujin(project_id: str, message: str) -> {status, reply, ...}
   `VideoBoxApiClient`를 거쳐 호출한다 — 화면과 다른 문을 쓰지 않는다
   (scope 문서 원칙 3 "MCP → API → Core 순서를 지킨다"와 동일 정신).
 - **실패 시 정확히 1회 재시도**한다. 재시도도 실패하면 성공한 척하지
-  않고 이유 있는 실패(`status: "failed"`, 원인 문구)를 그대로 돌려준다.
+  않고 원래 예외를 그대로 올려보낸다(raise) — MCP 프레임워크가 이걸
+  도구 호출의 `is_error: true`로 번역한다. `status: "failed"`를 담은
+  정상 응답을 "반환"하지 않는다.
 - **VideoBox MCP는 여기서 멈춘다.** 사람에게 알리는 결정과 실행은
   AK-Hermes 쪽 몫이다 — VideoBox가 대신 우회 재시도를 하거나 다른
   도구(직접 타임라인 조작 등)로 새지 않는다. 이건 대표님이 명시적으로

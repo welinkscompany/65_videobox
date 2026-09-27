@@ -63,6 +63,18 @@ async def job_status(client: VideoBoxApiClient, *, project_id: str, job_id: str)
     }
 
 
+class _UnsafeToRetryError(Exception):
+    """`apply_yujin_editing_proposal`이 409가 아닌 이유로 실패했다는 표시.
+
+    이 표시가 뜨면 바깥 재시도 루프는 절대 다시 돌면 안 된다 -- 원래
+    예외를 그대로 들고 있다가(`original`) 즉시 로그·재-raise만 한다.
+    """
+
+    def __init__(self, original: Exception) -> None:
+        self.original = original
+        super().__init__(str(original))
+
+
 async def ask_yujin(client: VideoBoxApiClient, *, project_id: str, message: str) -> dict[str, Any]:
     """유진에게 자연어로 편집을 요청한다.
 
@@ -79,16 +91,40 @@ async def ask_yujin(client: VideoBoxApiClient, *, project_id: str, message: str)
     `httpx.ReadTimeout`이 재시도·로그를 그대로 건너뛰고 새어 나간 적이
     있다. 유진(LLM) 백엔드가 느리거나 안 떠 있는 상황은 흔하고, 이
     경로야말로 재시도·에스컬레이션 설계가 지켜야 할 자리다.
+
+    **단, `apply_yujin_editing_proposal`이 실제로 불린 뒤에는 이 재시도가
+    안전하지 않다.** VideoBox의 편집 세션 API는 동기 `def` 핸들러라
+    스레드풀에서 돈다 -- 클라이언트 쪽 타임아웃이 서버 쪽 작업을 취소하지
+    않는다. apply가 클라이언트 쪽에서 타임아웃 났는데 서버는 실제로 적용을
+    끝냈다면, 재시도는 세션을 다시 읽고 새 제안을 만들어 다시 적용해버려서
+    "이중 적용"이 된다. 게다가 숏폼 의도들(`create_short_form` 등)은
+    apply가 세션 리비전을 안 올려서, 낙관적 락도 이중 적용을 못 막는다
+    (`services/api/src/videobox_api/routers/director_proposals.py:694-703`).
+    유일하게 안전한 재시도는 apply가 정확히 `VideoBoxApiError(status_code=409)`
+    로 실패했을 때뿐이다 -- 그건 `editing_proposal_needs_refresh`, 즉 적용이
+    "거절"됐다는 뜻이라 애초에 아무것도 안 걸렸다.
     """
     last_error: Exception | None = None
     for _ in range(2):
         try:
             return await _ask_yujin_once(client, project_id=project_id, message=message)
+        except _UnsafeToRetryError as unsafe:
+            # 재시도 예산과 무관하게 즉시 멈춘다 -- 몇 번째 루프든 상관없다.
+            log_ask_yujin_escalation(
+                project_id=project_id,
+                message=message,
+                error=f"{type(unsafe.original).__name__}: {unsafe.original}",
+                retry_count=1,
+            )
+            raise unsafe.original
         except (VideoBoxApiError, httpx.HTTPError) as exc:
             last_error = exc
     assert last_error is not None
     log_ask_yujin_escalation(
-        project_id=project_id, message=message, error=str(last_error), retry_count=1
+        project_id=project_id,
+        message=message,
+        error=f"{type(last_error).__name__}: {last_error}",
+        retry_count=1,
     )
     raise last_error
 
@@ -123,12 +159,19 @@ async def _ask_yujin_once(
         }
 
     proposal_id = created["proposal_id"]
-    await client.apply_yujin_editing_proposal(
-        project_id=project_id,
-        session_id=session_id,
-        proposal_id=proposal_id,
-        expected_revision=created["base_session_revision"],
-    )
+    try:
+        await client.apply_yujin_editing_proposal(
+            project_id=project_id,
+            session_id=session_id,
+            proposal_id=proposal_id,
+            expected_revision=created["base_session_revision"],
+        )
+    except VideoBoxApiError as exc:
+        if exc.status_code != 409:
+            raise _UnsafeToRetryError(exc) from exc
+        raise
+    except httpx.HTTPError as exc:
+        raise _UnsafeToRetryError(exc) from exc
     return {
         "status": "applied",
         "reply_text": None,

@@ -306,6 +306,195 @@ def test_ask_yujin_retries_once_on_network_failure_then_logs_and_raises(
     assert logged[0]["project_id"] == "does-not-matter"
 
 
+def test_ask_yujin_does_not_retry_after_unsafe_non_409_apply_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finding 1: `apply_yujin_editing_proposal`이 실패했는데 그게
+    409(`editing_proposal_needs_refresh` -- 적용이 거절됐다는 뜻, 아무것도
+    안 걸렸다)가 아니면 재시도하면 안 된다. 서버 라우트는 동기 `def`라서
+    스레드풀에서 돈다 -- 클라이언트가 타임아웃으로 포기해도 서버는 계속
+    돌아서 실제로 적용을 끝낼 수 있다. 재시도하면 세션을 다시 만들고
+    제안을 다시 만들어 두 번째로 적용해버려 이중 적용이 된다."""
+    from videobox_mcp import tools
+
+    client = _client_and_app_for(tmp_path)
+
+    session_calls = {"n": 0}
+    proposal_calls = {"n": 0}
+    apply_calls = {"n": 0}
+
+    async def fake_get_session(self: VideoBoxApiClient, *, project_id: str) -> dict[str, Any]:
+        session_calls["n"] += 1
+        return {"session_id": "s1", "project_id": project_id}
+
+    async def fake_create_proposal(
+        self: VideoBoxApiClient, *, project_id: str, session_id: str, instruction: str
+    ) -> dict[str, Any]:
+        proposal_calls["n"] += 1
+        return {"status": "ready", "proposal_id": "p1", "base_session_revision": 1}
+
+    async def fake_apply_500(
+        self: VideoBoxApiClient,
+        *,
+        project_id: str,
+        session_id: str,
+        proposal_id: str,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        apply_calls["n"] += 1
+        raise VideoBoxApiError(status_code=500, detail="apply exploded", path="/fake")
+
+    monkeypatch.setattr(VideoBoxApiClient, "get_latest_editing_session", fake_get_session)
+    monkeypatch.setattr(VideoBoxApiClient, "create_yujin_editing_proposal", fake_create_proposal)
+    monkeypatch.setattr(VideoBoxApiClient, "apply_yujin_editing_proposal", fake_apply_500)
+
+    logged: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        tools, "log_ask_yujin_escalation", lambda **kwargs: logged.append(kwargs)
+    )
+
+    import asyncio
+
+    async def run() -> None:
+        await tools.ask_yujin(client, project_id="does-not-matter", message="아무 말")
+
+    with pytest.raises(VideoBoxApiError) as excinfo:
+        asyncio.run(run())
+
+    assert excinfo.value.status_code == 500
+    # 재시도 없이 정확히 한 번씩만 -- 이중 적용 위험이 있는 자리라서.
+    assert session_calls["n"] == 1
+    assert proposal_calls["n"] == 1
+    assert apply_calls["n"] == 1
+    assert len(logged) == 1
+    assert logged[0]["retry_count"] == 1
+    assert "500" in logged[0]["error"]
+
+
+def test_ask_yujin_does_not_retry_after_unsafe_network_apply_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finding 1의 같은 규칙이 `httpx.HTTPError`(타임아웃 등)에도 적용된다 --
+    응답 자체가 없어도 서버 쪽에서 적용이 끝났을 수 있으니 안전하지 않다."""
+    from videobox_mcp import tools
+
+    client = _client_and_app_for(tmp_path)
+
+    session_calls = {"n": 0}
+    proposal_calls = {"n": 0}
+    apply_calls = {"n": 0}
+
+    async def fake_get_session(self: VideoBoxApiClient, *, project_id: str) -> dict[str, Any]:
+        session_calls["n"] += 1
+        return {"session_id": "s1", "project_id": project_id}
+
+    async def fake_create_proposal(
+        self: VideoBoxApiClient, *, project_id: str, session_id: str, instruction: str
+    ) -> dict[str, Any]:
+        proposal_calls["n"] += 1
+        return {"status": "ready", "proposal_id": "p1", "base_session_revision": 1}
+
+    async def fake_apply_timeout(
+        self: VideoBoxApiClient,
+        *,
+        project_id: str,
+        session_id: str,
+        proposal_id: str,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        apply_calls["n"] += 1
+        raise httpx.ReadTimeout("simulated apply timeout")
+
+    monkeypatch.setattr(VideoBoxApiClient, "get_latest_editing_session", fake_get_session)
+    monkeypatch.setattr(VideoBoxApiClient, "create_yujin_editing_proposal", fake_create_proposal)
+    monkeypatch.setattr(VideoBoxApiClient, "apply_yujin_editing_proposal", fake_apply_timeout)
+
+    logged: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        tools, "log_ask_yujin_escalation", lambda **kwargs: logged.append(kwargs)
+    )
+
+    import asyncio
+
+    async def run() -> None:
+        await tools.ask_yujin(client, project_id="does-not-matter", message="아무 말")
+
+    with pytest.raises(httpx.HTTPError):
+        asyncio.run(run())
+
+    assert session_calls["n"] == 1
+    assert proposal_calls["n"] == 1
+    assert apply_calls["n"] == 1
+    assert len(logged) == 1
+    assert logged[0]["retry_count"] == 1
+    # `str(httpx.ReadTimeout(...))`는 흔히 빈 문자열이다 -- Finding 2: 타입
+    # 이름까지 같이 남아야 로그가 증거로 쓸모 있다.
+    assert "ReadTimeout" in logged[0]["error"]
+
+
+def test_ask_yujin_retries_after_409_apply_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """409는 유일한 안전한 재시도 대상이다 -- `editing_proposal_needs_refresh`는
+    적용이 거절됐다는 뜻이라 아무것도 실제로 걸리지 않았다."""
+    from videobox_mcp import tools
+
+    client = _client_and_app_for(tmp_path)
+
+    session_calls = {"n": 0}
+    proposal_calls = {"n": 0}
+    apply_calls = {"n": 0}
+
+    async def fake_get_session(self: VideoBoxApiClient, *, project_id: str) -> dict[str, Any]:
+        session_calls["n"] += 1
+        return {"session_id": "s1", "project_id": project_id}
+
+    async def fake_create_proposal(
+        self: VideoBoxApiClient, *, project_id: str, session_id: str, instruction: str
+    ) -> dict[str, Any]:
+        proposal_calls["n"] += 1
+        return {"status": "ready", "proposal_id": "p1", "base_session_revision": 1}
+
+    async def fake_apply_409(
+        self: VideoBoxApiClient,
+        *,
+        project_id: str,
+        session_id: str,
+        proposal_id: str,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        apply_calls["n"] += 1
+        raise VideoBoxApiError(
+            status_code=409, detail="editing_proposal_needs_refresh", path="/fake"
+        )
+
+    monkeypatch.setattr(VideoBoxApiClient, "get_latest_editing_session", fake_get_session)
+    monkeypatch.setattr(VideoBoxApiClient, "create_yujin_editing_proposal", fake_create_proposal)
+    monkeypatch.setattr(VideoBoxApiClient, "apply_yujin_editing_proposal", fake_apply_409)
+
+    logged: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        tools, "log_ask_yujin_escalation", lambda **kwargs: logged.append(kwargs)
+    )
+
+    import asyncio
+
+    async def run() -> None:
+        await tools.ask_yujin(client, project_id="does-not-matter", message="아무 말")
+
+    with pytest.raises(VideoBoxApiError) as excinfo:
+        asyncio.run(run())
+
+    assert excinfo.value.status_code == 409
+    # 409는 안전해서 처음부터 다시 -- 최초 시도 + 1회 재시도, 그 이상은 없다.
+    assert session_calls["n"] == 2
+    assert proposal_calls["n"] == 2
+    assert apply_calls["n"] == 2
+    assert len(logged) == 1
+    assert logged[0]["retry_count"] == 1
+    assert "409" in logged[0]["error"]
+
+
 def test_ask_yujin_network_failure_becomes_a_tool_error_not_a_raw_exception(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

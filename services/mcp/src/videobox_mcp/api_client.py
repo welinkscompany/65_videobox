@@ -80,10 +80,14 @@ class VideoBoxApiClient:
     async def create_yujin_editing_proposal(
         self, *, project_id: str, session_id: str, instruction: str
     ) -> dict[str, Any]:
+        # 유진(LLM)의 판단 단계는 평소 10초, GPU 경합 아래서는 훨씬 길어질 수
+        # 있다 -- 클라이언트 기본 30초는 너무 빡빡해서 조기 타임아웃을 만든다
+        # (그리고 apply 단계에서는 그게 곧 안전하지 않은 재시도 상황이다).
         return await self._request(
             "POST",
             f"/api/projects/{project_id}/editing-sessions/{session_id}/yujin-editing-proposals",
             json={"instruction": instruction},
+            timeout=180.0,
         )
 
     async def apply_yujin_editing_proposal(
@@ -94,4 +98,5 @@ class VideoBoxApiClient:
             f"/api/projects/{project_id}/editing-sessions/{session_id}"
             f"/yujin-editing-proposals/{proposal_id}/apply",
             json={"expected_revision": expected_revision},
+            timeout=180.0,
         )
