@@ -32,6 +32,35 @@
 }
 ```
 
+### 2.1 도커 컨테이너 안에서 붙을 때 (예: AK 06번 직원)
+
+호출자가 그 자신도 도커 컨테이너 안에 있으면(예: AK-System 06번 직원)
+`127.0.0.1`이 컨테이너 자기 자신을 가리켜서 안 닿는다 — 대신
+**`host.docker.internal`**로 붙어야 한다:
+
+```json
+{
+  "mcpServers": {
+    "videobox": {
+      "type": "http",
+      "url": "http://host.docker.internal:8901/mcp",
+      "headers": {
+        "Authorization": "Bearer ${VIDEOBOX_MCP_HTTP_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+VideoBox MCP HTTP 서버는 **여전히 `127.0.0.1`에만 바인딩**한다 — 밖으로
+열지 않는다. `host.docker.internal:8901`은 허용 Host 이름 목록에만 추가돼
+있다(2026-09-28, 실사용 중 421 발견 → 고침). 토큰 인증은 그대로 필수이고,
+목록에 없는 다른 이름은 여전히 421로 거절된다.
+
+**이 항목을 반영하려면 VideoBox MCP HTTP 서버를 다시 띄워야 한다.**
+`scripts/start-videobox-mcp-http.ps1`을 재실행하면 된다 — 켜 둔 채로는
+코드가 안 바뀐다.
+
 ## 3. 노출된 도구
 
 - `create_project`/`list_projects`/`get_project`/`job_status` — 조회.

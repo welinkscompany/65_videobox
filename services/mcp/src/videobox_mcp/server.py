@@ -18,6 +18,7 @@ from typing import Any
 import httpx
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.server.transport_security import TransportSecuritySettings
 
 from . import tools
 from .api_client import DEFAULT_API_BASE_URL, VideoBoxApiClient, VideoBoxApiError
@@ -98,12 +99,26 @@ def build_server(client: VideoBoxApiClient) -> MCPServer:
     return server
 
 
-def build_http_app(client: VideoBoxApiClient, *, token: str, host: str = "127.0.0.1"):
+def build_http_app(client: VideoBoxApiClient, *, token: str, host: str = "127.0.0.1", port: int = 8901):
     """HTTP 전송 앱. 컨테이너 네트워크가 아니라 호스트 프로세스에서 띄운다
     (스펙 §2) -- 그래서 CLAUDE.md §6의 컨테이너 네트워크 경계 승인과 무관하다.
+
+    **바인드 주소는 그대로 `host`(기본 127.0.0.1)다 -- 밖으로 여는 게 아니다.**
+    `host.docker.internal:<port>`는 허용 Host 이름 목록에만 추가한다. AK-System
+    쪽 직원이 도커 컨테이너 안에서 `http://host.docker.internal:<port>/mcp`로
+    들어올 때, `mcp` SDK의 DNS 리바인딩 방지가 Host 헤더를 그 이름으로는
+    못 보고 421을 냈다(2026-09-28 실사용 발견). `transport_security`를 직접
+    만들어서 그 SDK의 기본값(`host`가 로컬일 때 자동으로 여는
+    `127.0.0.1:*`/`localhost:*`/`[::1]:*`)에 이 한 항목만 더한다 -- 토큰
+    인증은 그대로 필수, 다른 이름은 여전히 421이다.
     """
     server = build_server(client)
-    app = server.streamable_http_app(streamable_http_path="/mcp", host=host)
+    security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*", f"host.docker.internal:{port}"],
+        allowed_origins=["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"],
+    )
+    app = server.streamable_http_app(streamable_http_path="/mcp", host=host, transport_security=security)
     app.add_middleware(BearerAuthMiddleware, token=token)
     return app
 
@@ -118,7 +133,7 @@ def main_http() -> None:
     host = os.environ.get("VIDEOBOX_MCP_HTTP_HOST", "127.0.0.1")
     port = int(os.environ.get("VIDEOBOX_MCP_HTTP_PORT", "8901"))
     client = VideoBoxApiClient(base_url=base_url)
-    app = build_http_app(client, token=token, host=host)
+    app = build_http_app(client, token=token, host=host, port=port)
 
     import uvicorn
 
