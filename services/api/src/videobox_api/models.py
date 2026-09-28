@@ -1635,6 +1635,17 @@ class EditingSessionSegmentResponse(BaseModel):
     end_sec: float
     cut_action: str
     review_required: bool
+
+    @field_validator("cut_action", mode="before")
+    @classmethod
+    def _null_cut_action_means_keep(cls, value: object) -> object:
+        # 저장 계층은 이미 이 관용을 갖고 있다(`packages/core-engine/.../
+        # composition_plan.py`의 `str(segment.get("cut_action") or "keep")`
+        # 패턴, 여러 자리) -- 응답 모델도 같은 관용을 지켜야 내부에서 멀쩡히
+        # 처리되던 데이터가 API 경계에서만 500으로 안 터진다(2026-09-28,
+        # AK-Hermes가 `ask_yujin`으로 실제 프로젝트를 읽다가 실측).
+        return value or "keep"
+
     broll_override: dict[str, object] | None = None
     visual_overlays: list[dict[str, object]] = Field(default_factory=list)
     music_override: dict[str, object] | None = None
