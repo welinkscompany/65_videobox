@@ -208,7 +208,7 @@ def _run_sync(app: Any, registry_dir: Path) -> dict[str, Any]:
     from videobox_mcp.ak_decision_sync import sync_founder_decisions_once
     from videobox_mcp.api_client import VideoBoxApiClient
 
-    client = VideoBoxApiClient(base_url="http://videobox.test", transport=httpx.ASGITransport(app=app))
+    client = VideoBoxApiClient(base_url="http://127.0.0.1:5173", transport=httpx.ASGITransport(app=app))
     return asyncio.run(sync_founder_decisions_once(client, registry_dir=registry_dir))
 
 
