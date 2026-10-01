@@ -235,7 +235,7 @@ describe("TimelineReviewPage", () => {
     const reopenTimeline = vi.spyOn(api, "reopenTimeline");
     render(<TimelineReviewPage projectId="project-a" />);
 
-    expect(await screen.findByText("현재 편집본의 검토가 승인되었어요.")).toBeVisible();
+    expect(await screen.findByText("현재 편집본의 검토를 승인했어요.")).toBeVisible();
     // Already approved: re-approving is meaningless, and reopening is how the
     // owner gets back to editing without losing the approval record.
     expect(screen.queryByRole("button", { name: "검토 승인" })).toBeNull();

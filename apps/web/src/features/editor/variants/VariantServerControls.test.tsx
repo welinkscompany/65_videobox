@@ -21,7 +21,7 @@ describe("VariantServerControls", () => {
     const onPatch = vi.fn();
     render(<VariantServerControls variant={variant} onMaterialize={onMaterialize} onPatch={onPatch} onCreateHighlight={vi.fn()} />);
 
-    expect(screen.getByText("서버 변형 버전 3")).toBeInTheDocument();
+    expect(screen.getByText("세로 버전 3")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "세로 변형 준비" }));
     fireEvent.click(screen.getByRole("button", { name: "크롭 저장" }));
     fireEvent.click(screen.getByRole("button", { name: "캡션 저장" }));
@@ -110,7 +110,7 @@ describe("VariantServerControls", () => {
 
   it("shows the conflict state without hiding server lineage", () => {
     render(<VariantServerControls variant={{ ...variant, conflicts: [{ field: "crop", reason: "master_changed_while_locked", base_master_revision: 4, current_master_revision: 5 }] }} onMaterialize={vi.fn()} onPatch={vi.fn()} />);
-    expect(screen.getByText("서버 충돌 1건")).toBeInTheDocument();
-    expect(screen.getByText("마스터 변경을 확인해야 적용할 수 있어요.")).toBeInTheDocument();
+    expect(screen.getByText("마스터와 다른 곳 1건")).toBeInTheDocument();
+    expect(screen.getByText("마스터가 바뀌었어요. 달라진 곳을 먼저 정해 주세요.")).toBeInTheDocument();
   });
 });

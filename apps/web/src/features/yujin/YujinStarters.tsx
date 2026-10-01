@@ -24,7 +24,7 @@ export function YujinStarters({
   context,
   onSelect,
   disabled = false,
-  heading = "무엇을 도와드릴까요?",
+  heading = "유진에게 부탁하기",
   className = "",
   showAllByDefault = false,
 }: YujinStartersProps) {
@@ -55,7 +55,7 @@ export function YujinStarters({
   return (
     <div role="group" aria-label="대화 스타터" className={`vb-yujin-starters ${className}`.trim()}>
       <h3>{heading}</h3>
-      <span>스타터를 누르면 요청 문장이 입력창에 채워져요.</span>
+      <span>예시를 누르면 입력창에 채워져요.</span>
       <div className="vb-yujin-starters__list">
         {visibleStarters.map((starter) => (
           <Button

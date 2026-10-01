@@ -132,9 +132,9 @@ describe("product shell", () => {
     fireEvent.click(trigger);
 
     expect(await screen.findByRole("dialog", { name: "작업 상태" })).toBeVisible();
-    expect(screen.getByText("로컬 작업 상태를 확인하고 실패한 작업을 다시 시작할 수 있어요.")).toBeVisible();
+    expect(screen.getByText("작업 진행 상황을 보고, 실패한 작업을 다시 실행할 수 있어요.")).toBeVisible();
     expect(await screen.findByRole("region", { name: "유진 연결 상태" })).toBeVisible();
-    expect(screen.getByText("유진과 대화할 준비가 확인됐어요.")).toBeVisible();
+    expect(screen.getByText("유진과 대화할 수 있어요.")).toBeVisible();
     expect(screen.getByRole("region", { name: "작업 복구" })).toBeVisible();
     expect(screen.getByText("음성 받아쓰기")).toBeVisible();
     expect(getYujinStatus).toHaveBeenCalledTimes(1);
@@ -249,7 +249,7 @@ describe("product shell", () => {
     const compact = await screen.findByRole("button", { name: "조밀한 화면: 꺼짐" });
     fireEvent.click(compact);
     expect(window.localStorage.getItem("videobox.settings")).toContain("compact");
-    expect(screen.getByText("설정은 이 기기에서만 관리됩니다.")).toBeTruthy();
+    expect(screen.getByText("설정은 이 기기에만 저장돼요.")).toBeTruthy();
     expect(screen.queryByText(/billing|team|account/i)).toBeNull();
   });
 
@@ -258,7 +258,7 @@ describe("product shell", () => {
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/settings/ai-privacy"] }));
     render(<AppRouter router={router} />);
 
-    expect(await screen.findByText("모든 처리는 이 기기 안에서만 이뤄집니다.")).toBeTruthy();
+    expect(await screen.findByText("모든 처리는 이 기기 안에서만 해요.")).toBeTruthy();
     expect(screen.queryByRole("region", { name: "내 목소리 준비 상태" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "내 목소리" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/settings/voice"));
@@ -434,7 +434,7 @@ describe("output format setting", () => {
     // carries no format field, so picking MOV changed nothing at all.
     render(<SettingsPage section="output" onNavigate={vi.fn()} projectId="project-a" />);
 
-    expect(screen.getByText("완성본은 MP4(H.264)로 만듭니다.")).toBeVisible();
+    expect(screen.getByText("완성본은 MP4(H.264)로 만들어요.")).toBeVisible();
     expect(screen.queryByRole("button", { name: "MOV" })).toBeNull();
   });
 });
@@ -445,7 +445,7 @@ describe("settings that cannot do what they offered", () => {
     // could never be false. A fact is useful; a dead switch is not.
     render(<SettingsPage section="ai-privacy" onNavigate={vi.fn()} projectId="project-a" />);
 
-    expect(screen.getByText("모든 처리는 이 기기 안에서만 이뤄집니다.")).toBeVisible();
+    expect(screen.getByText("모든 처리는 이 기기 안에서만 해요.")).toBeVisible();
     expect(screen.queryByRole("button", { name: /이 기기에서만 처리/ })).toBeNull();
   });
 

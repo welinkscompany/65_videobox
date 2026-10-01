@@ -40,13 +40,13 @@ describe("JobRecovery", () => {
     expect(screen.getByTestId("job-row-retryable")).toHaveTextContent(/시작 2026/);
     expect(screen.getByText(/승인 대기 중/)).toBeVisible();
     expect(screen.getAllByRole("button", { name: "다시 실행" })).toHaveLength(1);
-    expect(screen.getByText("자동 재시도 대신 원래 화면에서 직접 다시 실행해 주세요.")).toBeVisible();
+    expect(screen.getByText("원래 화면에서 다시 실행해 주세요.")).toBeVisible();
   });
   it("lazily shows current and global work without mutating on mount", async () => {
     render(<JobRecovery projectId="project-a" />);
 
     expect(await screen.findByText("음성 받아쓰기")).toBeVisible();
-    expect(screen.getByText("다시 확인이 필요해요")).toBeVisible();
+    expect(screen.getByText("실패", { exact: true })).toBeVisible();
     expect(api.retryJob).not.toHaveBeenCalled();
     expect(api.listAllJobs).not.toHaveBeenCalled();
     expect(document.body.textContent).not.toMatch(/job-internal|asset-internal|transcription|provider internal/i);
@@ -91,7 +91,7 @@ describe("JobRecovery", () => {
     expect(api.retryJob).toHaveBeenCalledWith("project-b", "job-global-internal");
     await act(async () => releaseRetry({ job_id: "job-new", status: "succeeded" }));
     await waitFor(() => expect(api.listAllJobs).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText("작업을 다시 시작했어요. 최신 상태를 확인했습니다.")).toBeVisible();
+    expect(await screen.findByText("작업을 다시 시작했어요.")).toBeVisible();
     expect(screen.queryByRole("button", { name: "다시 실행" })).not.toBeInTheDocument();
   });
 
@@ -148,7 +148,7 @@ describe("JobRecovery", () => {
     expect(screen.getByText("장면 추천")).toBeVisible();
     expect(screen.getByText("음악 추천")).toBeVisible();
     expect(screen.getByText("원본 미리보기 준비")).toBeVisible();
-    expect(screen.getByText("자동 재시도 대신 원래 화면에서 직접 다시 실행해 주세요.")).toBeVisible();
+    expect(screen.getByText("원래 화면에서 다시 실행해 주세요.")).toBeVisible();
     expect(document.body.textContent).not.toMatch(/preview_render|capcut_export|timeline_build|segment_analysis|partial_regeneration|unknown_type/);
   });
 
@@ -163,7 +163,7 @@ describe("JobRecovery", () => {
     fireEvent.click(screen.getByRole("button", { name: "다시 불러오기" }));
     const retry = await screen.findByRole("button", { name: "다시 실행" });
     fireEvent.click(retry);
-    expect(await screen.findByText("자동으로 다시 시작하지 못했어요. 해당 화면에서 직접 다시 실행해 주세요.")).toBeVisible();
+    expect(await screen.findByText("자동으로 다시 시작하지 못했어요. 원래 화면에서 다시 실행해 주세요.")).toBeVisible();
     await waitFor(() => expect(api.listJobs).toHaveBeenCalledTimes(3));
   });
 
@@ -176,7 +176,7 @@ describe("JobRecovery", () => {
     fireEvent.click(await screen.findByRole("button", { name: "다시 실행" }));
 
     expect(await screen.findByText("작업 상태를 불러오지 못했어요.")).toBeVisible();
-    expect(screen.queryByText("작업을 다시 시작했어요. 최신 상태를 확인했습니다.")).not.toBeInTheDocument();
+    expect(screen.queryByText("작업을 다시 시작했어요.")).not.toBeInTheDocument();
   });
 
   it("keeps an old current retry from refetching, messaging, or unlocking a newer retry after current-global-current", async () => {
@@ -195,10 +195,10 @@ describe("JobRecovery", () => {
 
     await act(async () => releaseOld({ job_id: "old-new", status: "succeeded" }));
     expect(screen.getByRole("button", { name: "다시 실행" })).toBeDisabled();
-    expect(screen.queryByText("작업을 다시 시작했어요. 최신 상태를 확인했습니다.")).not.toBeInTheDocument();
+    expect(screen.queryByText("작업을 다시 시작했어요.")).not.toBeInTheDocument();
 
     await act(async () => releaseNew({ job_id: "new-new", status: "succeeded" }));
-    expect(await screen.findByText("작업을 다시 시작했어요. 최신 상태를 확인했습니다.")).toBeVisible();
+    expect(await screen.findByText("작업을 다시 시작했어요.")).toBeVisible();
     expect(api.listJobs).toHaveBeenCalledTimes(3);
   });
 

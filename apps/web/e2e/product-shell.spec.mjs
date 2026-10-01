@@ -137,7 +137,7 @@ test("approved brief prepares a local draft without an editing-session mutation"
   await expect(page.getByRole("heading", { name: "장면 영상 추가" })).toBeVisible();
   await page.locator("#gap-broll-file").setInputFiles({ name: "beach.mp4", mimeType: "video/mp4", buffer: Buffer.from("local-video") });
   await page.getByRole("button", { name: "영상 추가" }).click();
-  await expect(page.getByText("영상 추가를 확인했어요. 기획으로 돌아가 다시 준비해 주세요.")).toBeVisible();
+  await expect(page.getByText("영상을 넣었어요. 기획으로 돌아가 초안을 다시 준비해 주세요.")).toBeVisible();
   await expect(page.getByRole("button", { name: "기획으로 돌아가기" })).toBeVisible();
   await page.getByRole("button", { name: "기획으로 돌아가기" }).click();
   await expect(page.getByRole("button", { name: "다시 준비" })).toBeVisible();

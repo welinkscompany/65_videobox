@@ -162,7 +162,7 @@ describe("FootageOrganizerPage", () => {
   it("shows retry state when the source list fails", async () => {
     vi.mocked(api.listLibraryAssets).mockRejectedValueOnce(new Error("offline"));
     render(<FootageOrganizerPage />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("촬영본을 불러오지 못했습니다");
+    expect(await screen.findByRole("alert")).toHaveTextContent("촬영본을 불러오지 못했어요");
     expect(screen.getByRole("button", { name: "다시 시도" })).toBeVisible();
   });
 

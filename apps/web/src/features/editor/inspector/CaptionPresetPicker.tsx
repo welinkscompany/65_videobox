@@ -166,7 +166,7 @@ export function CaptionPresetPicker({
     <section className="vb-caption-presets" aria-labelledby="caption-presets-heading">
       <h3 id="caption-presets-heading">캡션 모양</h3>
       {error ? <p role="status">{error}</p> : null}
-      {currentStyle ? <Button type="button" variant="outline" onClick={() => void keepCurrent()}>이 모양 저장해 두기</Button> : null}
+      {currentStyle ? <Button type="button" variant="outline" onClick={() => void keepCurrent()}>지금 모양 저장</Button> : null}
       {/* **드롭다운 하나**(owner 지시 2026-09-05: "캡션 모양이랑 저장한 포맷도
           재서 똑같이 정리해"). 모양마다 `적용`·`즐겨찾기` 단추가 둘씩 붙어
           있어서 모양을 저장할수록 2N+1로 늘어났다 -- 글꼴에서 15개가 30단추가
@@ -184,7 +184,7 @@ export function CaptionPresetPicker({
           </NativeSelect>
         </div>
         {chosen && !favourites.includes(chosen.preset_id) && recents.includes(chosen.preset_id)
-          ? <p>최근에 썼어요</p> : null}
+          ? <p>최근 사용</p> : null}
         <Button type="button" variant="outline" onClick={() => { if (chosen) void apply(chosen); }}>고른 모양 적용</Button>
         {/* 즐겨찾기는 **고른 모양 하나**에만 붙인다 -- 목록이 접히면서 모양마다
             두던 단추는 갈 자리가 없어졌다. */}

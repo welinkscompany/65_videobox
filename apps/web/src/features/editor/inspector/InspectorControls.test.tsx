@@ -1507,7 +1507,7 @@ describe("InspectorControls", () => {
     );
 
     openInspectorTab("보정");
-    expect(screen.getByText("캡컷으로 넘기면 비슷한 색감으로 바뀝니다.")).toBeInTheDocument();
+    expect(screen.getByText("캡컷으로 넘기면 비슷한 색감으로 바뀌어요.")).toBeInTheDocument();
   });
 
   it("lets the owner set playback speed and loudness on a clip", async () => {

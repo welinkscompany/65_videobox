@@ -16,7 +16,7 @@ describe("toExactPreviewState", () => {
     ["pending", "미리보기를 준비하고 있어요."],
     ["running", "편집본 미리보기를 만드는 중이에요."],
     ["failed", "미리보기를 만들지 못했어요."],
-    ["stale", "이전 편집본 미리보기는 재생하지 않아요."],
+    ["stale", "편집이 바뀌었어요. 미리보기를 새로 만들어 주세요."],
     ["unavailable", "아직 편집본 미리보기가 없어요."],
   ] as const)("maps %s to clear Korean recovery copy", (status, copy) => {
     expect(toExactPreviewState({ status }, 4)).toMatchObject({ copy, action: "refresh" });

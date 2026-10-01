@@ -118,7 +118,7 @@ describe("AppRouter URL ownership", () => {
     const video = await screen.findByLabelText("공유된 영상");
     fireEvent.error(video);
 
-    expect(await screen.findByText("이 링크를 열 수 없어요. 만료되었거나 취소된 링크일 수 있어요.")).toBeVisible();
+    expect(await screen.findByText("열 수 없는 링크예요. 기간이 지났거나 취소됐을 수 있어요.")).toBeVisible();
   });
 
   // 2026-08-19 owner 지적: `내 라이브러리`를 누르면 좌측 메뉴가 통째로 사라져서
@@ -503,11 +503,11 @@ describe("AppRouter URL ownership", () => {
     fireEvent.click(screen.getByRole("button", { name: "둘째 영상 완전 삭제" }));
     expect(deleteProjectPermanently).not.toHaveBeenCalled();
     // 첫 확인은 되돌릴 수 없다는 것을 말하고, 지우지는 않는다.
-    expect(screen.getByText(/되돌릴 수 없어요/)).toBeVisible();
+    expect(screen.getByText(/되돌릴 수 없음/)).toBeVisible();
 
-    fireEvent.click(screen.getByRole("button", { name: /삭제 1차 확인/ }));
+    fireEvent.click(screen.getByRole("button", { name: /삭제 확인 · 되돌릴 수 없음/ }));
     expect(deleteProjectPermanently).not.toHaveBeenCalled();
-    expect(screen.getByText(/한 번 더 확인/)).toBeVisible();
+    expect(screen.getByText(/영구 삭제 확정/)).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: /영구 삭제/ }));
 
@@ -585,7 +585,7 @@ describe("AppRouter URL ownership", () => {
     fireEvent.click(screen.getByRole("button", { name: "둘째 영상 보관하기" }));
     fireEvent.click(screen.getByRole("button", { name: "둘째 영상 보관 확인" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("프로젝트 작업에 실패했어요. 다시 시도해 주세요.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("프로젝트를 바꾸지 못했어요. 다시 시도해 주세요.");
   });
 
   it("keeps a failed workspace summary out of project creation", async () => {
@@ -870,8 +870,8 @@ describe("AppRouter URL ownership", () => {
     render(<AppRouter router={router} />);
 
     expect(await screen.findByTestId("settings-page")).toBeVisible();
-    expect(screen.getByRole("heading", { name: "일반" })).toBeVisible();
-    await waitFor(() => expect(router.state.location.pathname).toBe("/settings/general"));
+    expect(screen.getByRole("heading", { name: "화면" })).toBeVisible();
+    await waitFor(() => expect(router.state.location.pathname).toBe("/settings/appearance"));
     expect(getPreview).not.toHaveBeenCalled();
     expect(getExport).not.toHaveBeenCalled();
   });
@@ -892,7 +892,7 @@ describe("AppRouter URL ownership", () => {
     expect(await screen.findByTestId("settings-page")).toBeVisible();
     // 띠는 **지금 프로젝트만** 보여 준다 -- 보인다는 것이 곧 열려 있다는 뜻이다.
     expect(screen.getByRole("button", { name: "B" })).toBeVisible();
-    await waitFor(() => expect(router.state.location.href).toBe("/settings/general?project_id=project_b"));
+    await waitFor(() => expect(router.state.location.href).toBe("/settings/appearance?project_id=project_b"));
   });
 
   it("keeps the open project when the top bar settings entry is activated", async () => {
@@ -911,7 +911,7 @@ describe("AppRouter URL ownership", () => {
     // 보이는 화면에서 접힌다 -- 같은 기능이 화면에 둘 있으면 안 된다.
     fireEvent.click(within(await screen.findByRole("navigation", { name: "화면 이동" })).getByRole("button", { name: "설정" }));
 
-    await waitFor(() => expect(router.state.location.href).toBe("/settings/general?project_id=project_b"));
+    await waitFor(() => expect(router.state.location.href).toBe("/settings/appearance?project_id=project_b"));
     expect(screen.getByRole("button", { name: "B" })).toBeVisible();
   });
 
@@ -1074,6 +1074,9 @@ describe("AppRouter URL ownership", () => {
     // 이름은 자동이다 -- 무엇이든 붙되 비어 있지는 않다.
     expect(createProject).toHaveBeenCalledTimes(1);
     expect(String(createProject.mock.calls[0][0].name).trim().length).toBeGreaterThan(0);
+    // 시각만 붙이면 날마다 같은 이름이 쌓인다(실측: "새 영상 오후 08:36"과 "내 목소리
+    // 오후 08:36"이 목록에 나란히). 날짜를 함께 붙인다.
+    expect(String(createProject.mock.calls[0][0].name)).toMatch(/^새 영상 \d{1,2}월 \d{1,2}일 \d{2}:\d{2}$/);
     expect(screen.queryByLabelText("새 프로젝트 이름")).toBeNull();
   });
 
@@ -1104,7 +1107,7 @@ describe("AppRouter URL ownership", () => {
     render(<AppRouter router={router} />);
     fireEvent.click(await screen.findByRole("button", { name: "+ 새로 만들기" }));
 
-    expect(await screen.findByText("프로젝트는 만들어졌지만 편집판을 열지 못했어요. 방금 만든 프로젝트에서 이어가 주세요.")).toBeVisible();
+    expect(await screen.findByText("프로젝트는 만들었지만 편집판을 열지 못했어요. 목록에서 방금 만든 프로젝트를 열어 주세요.")).toBeVisible();
     expect(router.state.location.pathname).toBe("/projects");
     await waitFor(() => expect(listProjects).toHaveBeenCalledTimes(2));
   });

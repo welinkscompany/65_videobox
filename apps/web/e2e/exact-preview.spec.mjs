@@ -311,7 +311,7 @@ test("source revision makes an older exact proxy stale and blocks its player", a
   const state = { current: manifest({ tracks: oneNarrationClip, revision: 8, exact: { status: "succeeded", url: "/api/projects/local-draft/exact-previews/generation-7/content", artifact_revision: 7, timeline_start_sec: 2, timeline_end_sec: 8 } }), retryBodies: [] };
   await openEditor(page, state);
 
-  await expect(page.locator(".vb-preview-stage__empty")).toContainText("이전 편집본 미리보기는 재생하지 않아요.");
+  await expect(page.locator(".vb-preview-stage__empty")).toContainText("편집이 바뀌었어요. 미리보기를 새로 만들어 주세요.");
   await expect(page.locator("audio, video")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "미리보기 새로 만들기" })).toBeVisible();
 });
@@ -355,7 +355,7 @@ test("audition replaces the exact player without autoplay and can return to exac
   // "B-roll"은 2026-09-07에 화면에서 "영상"으로 통일됐다(owner 승인,
   // `SideNav.tsx` 주석 참고 -- 자료실 분류 목록도 이미 "영상"이었다).
   await page.getByRole("button", { name: "영상 · 1번째 장면 원본 열기" }).click();
-  const audition = page.getByLabel("영상 · 1번째 장면 소스 미리보기");
+  const audition = page.getByLabel("영상 · 1번째 장면 원본 재생");
   await expect(audition).toHaveCount(1);
   await expect(audition).not.toHaveAttribute("autoplay");
   await expect(audition).toHaveJSProperty("autoplay", false);

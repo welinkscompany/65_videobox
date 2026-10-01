@@ -16,7 +16,7 @@ describe("PreviewStage", () => {
     expect(screen.getByLabelText("편집본 미리보기")).toHaveAttribute("src", "/api/exact.mp4");
     expect(screen.getByLabelText("편집본 미리보기")).not.toHaveAttribute("autoplay");
     expect(container.querySelectorAll("video, audio")).toHaveLength(1);
-    expect(screen.getByText(/캡션은 영상에 포함되어 재생됩니다/)).toBeInTheDocument();
+    expect(screen.getByText(/캡션도 함께 재생돼요/)).toBeInTheDocument();
     expect(container.querySelector(".vb-preview-stage__caption-overlay")).toBeNull();
   });
 
@@ -43,7 +43,7 @@ describe("PreviewStage", () => {
     expect(container.querySelector(".vb-preview-stage__burned-caption")).toBeNull();
     const status = container.querySelector(".vb-preview-stage__status");
     expect(status).not.toBeNull();
-    expect(status).toHaveTextContent("캡션은 영상에 포함되어 재생됩니다");
+    expect(status).toHaveTextContent("캡션도 함께 재생돼요");
     expect(status).toHaveTextContent("타임라인 0.0초");
   });
 
@@ -150,9 +150,9 @@ describe("PreviewStage", () => {
     const pause = vi.spyOn(exact, "pause").mockImplementation(() => undefined);
     rerender(<PreviewStage {...current} auditionRequest={{ requestId: 1, source: current.sources[0] }} />);
     expect(pause).toHaveBeenCalled();
-    expect(screen.getByLabelText("B-roll A 소스 미리보기")).toHaveAttribute("src", "/api/assets/a/content");
-    expect(screen.getByLabelText("B-roll A 소스 미리보기")).not.toHaveAttribute("autoplay");
-    expect(screen.getByText("소스 미리보기")).toBeInTheDocument();
+    expect(screen.getByLabelText("B-roll A 원본 재생")).toHaveAttribute("src", "/api/assets/a/content");
+    expect(screen.getByLabelText("B-roll A 원본 재생")).not.toHaveAttribute("autoplay");
+    expect(screen.getByText("원본 미리보기")).toBeInTheDocument();
     expect(container.querySelectorAll("video, audio")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "편집본으로 돌아가기" }));
     expect(screen.getByLabelText("편집본 미리보기")).toBeInTheDocument();
@@ -161,7 +161,7 @@ describe("PreviewStage", () => {
   it("guides a browser-incompatible source back to the exact edited preview", () => {
     const { rerender } = render(<PreviewStage {...current} />);
     rerender(<PreviewStage {...current} auditionRequest={{ requestId: 1, source: current.sources[0] }} />);
-    const audition = screen.getByLabelText("B-roll A 소스 미리보기") as HTMLVideoElement;
+    const audition = screen.getByLabelText("B-roll A 원본 재생") as HTMLVideoElement;
     Object.defineProperty(audition, "videoWidth", { configurable: true, value: 0 });
     Object.defineProperty(audition, "videoHeight", { configurable: true, value: 0 });
 
@@ -177,7 +177,7 @@ describe("PreviewStage", () => {
   it("replaces an audition compatibility notice with current exact-preview recovery", async () => {
     const rendered = render(<PreviewStage {...current} />);
     rendered.rerender(<PreviewStage {...current} auditionRequest={{ requestId: 1, source: current.sources[0] }} />);
-    const audition = screen.getByLabelText("B-roll A 소스 미리보기") as HTMLVideoElement;
+    const audition = screen.getByLabelText("B-roll A 원본 재생") as HTMLVideoElement;
     Object.defineProperty(audition, "videoWidth", { configurable: true, value: 0 });
     Object.defineProperty(audition, "videoHeight", { configurable: true, value: 0 });
     fireEvent.loadedMetadata(audition);
@@ -193,21 +193,21 @@ describe("PreviewStage", () => {
     const { container, rerender } = render(<PreviewStage {...current} auditionRequest={null} />);
     rerender(<PreviewStage {...current} auditionRequest={{ requestId: 1, source: { id: "broll:image-1", label: "제품 사진", url: "/api/projects/project-a/assets/image-1/content", mediaKind: "video", timelineRange: { startSec: 3, endSec: 7 } } }} />);
 
-    expect(screen.getByLabelText("제품 사진 소스 미리보기")).toBeInTheDocument();
+    expect(screen.getByLabelText("제품 사진 원본 재생")).toBeInTheDocument();
     expect(container.querySelectorAll("audio, video")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "편집본으로 돌아가기" }));
     rerender(<PreviewStage {...current} auditionRequest={{ requestId: 2, source: { id: "broll:image-1", label: "제품 사진", url: "/api/projects/project-a/assets/image-1/content", mediaKind: "video", timelineRange: { startSec: 3, endSec: 7 } } }} />);
-    expect(screen.getByLabelText("제품 사진 소스 미리보기")).toBeInTheDocument();
+    expect(screen.getByLabelText("제품 사진 원본 재생")).toBeInTheDocument();
     expect(container.querySelectorAll("audio, video")).toHaveLength(1);
   });
 
   it("switches from a playable audition to one non-playable image surface without retaining media", () => {
     const { container, rerender } = render(<PreviewStage {...current} auditionRequest={{ requestId: 1, source: { id: "audio-1", label: "현장 오디오", url: "/api/projects/project-a/assets/audio-1/content", mediaKind: "audio", timelineRange: { startSec: 3, endSec: 7 } } }} />);
-    expect(screen.getByLabelText("현장 오디오 소스 미리보기").tagName).toBe("AUDIO");
+    expect(screen.getByLabelText("현장 오디오 원본 재생").tagName).toBe("AUDIO");
     expect(container.querySelectorAll("audio, video")).toHaveLength(1);
 
     rerender(<PreviewStage {...current} auditionRequest={{ requestId: 2, source: { id: "image-1", label: "제품 사진", url: "/api/projects/project-a/assets/image-1/content", mediaKind: "image", timelineRange: { startSec: 3, endSec: 7 } } }} />);
-    expect(screen.getByLabelText("제품 사진 소스 미리보기").tagName).toBe("IMG");
+    expect(screen.getByLabelText("제품 사진 원본 재생").tagName).toBe("IMG");
     expect(container.querySelectorAll("audio, video")).toHaveLength(0);
     expect(container.querySelectorAll("img")).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "재생 또는 일시정지" })).toBeNull();
@@ -510,7 +510,7 @@ describe("PreviewStage", () => {
 
     const rendered = render(<PreviewStage {...current} />);
     rendered.rerender(<PreviewStage {...current} auditionRequest={{ requestId: 1, source: current.sources[0] }} />);
-    const audition = screen.getByLabelText("B-roll A 소스 미리보기") as HTMLVideoElement;
+    const audition = screen.getByLabelText("B-roll A 원본 재생") as HTMLVideoElement;
     const play = vi.spyOn(audition, "play").mockResolvedValue(undefined);
     const returnButton = screen.getByRole("button", { name: "편집본으로 돌아가기" });
     expect(fireEvent.keyDown(returnButton, { key: "Enter" })).toBe(true);

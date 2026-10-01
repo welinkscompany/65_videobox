@@ -107,7 +107,7 @@ export function ProjectTitleDialog({ projectId, currentName, open, onOpenChange,
       <DialogContent className="vb-dialog-content">
         <DialogHeader>
           <DialogTitle>영상 제목 바꾸기</DialogTitle>
-          <DialogDescription>이 영상을 부를 이름이에요. 언제든 다시 바꿀 수 있어요.</DialogDescription>
+          <DialogDescription>언제든 다시 바꿀 수 있어요.</DialogDescription>
         </DialogHeader>
         <label className="grid gap-2 text-sm" htmlFor="vb-project-title">새 제목</label>
         <Input

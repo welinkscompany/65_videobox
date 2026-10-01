@@ -43,7 +43,7 @@ describe("MediaAnalysisStatusPanel", () => {
 
     expect(await screen.findByRole("heading", { name: "분석 상태" })).toBeVisible();
     expect(screen.getAllByText("회의 장면")[0]).toBeVisible();
-    expect(screen.getByText(/확인이 필요해요/)).toBeVisible();
+    expect(screen.getByText(/확인 필요/)).toBeVisible();
     expect(document.body.textContent).not.toMatch(/asset-project-a|analysis-internal|needs_review|provider session/i);
   });
 
@@ -94,6 +94,6 @@ describe("MediaAnalysisStatusPanel", () => {
     await screen.findByRole("heading", { name: "분석 상태" });
     await act(async () => resolveA({ items: [analysis("needs_review", 1)] }));
 
-    expect(screen.queryByText(/확인이 필요해요/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/확인 필요/)).not.toBeInTheDocument();
   });
 });

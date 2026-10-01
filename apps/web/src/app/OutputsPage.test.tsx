@@ -170,7 +170,7 @@ describe("OutputsPage", () => {
 
     await waitFor(() => expect(renderSubtitle).toHaveBeenCalledWith("project_a", { timeline_job_id: "timeline-current" }));
     await waitFor(() => expect(api.getSubtitle).toHaveBeenCalledWith("project_a", "subtitle-current"));
-    expect(await screen.findByText("자막이 준비되었어요.")).toBeVisible();
+    expect(await screen.findByText("자막이 준비됐어요.")).toBeVisible();
     expect(renderSubtitle).toHaveBeenCalledTimes(1);
     // owner 요청(2026-08-28): "srt... 내보내기". 준비된 자막 옆에 실제로
     // 내려받는 문이 보여야 한다.
@@ -200,7 +200,7 @@ describe("OutputsPage", () => {
     render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
 
     expect(await screen.findByText("자막이 최신 편집본과 달라요.")).toBeVisible();
-    expect(screen.queryByText("자막이 준비되었어요.")).not.toBeInTheDocument();
+    expect(screen.queryByText("자막이 준비됐어요.")).not.toBeInTheDocument();
   });
 
   it("keeps subtitle rendering disabled when the active review has a blocker", async () => {
@@ -319,7 +319,7 @@ describe("OutputsPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "자막 만들기" }));
 
-    expect(await screen.findByText("자막이 준비되었어요.")).toBeVisible();
+    expect(await screen.findByText("자막이 준비됐어요.")).toBeVisible();
     expect(screen.queryByText("자막을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.")).not.toBeInTheDocument();
     expect(api.listJobs).toHaveBeenCalledTimes(2);
   });
@@ -357,7 +357,7 @@ describe("OutputsPage", () => {
 
     render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
 
-    expect(await screen.findByText("자막이 준비되었어요.")).toBeVisible();
+    expect(await screen.findByText("자막이 준비됐어요.")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "자막 만들기" }));
 
     expect(await screen.findByText("자막을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.")).toBeVisible();
@@ -409,7 +409,7 @@ describe("OutputsPage", () => {
     vi.mocked(api.listJobs).mockResolvedValue([activeTimelineJob, subtitleJob] as never);
     fireEvent.click(screen.getByRole("button", { name: "상태 다시 확인" }));
 
-    expect(await screen.findByText("자막이 준비되었어요.")).toBeVisible();
+    expect(await screen.findByText("자막이 준비됐어요.")).toBeVisible();
     expect(screen.queryByText("자막을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.")).not.toBeInTheDocument();
   });
 
@@ -449,7 +449,7 @@ describe("OutputsPage", () => {
     expect(screen.getByRole("button", { name: "자막 만드는 중" })).toBeDisabled();
     resolveSubtitle({ job_id: subtitleJob.job_id, status: "succeeded" });
 
-    expect(await screen.findByText("자막이 준비되었어요.")).toBeVisible();
+    expect(await screen.findByText("자막이 준비됐어요.")).toBeVisible();
     expect(renderSubtitle).toHaveBeenCalledTimes(1);
   });
 
@@ -849,7 +849,7 @@ describe("OutputsPage", () => {
         upload_scheduled_summary_ko: "이번 주 목요일에 유튜브로 올릴 예정입니다.",
       }),
     );
-    expect(await screen.findByText("대표님 결재함에 올렸어요. 승인하시면 업로드를 진행할 수 있어요.")).toBeVisible();
+    expect(await screen.findByText("대표님 결재함에 올렸어요. 승인하시면 올릴 수 있어요.")).toBeVisible();
   });
 
   it.each([
@@ -948,7 +948,7 @@ describe("OutputsPage", () => {
     });
 
     render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("button", { name: "동료에게 공유 링크 만들기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "공유 링크 만들기" }));
 
     await waitFor(() => expect(createPreviewShare).toHaveBeenCalledWith("project_a", currentFinalJob.job_id));
     const link = await screen.findByDisplayValue(`${window.location.origin}/preview/opaque-token-abc`);
@@ -969,10 +969,10 @@ describe("OutputsPage", () => {
     const revokePreviewShare = vi.spyOn(api, "revokePreviewShare").mockResolvedValue({ revoked: true });
 
     render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("button", { name: "동료에게 공유 링크 만들기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "공유 링크 만들기" }));
     await screen.findByDisplayValue(`${window.location.origin}/preview/opaque-token-abc`);
 
-    fireEvent.click(screen.getByRole("button", { name: "이 링크 취소하기" }));
+    fireEvent.click(screen.getByRole("button", { name: "링크 취소" }));
 
     await waitFor(() => expect(revokePreviewShare).toHaveBeenCalledWith("project_a", "preview-share-1"));
     expect(await screen.findByText("이 링크를 취소했어요. 더 이상 열리지 않아요.")).toBeVisible();
@@ -997,8 +997,8 @@ describe("OutputsPage", () => {
 
     render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
 
-    expect(await screen.findByText("공유 링크가 활성 상태예요. 주소는 처음 만들 때만 보여드려요.")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "이 링크 취소하기" }));
+    expect(await screen.findByText("공유 링크가 열려 있어요. 주소는 처음 만들 때만 보여요.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "링크 취소" }));
 
     await waitFor(() => expect(revokePreviewShare).toHaveBeenCalledWith("project_a", "preview-share-old"));
     expect(await screen.findByText("이 링크를 취소했어요. 더 이상 열리지 않아요.")).toBeVisible();
@@ -1018,9 +1018,9 @@ describe("OutputsPage", () => {
 
     render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
 
-    await screen.findByRole("button", { name: "동료에게 공유 링크 만들기" });
-    expect(screen.queryByRole("button", { name: "이 링크 취소하기" })).toBeNull();
-    expect(screen.queryByText("공유 링크가 활성 상태예요. 주소는 처음 만들 때만 보여드려요.")).toBeNull();
+    await screen.findByRole("button", { name: "공유 링크 만들기" });
+    expect(screen.queryByRole("button", { name: "링크 취소" })).toBeNull();
+    expect(screen.queryByText("공유 링크가 열려 있어요. 주소는 처음 만들 때만 보여요.")).toBeNull();
   });
 
   it("saves the format of a video the owner liked, under a name they chose", async () => {
@@ -1039,7 +1039,7 @@ describe("OutputsPage", () => {
 
     render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
     fireEvent.change(await screen.findByLabelText("포맷 이름"), { target: { value: "내 브이로그 포맷" } });
-    fireEvent.click(screen.getByRole("button", { name: "이 포맷 저장하기" }));
+    fireEvent.click(screen.getByRole("button", { name: "포맷 저장" }));
 
     await waitFor(() => expect(save).toHaveBeenCalledWith("project_a", { name: "내 브이로그 포맷", session_id: "session-a" }));
     expect(await screen.findByText("포맷을 저장했어요. 다음 영상에서 편집 화면의 저장한 포맷에서 고를 수 있어요.")).toBeVisible();
@@ -1058,7 +1058,7 @@ describe("OutputsPage", () => {
 
     render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
     await screen.findByLabelText("포맷 이름");
-    fireEvent.click(screen.getByRole("button", { name: "이 포맷 저장하기" }));
+    fireEvent.click(screen.getByRole("button", { name: "포맷 저장" }));
 
     expect(save).not.toHaveBeenCalled();
   });
@@ -1431,8 +1431,8 @@ describe("OutputsPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "CapCut 초안 만들기" }));
     await waitFor(() => expect(startCapcutDraftExport).toHaveBeenCalledWith("project_a", { timeline_job_id: "timeline-current" }));
     await waitFor(() => expect(api.getCapcutDraftExport).toHaveBeenCalledWith("project_a", "capcut-current-timeline"));
-    expect(await screen.findByText("CapCut 초안이 준비되었어요.")).toBeVisible();
-    expect(screen.getByText("로컬 저장 위치: local://draft-current.zip")).toBeVisible();
+    expect(await screen.findByText("CapCut 초안이 준비됐어요.")).toBeVisible();
+    expect(screen.getByText("저장 위치: local://draft-current.zip")).toBeVisible();
     expect(screen.queryByRole("link", { name: /draft-current/i })).not.toBeInTheDocument();
     expect(startCapcutDraftExport).toHaveBeenCalledTimes(1);
   });
@@ -1454,7 +1454,7 @@ describe("OutputsPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "CapCut 초안 만들기" }));
 
-    expect(await screen.findByText("CapCut 초안이 준비되었어요.")).toBeVisible();
+    expect(await screen.findByText("CapCut 초안이 준비됐어요.")).toBeVisible();
     expect(screen.queryByText("CapCut 초안을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.")).not.toBeInTheDocument();
     expect(api.listJobs).toHaveBeenCalledTimes(2);
   });
@@ -1479,7 +1479,7 @@ describe("OutputsPage", () => {
 
     expect(await screen.findByText("CapCut 초안을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.")).toBeVisible();
     expect(screen.getByText("CapCut 초안이 최신 편집본과 달라요.")).toBeVisible();
-    expect(screen.queryByText("로컬 저장 위치: local://draft-b.zip")).not.toBeInTheDocument();
+    expect(screen.queryByText("저장 위치: local://draft-b.zip")).not.toBeInTheDocument();
   });
 
   it("shows a CapCut draft request error when refresh only returns the same current artifact", async () => {
@@ -1494,7 +1494,7 @@ describe("OutputsPage", () => {
 
     render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
 
-    expect(await screen.findByText("CapCut 초안이 준비되었어요.")).toBeVisible();
+    expect(await screen.findByText("CapCut 초안이 준비됐어요.")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "CapCut 초안 만들기" }));
 
     expect(await screen.findByText("CapCut 초안을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.")).toBeVisible();
@@ -1542,8 +1542,8 @@ describe("OutputsPage", () => {
     render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
 
     expect(await screen.findByText("CapCut 초안이 최신 편집본과 달라요.")).toBeVisible();
-    expect(screen.queryByText("CapCut 초안이 준비되었어요.")).not.toBeInTheDocument();
-    expect(screen.queryByText("로컬 저장 위치: local://draft-stale.zip")).not.toBeInTheDocument();
+    expect(screen.queryByText("CapCut 초안이 준비됐어요.")).not.toBeInTheDocument();
+    expect(screen.queryByText("저장 위치: local://draft-stale.zip")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "CapCut 초안 만들기" })).toBeEnabled();
   });
 
@@ -1575,7 +1575,7 @@ describe("OutputsPage", () => {
     render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
 
     expect(await screen.findByText("CapCut 초안이 최신 편집본과 달라요.")).toBeVisible();
-    expect(screen.queryByText("로컬 저장 위치: local://draft-other.zip")).not.toBeInTheDocument();
+    expect(screen.queryByText("저장 위치: local://draft-other.zip")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "CapCut에 등록" })).not.toBeInTheDocument();
   });
 
@@ -1721,11 +1721,11 @@ describe("OutputsPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "CapCut 초안 만들기" }));
     await waitFor(() => expect(listJobs).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByRole("button", { name: "상태 다시 확인" }));
-    expect(await screen.findByText("로컬 저장 위치: local://capcut-refreshed.zip")).toBeVisible();
+    expect(await screen.findByText("저장 위치: local://capcut-refreshed.zip")).toBeVisible();
 
     resolveSubmissionJobs([activeTimelineJob, submittedCapcut] as never);
     await waitFor(() => expect(api.getCapcutDraftExport).toHaveBeenCalledWith("project_a", "capcut-submitted"));
-    await waitFor(() => expect(screen.getByText("로컬 저장 위치: local://capcut-refreshed.zip")).toBeVisible());
+    await waitFor(() => expect(screen.getByText("저장 위치: local://capcut-refreshed.zip")).toBeVisible());
   });
 
   it("does not surface an older CapCut export failure after a newer manual refresh", async () => {
@@ -1757,14 +1757,14 @@ describe("OutputsPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "CapCut 초안 만들기" }));
     fireEvent.click(screen.getByRole("button", { name: "상태 다시 확인" }));
-    expect(await screen.findByText("로컬 저장 위치: local://capcut-current.zip")).toBeVisible();
+    expect(await screen.findByText("저장 위치: local://capcut-current.zip")).toBeVisible();
     await act(async () => {
       rejectCapcut(new Error("offline"));
       await Promise.resolve();
     });
 
     expect(screen.queryByText("CapCut 초안을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.")).not.toBeInTheDocument();
-    expect(screen.getByText("로컬 저장 위치: local://capcut-current.zip")).toBeVisible();
+    expect(screen.getByText("저장 위치: local://capcut-current.zip")).toBeVisible();
   });
 
   it("surfaces a CapCut export failure after a manual refresh when no durable progress exists", async () => {
@@ -1814,8 +1814,8 @@ describe("OutputsPage", () => {
 
     await waitFor(() => expect(registerCapcutDraftHandoff).toHaveBeenCalledWith("project_a", "capcut-current-timeline"));
     await waitFor(() => expect(getCapcutDraftExport).toHaveBeenLastCalledWith("project_a", "capcut-current-timeline"));
-    expect(await screen.findByText("CapCut 등록 상태가 준비되었어요.")).toBeVisible();
-    expect(screen.getByText("실제 CapCut Desktop에서 열기와 가져오기는 별도로 확인해야 해요.")).toBeVisible();
+    expect(await screen.findByText("CapCut에 등록했어요.")).toBeVisible();
+    expect(screen.getByText("CapCut 앱에서 실제로 열리는지는 직접 확인해 주세요.")).toBeVisible();
     expect(screen.queryByRole("button", { name: "CapCut에 등록" })).not.toBeInTheDocument();
   });
 
@@ -1880,7 +1880,7 @@ describe("OutputsPage", () => {
 
     render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
 
-    expect(await screen.findByText("CapCut 등록이 진행 중이에요. 잠시 후 상태를 다시 확인해 주세요.")).toBeVisible();
+    expect(await screen.findByText("CapCut에 등록하는 중이에요. 잠시 후 상태를 다시 확인해 주세요.")).toBeVisible();
     expect(screen.queryByRole("button", { name: /CapCut에 등록|CapCut 등록 다시 시도/ })).not.toBeInTheDocument();
     expect(registerCapcutDraftHandoff).not.toHaveBeenCalled();
   });
@@ -1935,7 +1935,7 @@ describe("OutputsPage", () => {
     render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
 
     const action = await screen.findByRole("button", { name: "CapCut 등록 다시 시도" });
-    expect(screen.getByText("CapCut 등록을 완료하지 못했어요. 상태를 확인한 뒤 다시 시도해 주세요.")).toBeVisible();
+    expect(screen.getByText("CapCut에 등록하지 못했어요. 다시 시도해 주세요.")).toBeVisible();
     expect(registerCapcutDraftHandoff).not.toHaveBeenCalled();
     fireEvent.click(action);
     await waitFor(() => expect(registerCapcutDraftHandoff).toHaveBeenCalledTimes(1));
@@ -1988,8 +1988,8 @@ describe("OutputsPage", () => {
     render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "CapCut에 등록" }));
-    expect(await screen.findByText("CapCut 등록이 진행 중이에요. 잠시 후 상태를 다시 확인해 주세요.")).toBeVisible();
-    expect(screen.queryByText("CapCut 등록 상태를 확인하지 못했어요. 상태를 다시 확인한 뒤 시도해 주세요.")).not.toBeInTheDocument();
+    expect(await screen.findByText("CapCut에 등록하는 중이에요. 잠시 후 상태를 다시 확인해 주세요.")).toBeVisible();
+    expect(screen.queryByText("CapCut 등록 상태를 확인하지 못했어요. 상태 다시 확인을 눌러 주세요.")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /CapCut에 등록|CapCut 등록 다시 시도/ })).not.toBeInTheDocument();
   });
 
@@ -2015,8 +2015,8 @@ describe("OutputsPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "CapCut에 등록" }));
 
-    expect(await screen.findByText("기존 CapCut 등록 정보를 다시 사용해요.")).toBeVisible();
-    expect(screen.queryByText("CapCut 등록 상태를 확인하지 못했어요. 상태를 다시 확인한 뒤 시도해 주세요.")).not.toBeInTheDocument();
+    expect(await screen.findByText("이미 등록한 CapCut 정보를 다시 써요.")).toBeVisible();
+    expect(screen.queryByText("CapCut 등록 상태를 확인하지 못했어요. 상태 다시 확인을 눌러 주세요.")).not.toBeInTheDocument();
     expect(api.listJobs).toHaveBeenCalledTimes(2);
   });
 
@@ -2045,9 +2045,9 @@ describe("OutputsPage", () => {
     render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "CapCut에 등록" }));
 
-    expect(await screen.findByText("CapCut 등록 상태를 확인하지 못했어요. 상태를 다시 확인한 뒤 시도해 주세요.")).toBeVisible();
+    expect(await screen.findByText("CapCut 등록 상태를 확인하지 못했어요. 상태 다시 확인을 눌러 주세요.")).toBeVisible();
     expect(screen.getByText("CapCut 초안이 최신 편집본과 달라요.")).toBeVisible();
-    expect(screen.queryByText("기존 CapCut 등록 정보를 다시 사용해요.")).not.toBeInTheDocument();
+    expect(screen.queryByText("이미 등록한 CapCut 정보를 다시 써요.")).not.toBeInTheDocument();
   });
 
   it("shows a CapCut handoff request error when refresh only returns the same failed handoff", async () => {
@@ -2066,7 +2066,7 @@ describe("OutputsPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "CapCut 등록 다시 시도" }));
 
-    expect(await screen.findByText("CapCut 등록 상태를 확인하지 못했어요. 상태를 다시 확인한 뒤 시도해 주세요.")).toBeVisible();
+    expect(await screen.findByText("CapCut 등록 상태를 확인하지 못했어요. 상태 다시 확인을 눌러 주세요.")).toBeVisible();
     expect(api.listJobs).toHaveBeenCalledTimes(2);
   });
 
@@ -2104,7 +2104,7 @@ describe("OutputsPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "CapCut에 등록" }));
     await waitFor(() => expect(api.getCapcutDraftExport).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByRole("button", { name: "상태 다시 확인" }));
-    expect(await screen.findByText("기존 CapCut 등록 정보를 다시 사용해요.")).toBeVisible();
+    expect(await screen.findByText("이미 등록한 CapCut 정보를 다시 써요.")).toBeVisible();
 
     await act(async () => {
       resolveStaleHandoff({
@@ -2116,8 +2116,8 @@ describe("OutputsPage", () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByText("기존 CapCut 등록 정보를 다시 사용해요.")).toBeVisible();
-    expect(screen.queryByText("CapCut 등록을 완료하지 못했어요. 상태를 확인한 뒤 다시 시도해 주세요.")).not.toBeInTheDocument();
+    expect(screen.getByText("이미 등록한 CapCut 정보를 다시 써요.")).toBeVisible();
+    expect(screen.queryByText("CapCut에 등록하지 못했어요. 다시 시도해 주세요.")).not.toBeInTheDocument();
   });
 
   it("does not surface an older CapCut registration failure after a newer manual refresh", async () => {
@@ -2153,14 +2153,14 @@ describe("OutputsPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "CapCut에 등록" }));
     fireEvent.click(screen.getByRole("button", { name: "상태 다시 확인" }));
-    expect(await screen.findByText("기존 CapCut 등록 정보를 다시 사용해요.")).toBeVisible();
+    expect(await screen.findByText("이미 등록한 CapCut 정보를 다시 써요.")).toBeVisible();
     await act(async () => {
       rejectHandoff(new Error("offline"));
       await Promise.resolve();
     });
 
-    expect(screen.queryByText("CapCut 등록 상태를 확인하지 못했어요. 상태를 다시 확인한 뒤 시도해 주세요.")).not.toBeInTheDocument();
-    expect(screen.getByText("기존 CapCut 등록 정보를 다시 사용해요.")).toBeVisible();
+    expect(screen.queryByText("CapCut 등록 상태를 확인하지 못했어요. 상태 다시 확인을 눌러 주세요.")).not.toBeInTheDocument();
+    expect(screen.getByText("이미 등록한 CapCut 정보를 다시 써요.")).toBeVisible();
   });
 
   it("surfaces a CapCut registration failure after a manual refresh when no durable progress exists", async () => {
@@ -2197,7 +2197,7 @@ describe("OutputsPage", () => {
       await Promise.resolve();
     });
 
-    expect(await screen.findByText("CapCut 등록 상태를 확인하지 못했어요. 상태를 다시 확인한 뒤 시도해 주세요.")).toBeVisible();
+    expect(await screen.findByText("CapCut 등록 상태를 확인하지 못했어요. 상태 다시 확인을 눌러 주세요.")).toBeVisible();
   });
 
   it("does not let an in-flight project A CapCut registration change project B state", async () => {
@@ -2251,7 +2251,7 @@ describe("OutputsPage", () => {
     });
 
     expect(screen.queryByRole("button", { name: "CapCut 등록 중" })).not.toBeInTheDocument();
-    expect(screen.queryByText("CapCut 등록 상태를 확인하지 못했어요. 상태를 다시 확인한 뒤 시도해 주세요.")).not.toBeInTheDocument();
+    expect(screen.queryByText("CapCut 등록 상태를 확인하지 못했어요. 상태 다시 확인을 눌러 주세요.")).not.toBeInTheDocument();
   });
 
   it("keeps historical outputs read-only and does not label them current without an editing session", async () => {
@@ -2340,7 +2340,7 @@ describe("OutputsPage", () => {
     render(<OutputsPage projectId="project_a" onOpenEditor={openEditor} />);
 
     expect(await screen.findByText("완성본이 최신 편집본과 달라요.")).toBeVisible();
-    expect(screen.getByText("편집에서 새 완성본 만들기를 실행해 주세요.")).toBeVisible();
+    expect(screen.getByText("완성본 만들기를 다시 눌러 주세요.")).toBeVisible();
     expect(screen.queryByLabelText("완성본 재생")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "편집 열기" }));
     expect(openEditor).toHaveBeenCalledOnce();
@@ -2394,7 +2394,7 @@ describe("OutputsPage", () => {
 
     render(<OutputsPage projectId="project_a" onOpenEditor={onOpenEditor} />);
 
-    expect(await screen.findByText("현재 편집본 미리보기가 준비되었어요.")).toBeVisible();
+    expect(await screen.findByText("현재 편집본 미리보기가 준비됐어요.")).toBeVisible();
     expect(api.getEditorPlaybackManifest).toHaveBeenCalledWith("project_a", "session-a");
     expect(document.querySelector("audio, video")).toBeNull();
     expect(document.body).not.toHaveTextContent("/exact-previews/");
@@ -2469,7 +2469,7 @@ describe("OutputsPage", () => {
     expect(await screen.findByText("미리보기가 최신 편집본과 달라요.")).toBeVisible();
     expect(document.body).not.toHaveTextContent("/exact-previews/old");
     fireEvent.click(screen.getByRole("button", { name: "상태 다시 확인" }));
-    expect(await screen.findByText("현재 편집본 미리보기가 준비되었어요.")).toBeVisible();
+    expect(await screen.findByText("현재 편집본 미리보기가 준비됐어요.")).toBeVisible();
     expect(api.getEditorPlaybackManifest).toHaveBeenCalledTimes(2);
   });
 
@@ -2527,7 +2527,7 @@ describe("OutputsPage", () => {
     const view = render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
 
     view.rerender(<OutputsPage projectId="project_b" onOpenEditor={vi.fn()} />);
-    expect(await screen.findByText("현재 편집본 미리보기가 준비되었어요.")).toBeVisible();
+    expect(await screen.findByText("현재 편집본 미리보기가 준비됐어요.")).toBeVisible();
 
     await act(async () => {
       resolveA(playbackManifest({
@@ -2541,7 +2541,7 @@ describe("OutputsPage", () => {
       await delayedA;
     });
 
-    expect(screen.getByText("현재 편집본 미리보기가 준비되었어요.")).toBeVisible();
+    expect(screen.getByText("현재 편집본 미리보기가 준비됐어요.")).toBeVisible();
     expect(api.getEditorPlaybackManifest).toHaveBeenCalledWith("project_b", "session-b");
   });
 
@@ -2839,7 +2839,7 @@ describe("완성본 실패 이유", () => {
     expect(submit).toBeEnabled();
     fireEvent.click(submit);
     await flush(12);
-    expect(screen.getByText("출력을 만드는 중이에요.")).toBeVisible();
+    expect(screen.getByText("만드는 중")).toBeVisible();
 
     // 아무도 `출력 상태 다시 확인`을 안 눌렀다.
     await act(async () => {

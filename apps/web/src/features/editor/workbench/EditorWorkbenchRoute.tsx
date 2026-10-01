@@ -282,7 +282,7 @@ function capDirectorMessages(messages: readonly RightDockMessage[]) {
 function timelineZoomReplyText(command: TimelineZoomCommand): string {
   if (command === "in") return "타임라인을 확대했어요.";
   if (command === "out") return "타임라인을 축소했어요.";
-  return "타임라인이 영상 전체가 보이도록 맞춰졌어요.";
+  return "타임라인을 영상 전체에 맞췄어요.";
 }
 
 export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId = null, onOpenEditingSession }: {
@@ -450,7 +450,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     }).catch((error: unknown) => {
       if (!isCurrent()) return;
       const message = error instanceof Error && error.message === "editor_snapshot_identity_mismatch"
-          ? "편집 세션 정보가 일치하지 않아요. 다시 열어 주세요."
+          ? "편집 내용이 맞지 않아요. 다시 열어 주세요."
           : "재생 내용을 불러오지 못했어요. 새로고침 후 다시 확인해 주세요.";
       const identityMismatch = error instanceof Error && error.message === "editor_snapshot_identity_mismatch";
       setState((current) => !identityMismatch && current.key === requestKey && current.view && current.session
@@ -472,7 +472,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       if (!isCurrent()) return;
       setVariants({ key: requestKey, items: result.variants, message: variantRefresh.notice, busy: false });
     }).catch(() => {
-      if (isCurrent()) setVariants({ key: requestKey, items: [], message: "출력 변형 서버 상태를 불러오지 못했어요.", busy: false });
+      if (isCurrent()) setVariants({ key: requestKey, items: [], message: "가로·세로 버전을 불러오지 못했어요.", busy: false });
     });
     return () => { active = false; };
   }, [projectId, requestKey, sessionId, refreshToken, variantRefresh]);
@@ -515,11 +515,11 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       setVariants((current) => current.key !== requestKey ? current : {
         ...current,
         items: current.items.map((variant) => byId.get(variant.variant_id) ?? variant),
-        message: "마스터 변경을 확인했어요. 출력 변형 충돌을 검토해 주세요.",
+        message: "마스터가 바뀌었어요. 가로·세로에서 달라진 곳을 확인해 주세요.",
         busy: false,
       });
     }).catch(() => {
-      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "마스터 변경 후 출력 변형을 다시 맞추지 못했어요.", busy: false } : current);
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "마스터가 바뀐 뒤 가로·세로를 다시 맞추지 못했어요.", busy: false } : current);
     }).finally(() => {
       if (isCurrent()) variantMutationInFlight.current = false;
     });
@@ -1037,10 +1037,10 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         throw new Error("partial_regeneration_preflight_identity_mismatch");
       }
       if (isCurrent()) {
-        setPartial({ key: requestKey, ticket, preflight, run: null, jobId: null, result: null, isResultOpen: false, message: "영향 범위를 확인했어요. 실행 버튼을 눌러야 실제로 다시 만듭니다." });
+        setPartial({ key: requestKey, ticket, preflight, run: null, jobId: null, result: null, isResultOpen: false, message: "바뀌는 범위를 확인했어요. 실행을 눌러야 다시 만들어요." });
       }
     } catch {
-      if (isCurrent()) setPartial({ key: requestKey, ticket: null, preflight: null, run: null, jobId: null, result: null, isResultOpen: false, message: "영향 범위를 확인하지 못했어요. 직접 편집은 계속할 수 있어요." });
+      if (isCurrent()) setPartial({ key: requestKey, ticket: null, preflight: null, run: null, jobId: null, result: null, isResultOpen: false, message: "바뀌는 범위를 확인하지 못했어요. 직접 편집은 계속할 수 있어요." });
     } finally {
       if (isCurrent()) partialInFlight.current = false;
     }
@@ -1079,7 +1079,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
               jobId: result.job_id.trim(),
               result: null,
               isResultOpen: false,
-              message: "부분 재생성을 마쳤어요. 이전 결과 열기에서 결과 범위를 확인할 수 있어요.",
+              message: "부분 재생성을 마쳤어요. 결과는 `이전 결과 열기`에서 봐요.",
             });
           }
         } catch (error) {
@@ -1092,7 +1092,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
               jobId: null,
               result: null,
               isResultOpen: false,
-              message: "부분 재생성을 완료하지 못했어요. 영향 범위를 다시 확인해 주세요.",
+              message: "부분 재생성을 마치지 못했어요. 바뀌는 범위를 다시 확인해 주세요.",
             });
           }
           throw error;
@@ -1359,7 +1359,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     variantOperationId.current = operationId;
     const isCurrent = () => routeEpoch.current.key === requestKey && variantOperationId.current === operationId;
     setVariants((current) => current.key === requestKey ? { ...current, busy: true } : current);
-    setVariants((current) => current.key === requestKey ? { ...current, message: "출력 변형을 저장하는 중이에요.", busy: true } : current);
+    setVariants((current) => current.key === requestKey ? { ...current, message: "가로·세로 버전을 저장하는 중이에요.", busy: true } : current);
     try {
       const result = await api.patchOutputVariant(projectId, variant.variant_id, {
         expected_variant_revision: variant.variant_revision,
@@ -1369,11 +1369,11 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       setVariants((current) => current.key !== requestKey ? current : {
         ...current,
         items: current.items.map((item) => item.variant_id === result.variant.variant_id ? result.variant : item),
-        message: "출력 변형을 저장했어요.",
+        message: "가로·세로 버전을 저장했어요.",
         busy: false,
       });
     } catch {
-      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "출력 변형을 저장하지 못했어요. 최신 상태를 다시 확인해 주세요.", busy: false } : current);
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "가로·세로 버전을 저장하지 못했어요. 최신 상태를 다시 확인해 주세요.", busy: false } : current);
     } finally {
       if (isCurrent()) variantMutationInFlight.current = false;
     }
@@ -1972,7 +1972,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         setDirector((current) => current.key === requestKey ? {
           ...current,
           messages: current.messages.filter((message) => message.id !== optimisticUserId),
-          runState: { kind: "unavailable", message: "이미 처리 중이에요. 잠시 후 다시 시도해주세요.", retryable: true },
+          runState: { kind: "unavailable", message: "이미 처리 중이에요. 잠시 뒤 다시 눌러 주세요.", retryable: true },
         } : current);
         return;
       }
@@ -2805,7 +2805,7 @@ export function yujinSceneChangeNotice(candidate: DirectorCandidate) {
   }
   return (
     `${base} 이번에는 유진이 장면 ${total}개 중 ${read}개만 보고 골랐어요. `
-    + `영상 전 구간에서 고르게 보고 고른 결과를 원하면 숏폼 만들기 단추를 써 주세요. ${undo}`
+    + `영상 전체를 고르게 보고 고르려면 숏폼 만들기를 눌러 주세요. ${undo}`
   );
 }
 

@@ -260,7 +260,7 @@ export function SceneImageStudio({
         onChange={(event) => setDescription(event.target.value)}
       />
       <Button type="button" disabled={isMaking} onClick={() => void make()}>
-        {isMaking ? "이미지 생성 중" : "AI 이미지 생성"}
+        {isMaking ? "그림 만드는 중" : "AI 그림 만들기"}
       </Button>
       {status ? <p role="status">{status}</p> : null}
       {/* 만든 그림을 어디까지 쓸 수 있는지 **그림 옆에서** 말한다. 나중에
@@ -269,7 +269,7 @@ export function SceneImageStudio({
       {madeAssetId && commercialUseOk === false ? (
         <p role="status">
           이 그림은 <strong>수익 내는 영상에는 쓸 수 없어요.</strong> 지금 쓰는 그림
-          모델이 그렇게 정해 두었어요. 연습용·비공개 영상에는 괜찮아요.
+          도구의 사용 조건이에요. 연습용·비공개 영상에는 괜찮아요.
         </p>
       ) : null}
       {madeAssetId && commercialUseOk === null ? (
@@ -312,7 +312,7 @@ export function SceneImageStudio({
           {" "}GIF로 저장
         </label>
         <Button type="button" variant="outline" disabled={isMakingVideo} onClick={() => void makeVideo()}>
-          {isMakingVideo ? "영상 생성 중" : madeVideoAssetId ? "다시 만들기" : "AI 영상 생성"}
+          {isMakingVideo ? "영상 만드는 중" : madeVideoAssetId ? "다시 만들기" : "AI 영상 만들기"}
         </Button>
         {isMakingVideo && activeJobId ? (
           <Button type="button" variant="ghost" disabled={isCancelling} onClick={() => void cancelVideo()}>

@@ -65,7 +65,7 @@ export function SavedFormatPicker({ onApply }: { onApply: (style: CaptionStyleSn
           type="button"
           variant="outline"
           onClick={() => onApply((chosen?.caption_style ?? {}) as CaptionStyleSnapshot)}
-        >고른 포맷의 캡션 모양 적용</Button>
+        >캡션 모양 적용</Button>
       </> : <p>아직 저장한 포맷이 없어요. 마음에 든 완성본에서 저장해 보세요.</p>}
     </section>
   );

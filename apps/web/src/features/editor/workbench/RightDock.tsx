@@ -121,7 +121,7 @@ export function RightDock({
           >{group.label}</Button>)}
         </div> : null}
         {inspectorTargets.length > 1 ? <label>편집 대상<NativeSelect aria-label="편집 대상" value={selectedInspectorTargetId ?? ""} onChange={(event) => setSelectedInspectorTargetId(event.target.value)}>{inspectorTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}</NativeSelect></label> : null}
-        {!inspectorTargets.length ? <p>이 명령이 다루는 항목 없음</p> : null}
+        {!inspectorTargets.length ? <p>고칠 항목 없음</p> : null}
         {onInspectorAction ? <InspectorControls
           disabled={inspectorDisabled}
           loadApprovedTtsCandidates={loadApprovedTtsCandidates}

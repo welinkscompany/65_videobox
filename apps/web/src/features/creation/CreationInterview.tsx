@@ -206,7 +206,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
   }
 
   const resumeBanner = storedBriefId ? <section data-testid="creation-draft-resume" aria-label="저장된 초안">
-    <p>작성 중인 기획 초안이 있어요. 이어서 작업하면 저장된 답변을 그대로 사용할 수 있습니다.</p>
+    <p>쓰던 기획 초안이 있어요. 이어서 하면 저장한 답변을 그대로 써요.</p>
     <Button type="button" variant="outline" onClick={continueDraft}>초안 이어서 하기</Button>
   </section> : null;
 
@@ -252,7 +252,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       window.localStorage.removeItem(pendingKey(projectId, "paste"));
       setBrief(created);
     } catch {
-      setError("대본을 저장하지 못했습니다. 내용을 확인한 뒤 다시 시도해 주세요.");
+      setError("대본을 저장하지 못했어요. 내용을 확인한 뒤 다시 시도해 주세요.");
     } finally {
       setIsStarting(false);
     }
@@ -274,7 +274,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       window.localStorage.removeItem(pendingKey(projectId, "upload"));
       setBrief(created);
     } catch {
-      setError("대본 파일을 준비하지 못했습니다. 파일 형식과 내용을 확인해 주세요.");
+      setError("대본 파일을 준비하지 못했어요. 파일 형식과 내용을 확인해 주세요.");
     } finally {
       setIsStarting(false);
     }
@@ -305,7 +305,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
         : [...items, { asset_id: assetId, asset_type: "raw_video", library_asset_id: libraryAssetId }]);
       setBrief(created);
     } catch {
-      setError("받아쓴 대본으로 기획을 시작하지 못했습니다. 잠시 뒤 다시 눌러 주세요.");
+      setError("받아쓴 대본으로 기획을 시작하지 못했어요. 잠시 뒤 다시 눌러 주세요.");
     } finally {
       setIsStarting(false);
     }
@@ -337,7 +337,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
         : [...items, { asset_id: assetId, asset_type: "narration_audio" }]);
       setBrief(created);
     } catch {
-      setError("녹음한 목소리로 기획을 시작하지 못했습니다. 잠시 뒤 다시 눌러 주세요.");
+      setError("녹음한 목소리로 기획을 시작하지 못했어요. 잠시 뒤 다시 눌러 주세요.");
     } finally {
       setIsStarting(false);
     }
@@ -364,7 +364,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       window.localStorage.removeItem(pendingKey(projectId, "yujin"));
       setBrief(created);
     } catch {
-      setError("유진이 쓴 대본으로 기획을 시작하지 못했습니다. 잠시 뒤 다시 눌러 주세요.");
+      setError("유진이 쓴 대본으로 기획을 시작하지 못했어요. 잠시 뒤 다시 눌러 주세요.");
     } finally {
       setIsStarting(false);
     }
@@ -384,7 +384,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       answerInputRef.current?.focus();
     } catch {
       setRetryAnswer(submission);
-      setError("답변을 저장하지 못했습니다.");
+      setError("답변을 저장하지 못했어요.");
     } finally {
       setIsSaving(false);
     }
@@ -401,7 +401,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       setAnswerDraft(previousQuestion ? updated.answers[previousQuestion.field] ?? "" : "");
       setRetryAnswer(null);
     } catch {
-      setError("이전 질문으로 돌아가지 못했습니다. 다시 시도해 주세요.");
+      setError("이전 질문으로 돌아가지 못했어요. 다시 시도해 주세요.");
     } finally {
       setIsSaving(false);
     }
@@ -418,7 +418,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
     try {
       setBrief(await api.updateCreationBriefSummary(projectId, brief.brief_id, { summary, expected_revision: brief.revision }));
     } catch {
-      setError("기획 요약을 저장하지 못했습니다.");
+      setError("기획 요약을 저장하지 못했어요.");
     } finally {
       setIsSaving(false);
     }
@@ -435,7 +435,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
         : await api.updateCreationBriefSummary(projectId, brief.brief_id, { summary, expected_revision: brief.revision });
       setBrief(await api.approveCreationBrief(projectId, saved.brief_id, { expected_revision: saved.revision }));
     } catch {
-      setError("기획 요약을 확인하지 못했습니다. 다시 시도해 주세요.");
+      setError("기획 요약을 확인하지 못했어요. 다시 시도해 주세요.");
     } finally {
       setIsSaving(false);
     }
@@ -449,7 +449,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       setBrief(await api.bypassCreationBriefInterview(projectId, brief.brief_id, { expected_revision: brief.revision }));
       setRetryAnswer(null);
     } catch {
-      setError("질문을 건너뛰지 못했습니다. 다시 시도해 주세요.");
+      setError("질문을 건너뛰지 못했어요. 다시 시도해 주세요.");
     } finally {
       setIsSaving(false);
     }
@@ -471,7 +471,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       setBrief(null);
       setStoredBriefId(null);
     } catch {
-      setError("대본과 기획을 삭제하지 못했습니다. 다시 시도해 주세요.");
+      setError("대본과 기획을 삭제하지 못했어요. 다시 시도해 주세요.");
     } finally {
       setIsSaving(false);
     }
@@ -483,7 +483,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
     try {
       const run = await api.startDraftReadiness(projectId, { brief_id: brief.brief_id, narration_choice, idempotency_key: `draft-${brief.brief_id}-${brief.revision}-${narration_choice.kind}-${narration_choice.asset_id ?? ""}`, expected_brief_revision: brief.revision });
       window.localStorage.setItem(`videobox.draft-readiness.${projectId}`, run.readiness_id); setReadiness(run);
-    } catch { setError("초안을 준비하지 못했습니다. 다시 시도해 주세요."); }
+    } catch { setError("초안을 준비하지 못했어요. 다시 시도해 주세요."); }
     finally { setIsSaving(false); }
   }
 
@@ -501,7 +501,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
         // Preserve the last durable state when the recovery read is unavailable.
       }
       setAdvanceRetry(true);
-      setError("초안 준비를 이어가지 못했습니다. 다시 시도해 주세요.");
+      setError("초안 준비를 이어가지 못했어요. 다시 시도해 주세요.");
     }
   }
 
@@ -517,7 +517,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       const planning = await api.retryDraftReadiness(projectId, readiness.readiness_id, readiness.revision);
       setReadiness(await api.completeDraftReadiness(projectId, planning.readiness_id, planning.revision));
     } catch {
-      setError("초안을 다시 준비하지 못했습니다. 다시 준비를 눌러 주세요.");
+      setError("초안을 다시 준비하지 못했어요. 다시 준비를 눌러 주세요.");
     } finally {
       setIsSaving(false);
     }
@@ -590,7 +590,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
     if (!readiness || isAutoFillingGaps) return;
     await runReadinessAction(
       () => api.updateDraftReadinessCandidate(projectId, readiness.readiness_id, assetId, true, readiness.revision),
-      "장면을 건너뛰지 못했습니다. 다시 시도해 주세요.",
+      "장면을 건너뛰지 못했어요. 다시 시도해 주세요.",
     );
   }
 
@@ -605,7 +605,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
     } finally { setIsSaving(false); }
   }
 
-  async function uploadNarration(file: File | null) { if (!file) return; setIsSaving(true); try { const asset = await api.uploadDraftNarration(projectId, file); setNarrationOptions((items) => [...items, { asset_id: asset.asset_id, asset_type: "narration_audio" }]); } catch { setError("소리 파일을 준비하지 못했습니다."); } finally { setIsSaving(false); } }
+  async function uploadNarration(file: File | null) { if (!file) return; setIsSaving(true); try { const asset = await api.uploadDraftNarration(projectId, file); setNarrationOptions((items) => [...items, { asset_id: asset.asset_id, asset_type: "narration_audio" }]); } catch { setError("소리 파일을 준비하지 못했어요."); } finally { setIsSaving(false); } }
 
   async function saveCandidateRange(assetId: string, previous?: PendingCandidateRange) {
     // skipCandidate와 같은 이유로 자동 채우기 중에는 막는다.
@@ -629,7 +629,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       setRangeRetry(null);
     } catch {
       setRangeRetry(submission);
-      setError("구간을 저장하지 못했습니다. 다시 시도해 주세요.");
+      setError("구간을 저장하지 못했어요. 다시 시도해 주세요.");
     } finally { setIsSaving(false); }
   }
 
@@ -642,7 +642,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
       recorder.onstop = () => { stream.getTracks().forEach((track) => track.stop()); recordingStreamRef.current = null; setRecording(false); if (recordingDiscardRef.current) return; const file = new File([new Blob(chunks, { type: recorder.mimeType || "audio/webm" })], "녹음한-내레이션.webm", { type: recorder.mimeType || "audio/webm" }); setRecordingFile(file); void uploadNarration(file); };
       recorderRef.current = recorder; recordingStreamRef.current = stream; recordingDiscardRef.current = false; recorder.start(); setRecording(true);
-    } catch { recordingStreamRef.current?.getTracks().forEach((track) => track.stop()); recordingStreamRef.current = null; setError("마이크를 사용할 수 없습니다. 권한을 확인한 뒤 다시 시도해 주세요."); }
+    } catch { recordingStreamRef.current?.getTracks().forEach((track) => track.stop()); recordingStreamRef.current = null; setError("마이크를 쓸 수 없어요. 권한을 확인한 뒤 다시 시도해 주세요."); }
   }
 
   function stopRecording() { recordingDiscardRef.current = false; recorderRef.current?.stop(); }
@@ -652,12 +652,12 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       {resumeBanner}
       <p className="vb-eyebrow">새 영상 만들기</p>
       <h1 id="creation-interview-heading">유진과 영상 기획을 시작해요</h1>
-      <p>대본을 붙여넣으면, 이미 적힌 내용은 건너뛰고 필요한 것만 함께 정리해 드릴게요.</p>
+      <p>대본에 이미 있는 내용은 건너뛰고, 빠진 것만 물어봐요.</p>
       <label htmlFor="creation-script">대본 붙여넣기</label>
       <Textarea id="creation-script" value={scriptText} onChange={(event) => { setScriptText(event.target.value); window.localStorage.removeItem(pendingKey(projectId, "paste")); }} placeholder="영상에서 전할 내용을 붙여넣어 주세요." rows={10} />
       <Button type="button" onClick={() => void start()} disabled={isStarting}>{isStarting ? "대본 준비 중" : "유진과 기획 시작"}</Button>
       <label htmlFor="creation-script-file">대본 파일 선택</label>
-      <p id="creation-script-file-help">지원 형식: TXT · MD · SRT</p>
+      <p id="creation-script-file-help">TXT · MD · SRT</p>
       <Input id="creation-script-file" type="file" accept=".txt,.md,.srt,text/plain,text/markdown,application/x-subrip" onChange={(event) => { setScriptFile(event.target.files?.[0] ?? null); window.localStorage.removeItem(pendingKey(projectId, "upload")); }} />
       <Button type="button" variant="outline" onClick={() => void startFromFile()} disabled={isStarting}>{isStarting ? "대본 준비 중" : "파일로 기획 시작"}</Button>
       {/* 대본이 없어도 시작할 수 있는 길. 영상에서 말을 받아써 대본을 만든다.
@@ -685,11 +685,11 @@ export function CreationInterview({ projectId }: { projectId: string }) {
           {narrationOptions.filter((item) => item.asset_type === "narration_audio").map((item) => <Button key={item.asset_id} type="button" variant="outline" onClick={() => void startDraft({ kind: "existing", asset_id: item.asset_id })}>준비한 내레이션으로 초안 준비</Button>)}
           <label htmlFor="draft-narration-file">내레이션 파일 추가</label><Input id="draft-narration-file" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.webm" onChange={(event) => void uploadNarration(event.target.files?.[0] ?? null)} />
           <Button type="button" variant="outline" disabled={isSaving || recording} onClick={() => void startRecording()}>마이크로 녹음 시작</Button>{recording ? <Button type="button" onClick={stopRecording}>녹음 마치기</Button> : null}{recordingFile && error ? <Button type="button" variant="outline" onClick={() => void uploadNarration(recordingFile)}>녹음 다시 올리기</Button> : null}
-        </> : <section aria-label="초안 준비 상태"><label><Input type="checkbox" checked={vertical} onChange={(event) => setVertical(event.target.checked)} />숏폼(세로)으로 만들기</label><h2>{readiness.status === "ready" ? "초안이 준비됐어요" : readiness.status === "needs_assets" ? "추가 미디어가 필요해요" : readiness.status === "cancelled" ? "초안 준비를 멈췄어요" : readiness.status === "failed" ? "초안을 준비하지 못했어요" : readiness.status === "asset_check" ? "미디어를 확인하고 있어요" : "초안을 준비하고 있어요"}</h2>{readiness.status === "ready" ? <Button type="button" disabled={isSaving} onClick={() => void createDraftBundle()}>초안 만들기</Button> : null}{readiness.status === "needs_assets" ? <><p role="note">누락된 장면은 빈 구간으로 남습니다. 이 초안은 내보낼 수 없어요.</p><label><Input type="checkbox" checked={allowPlaceholder} onChange={(event) => setAllowPlaceholder(event.target.checked)} />빈 구간을 남긴 채 편집용 초안을 만들겠습니다</label><Button type="button" variant="outline" disabled={isSaving || !allowPlaceholder} onClick={() => void createDraftBundle(true)}>빈 구간 포함 초안 만들기</Button></> : null}{advanceRetry ? <Button type="button" onClick={() => void advanceDraftReadiness(readiness)}>준비 계속하기</Button> : null}{/* 브롤이 안 닿는 빈 장면을 AI 그림으로 한 번에 채운다(owner 요청 2026-08-29:
+        </> : <section aria-label="초안 준비 상태"><label><Input type="checkbox" checked={vertical} onChange={(event) => setVertical(event.target.checked)} />숏폼(세로)으로 만들기</label><h2>{readiness.status === "ready" ? "초안이 준비됐어요" : readiness.status === "needs_assets" ? "추가 미디어가 필요해요" : readiness.status === "cancelled" ? "초안 준비를 멈췄어요" : readiness.status === "failed" ? "초안을 준비하지 못했어요" : readiness.status === "asset_check" ? "미디어를 확인하고 있어요" : "초안을 준비하고 있어요"}</h2>{readiness.status === "ready" ? <Button type="button" disabled={isSaving} onClick={() => void createDraftBundle()}>초안 만들기</Button> : null}{readiness.status === "needs_assets" ? <><p role="note">영상이 없는 장면은 빈 구간으로 남아요. 이 초안은 내보낼 수 없어요.</p><label><Input type="checkbox" checked={allowPlaceholder} onChange={(event) => setAllowPlaceholder(event.target.checked)} />빈 구간을 남긴 채 편집용 초안 만들기</label><Button type="button" variant="outline" disabled={isSaving || !allowPlaceholder} onClick={() => void createDraftBundle(true)}>빈 구간 포함 초안 만들기</Button></> : null}{advanceRetry ? <Button type="button" onClick={() => void advanceDraftReadiness(readiness)}>준비 계속하기</Button> : null}{/* 브롤이 안 닿는 빈 장면을 AI 그림으로 한 번에 채운다(owner 요청 2026-08-29:
           "내 비롤에 ai 영상도 같이 붙여서 자동화를 만드는거야"). 브롤이 우선이고,
           이 자리는 브롤로도 못 채운 자리에만 뜬다. 다 채운 뒤에도 결과 문구는
           남아야 owner가 "몇 개 채워졌는지" 볼 수 있으므로, 단추만 조건에
-          걸고 문구는 따로 둔다. */}{(readiness.result?.gap_slots ?? []).some((gap) => gap.segment_id) ? <div aria-label="빈 장면 자동 채우기"><Button type="button" variant="outline" disabled={isSaving || isAutoFillingGaps} onClick={() => void autoFillRemainingGapsWithAi()}>{isAutoFillingGaps ? "빈 장면을 AI로 채우는 중" : "빈 장면 모두 AI로 채우기"}</Button></div> : null}{autoFillProgress ? <p role="status">{autoFillProgress}</p> : null}{readiness.result?.gap_slots?.map((gap) => <div key={gap.gap_slot_id}><p>{gap.reason} <a href={`/projects/${encodeURIComponent(projectId)}/media?return_to=${encodeURIComponent(`/projects/${projectId}/create?brief_id=${brief.brief_id}&readiness_id=${readiness.readiness_id}`)}`}>미디어 추가</a></p>{gap.segment_id ? <SceneImageStudio projectId={projectId} vertical={vertical} gap={{ gapSlotId: gap.gap_slot_id, segmentId: gap.segment_id, sceneNumber: sceneNumberOf(gap.segment_id), sceneText: sceneTextOf(readiness, gap.segment_id), durationSec: gapDurationOf(gap) }} onGenerated={() => void replanAfterSceneImage()} /> : null}</div>)}{usableBrollCandidates.length ? <><AssetPreviewPlayer proposalId={readiness.readiness_id} candidates={usableBrollCandidates.map((item): PreviewCandidate => ({ candidateId: item.asset_id, referenceCode: item.label, mediaType: "broll", controls: { in_sec: item.target_range.start_sec, out_sec: item.target_range.end_sec } }))} previewUrl={(assetId) => `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/content`} />{usableBrollCandidates.map((item) => <div key={item.asset_id}><label htmlFor={`${item.asset_id}-start`}>{item.label} 시작</label><Input id={`${item.asset_id}-start`} type="number" min="0" step="0.1" value={candidateRanges[item.asset_id]?.start ?? String(item.target_range.start_sec)} onChange={(event) => setCandidateRanges((ranges) => ({ ...ranges, [item.asset_id]: { start: event.target.value, end: ranges[item.asset_id]?.end ?? String(item.target_range.end_sec) } }))} /><label htmlFor={`${item.asset_id}-end`}>{item.label} 끝</label><Input id={`${item.asset_id}-end`} type="number" min="0" step="0.1" value={candidateRanges[item.asset_id]?.end ?? String(item.target_range.end_sec)} onChange={(event) => setCandidateRanges((ranges) => ({ ...ranges, [item.asset_id]: { start: ranges[item.asset_id]?.start ?? String(item.target_range.end_sec), end: event.target.value } }))} /><Button type="button" variant="outline" disabled={isSaving || isAutoFillingGaps} onClick={() => void saveCandidateRange(item.asset_id)}>구간 저장</Button><Button type="button" variant="ghost" disabled={isSaving || isAutoFillingGaps} onClick={() => void skipCandidate(item.asset_id)}>{item.label} 건너뛰기</Button></div>)}</> : null}{rangeRetry ? <Button type="button" variant="outline" disabled={isSaving || isAutoFillingGaps} onClick={() => void saveCandidateRange(rangeRetry.assetId, rangeRetry)}>구간 다시 저장</Button> : null}{["planning", "asset_check"].includes(readiness.status) ? <Button type="button" variant="ghost" disabled={isSaving} onClick={() => void runReadinessAction(() => api.cancelDraftReadiness(projectId, readiness.readiness_id, readiness.revision), "준비를 멈추지 못했습니다. 다시 시도해 주세요.")}>준비 멈추기</Button> : null}{["failed", "cancelled", "needs_assets"].includes(readiness.status) ? <Button type="button" variant="outline" disabled={isSaving} onClick={() => void runReadinessAction(() => api.retryDraftReadiness(projectId, readiness.readiness_id, readiness.revision), "다시 준비하지 못했습니다. 다시 시도해 주세요.")}>다시 준비</Button> : null}</section>}
+          걸고 문구는 따로 둔다. */}{(readiness.result?.gap_slots ?? []).some((gap) => gap.segment_id) ? <div aria-label="빈 장면 자동 채우기"><Button type="button" variant="outline" disabled={isSaving || isAutoFillingGaps} onClick={() => void autoFillRemainingGapsWithAi()}>{isAutoFillingGaps ? "빈 장면을 AI로 채우는 중" : "빈 장면 모두 AI로 채우기"}</Button></div> : null}{autoFillProgress ? <p role="status">{autoFillProgress}</p> : null}{readiness.result?.gap_slots?.map((gap) => <div key={gap.gap_slot_id}><p>{gap.reason} <a href={`/projects/${encodeURIComponent(projectId)}/media?return_to=${encodeURIComponent(`/projects/${projectId}/create?brief_id=${brief.brief_id}&readiness_id=${readiness.readiness_id}`)}`}>미디어 추가</a></p>{gap.segment_id ? <SceneImageStudio projectId={projectId} vertical={vertical} gap={{ gapSlotId: gap.gap_slot_id, segmentId: gap.segment_id, sceneNumber: sceneNumberOf(gap.segment_id), sceneText: sceneTextOf(readiness, gap.segment_id), durationSec: gapDurationOf(gap) }} onGenerated={() => void replanAfterSceneImage()} /> : null}</div>)}{usableBrollCandidates.length ? <><AssetPreviewPlayer proposalId={readiness.readiness_id} candidates={usableBrollCandidates.map((item): PreviewCandidate => ({ candidateId: item.asset_id, referenceCode: item.label, mediaType: "broll", controls: { in_sec: item.target_range.start_sec, out_sec: item.target_range.end_sec } }))} previewUrl={(assetId) => `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/content`} />{usableBrollCandidates.map((item) => <div key={item.asset_id}><label htmlFor={`${item.asset_id}-start`}>{item.label} 시작</label><Input id={`${item.asset_id}-start`} type="number" min="0" step="0.1" value={candidateRanges[item.asset_id]?.start ?? String(item.target_range.start_sec)} onChange={(event) => setCandidateRanges((ranges) => ({ ...ranges, [item.asset_id]: { start: event.target.value, end: ranges[item.asset_id]?.end ?? String(item.target_range.end_sec) } }))} /><label htmlFor={`${item.asset_id}-end`}>{item.label} 끝</label><Input id={`${item.asset_id}-end`} type="number" min="0" step="0.1" value={candidateRanges[item.asset_id]?.end ?? String(item.target_range.end_sec)} onChange={(event) => setCandidateRanges((ranges) => ({ ...ranges, [item.asset_id]: { start: ranges[item.asset_id]?.start ?? String(item.target_range.end_sec), end: event.target.value } }))} /><Button type="button" variant="outline" disabled={isSaving || isAutoFillingGaps} onClick={() => void saveCandidateRange(item.asset_id)}>구간 저장</Button><Button type="button" variant="ghost" disabled={isSaving || isAutoFillingGaps} onClick={() => void skipCandidate(item.asset_id)}>{item.label} 건너뛰기</Button></div>)}</> : null}{rangeRetry ? <Button type="button" variant="outline" disabled={isSaving || isAutoFillingGaps} onClick={() => void saveCandidateRange(rangeRetry.assetId, rangeRetry)}>구간 다시 저장</Button> : null}{["planning", "asset_check"].includes(readiness.status) ? <Button type="button" variant="ghost" disabled={isSaving} onClick={() => void runReadinessAction(() => api.cancelDraftReadiness(projectId, readiness.readiness_id, readiness.revision), "준비를 멈추지 못했어요. 다시 시도해 주세요.")}>준비 멈추기</Button> : null}{["failed", "cancelled", "needs_assets"].includes(readiness.status) ? <Button type="button" variant="outline" disabled={isSaving} onClick={() => void runReadinessAction(() => api.retryDraftReadiness(projectId, readiness.readiness_id, readiness.revision), "다시 준비하지 못했어요. 다시 시도해 주세요.")}>다시 준비</Button> : null}</section>}
       </> : <>
         <p>유진이 정리한 내용을 고친 뒤, 마음에 들면 승인해 주세요.</p>
         <label htmlFor="creation-summary">기획 요약</label>

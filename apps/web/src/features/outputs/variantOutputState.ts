@@ -32,11 +32,11 @@ export function variantContentUrl(projectId: string, item: VariantRenderItem): s
 }
 
 export function variantRenderSummary(items: readonly VariantRenderItem[]): string {
-  if (!items.length) return "출력 변형을 아직 만들지 않았어요.";
+  if (!items.length) return "아직 만든 가로·세로 출력이 없어요.";
   const succeeded = items.filter((item) => item.status === "succeeded").length;
   const failed = items.filter((item) => item.status === "failed").length;
   const running = items.filter((item) => item.status === "running" || item.status === "pending").length;
   if (failed) return `${succeeded}개 완료 · ${failed}개 확인 필요${running ? ` · ${running}개 진행 중` : ""}`;
   if (running) return `${succeeded}개 완료 · ${running}개 만드는 중`;
-  return `${succeeded}개 출력 확인 가능`;
+  return `${succeeded}개 완료`;
 }

@@ -19,15 +19,15 @@ test("the editor's media dock previews and recovers local analysis with authorit
   // <summary>미디어 분석</summary>{analysisPanel}</details>`). 기본으로
   // 닫혀 있으니 안의 상태 문구는 열기 전까지 `hidden`이다.
   await page.getByText("미디어 분석", { exact: true }).click();
-  await expect(page.getByText("분석을 마치지 못했어요 · 100%")).toBeVisible();
+  await expect(page.getByText("분석 실패 · 100%")).toBeVisible();
 
   await page.getByRole("article", { name: "항구 전경 분석" }).getByRole("button", { name: "미리보기" }).click();
   await expect(page.getByText("미리보기 길이 4초")).toBeVisible();
 
   await page.getByRole("button", { name: "분석 멈추기" }).click();
-  await expect(page.getByText("분석을 멈췄어요 · 50%")).toBeVisible();
+  await expect(page.getByText("분석 멈춤 · 50%")).toBeVisible();
   await page.getByRole("button", { name: "다시 분석하기" }).click();
-  await expect(page.getByText("분석을 기다리고 있어요 · 100%")).toBeVisible();
+  await expect(page.getByText("분석 대기 · 100%")).toBeVisible();
 
   // `assetTitle()`은 자산에 실제 제목(`metadata.title`)이 있으면 그것을 쓰고
   // "미디어 N"은 제목이 없을 때만 쓰는 대체다(`MediaAnalysisStatusPanel.tsx`).
@@ -36,7 +36,7 @@ test("the editor's media dock previews and recovers local analysis with authorit
   // "회의 장면 태그"다.
   await page.getByLabel("회의 장면 태그").fill("항구, 여행");
   await page.getByRole("button", { name: "태그 확인" }).click();
-  await expect(page.getByRole("article", { name: "회의 장면 분석" }).getByText("준비가 끝났어요 · 100%")).toBeVisible();
+  await expect(page.getByRole("article", { name: "회의 장면 분석" }).getByText("준비됨 · 100%")).toBeVisible();
 
   const state = await (await page.request.get(`${fakeApiBaseUrl}/__e2e/media-state`)).json();
   expect(state).toMatchObject({

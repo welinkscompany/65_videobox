@@ -773,11 +773,11 @@ function EditorWorkbenchInstance({
         onApplyTransitionSuggestion={rightDirector?.onApplyTransitionSuggestion}
       />
     </div>
-    <section className="vb-editor-variants" aria-label="출력 변형" data-collapsed={variantsCollapsed}>
-      <div className="vb-editor-variants__header"><div><h2>가로·세로 비교</h2></div><Button type="button" variant="outline" aria-expanded={!variantsCollapsed} onClick={toggleVariantsCollapsed}>{variantsCollapsed ? "출력 변형 펼치기" : "출력 변형 접기"}</Button></div>
-      {!variantsCollapsed ? <><span className="vb-editor-variants__hint">마스터 편집은 하나, 출력은 안전하게 분기</span>
+    <section className="vb-editor-variants" aria-label="가로·세로 비교" data-collapsed={variantsCollapsed}>
+      <div className="vb-editor-variants__header"><div><h2>가로·세로 비교</h2></div><Button type="button" variant="outline" aria-expanded={!variantsCollapsed} onClick={toggleVariantsCollapsed}>{variantsCollapsed ? "가로·세로 비교 펼치기" : "가로·세로 비교 접기"}</Button></div>
+      {!variantsCollapsed ? <><span className="vb-editor-variants__hint">편집은 마스터 하나, 가로·세로는 따로 내보내기</span>
       <VariantSelector selected={variantMode} onSelect={setVariantMode} />
-      {variantMode === "master" ? <p className="vb-editor-variants__master-note">현재 마스터 편집본을 기준으로 출력 변형을 확인합니다.</p> : <>
+      {variantMode === "master" ? <p className="vb-editor-variants__master-note">마스터 편집본 기준으로 가로·세로를 봐요.</p> : <>
         <VariantCompare master={variantMaster} variant={variantPreview} onSeek={seekPlayback} />
         {serverVariant && onVariantMaterialize && onVariantPatch ? <VariantServerControls variant={serverVariant} busy={variantBusy} onMaterialize={onVariantMaterialize} onPatch={onVariantPatch} onCreateHighlight={onVariantCreateHighlight} onRemakeShortForm={onVariantRemakeShortForm} /> : null}
       </>}
@@ -843,7 +843,7 @@ function EditorWorkbenchInstance({
       <DialogContent className="vb-dialog-content vb-export-dialog">
         <DialogHeader>
           <DialogTitle>내보내기</DialogTitle>
-          <DialogDescription>완성본을 만들고 받습니다. 아직 못 만들면 무엇이 남았는지 알려 줘요.</DialogDescription>
+          <DialogDescription>완성본을 만들고 받아요. 못 만들면 남은 일을 알려 줘요.</DialogDescription>
         </DialogHeader>
         {/* `편집 열기`는 이미 편집기 안이므로 팝업을 닫는 것으로 충분하다.
             장면을 열면(검토 목록의 `편집하기`) 이 편집기 안에서 그 장면을 그대로
@@ -873,7 +873,7 @@ function auditionRoleLabel(role: EditorViewModel["tracks"][number]["role"]): str
     broll: "영상",
     bgm: "배경 음악",
     sfx: "효과음",
-    overlay: "화면 표시",
+    overlay: "화면 요소",
   };
   return labels[role] ?? "미디어";
 }

@@ -14,7 +14,7 @@ describe("workspace route manifest", () => {
     expect(resolveGlobalLocation("projects")).toBe("/projects");
     expect(resolveGlobalLocation("library")).toBe("/library");
     expect(resolveGlobalLocation("footage")).toBe("/footage");
-    expect(resolveGlobalLocation("settings")).toBe("/settings/general");
+    expect(resolveGlobalLocation("settings")).toBe("/settings/appearance");
     expect(resolveProjectStage("p1", "assets")).toBe("/projects/p1/media");
   });
 

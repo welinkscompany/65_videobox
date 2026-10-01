@@ -43,7 +43,7 @@ describe("saved format picker", () => {
     render(<SavedFormatPicker onApply={onApply} />);
 
     fireEvent.change(await screen.findByRole("combobox", { name: "저장한 포맷" }), { target: { value: "format_template_2" } });
-    fireEvent.click(screen.getByRole("button", { name: "고른 포맷의 캡션 모양 적용" }));
+    fireEvent.click(screen.getByRole("button", { name: "캡션 모양 적용" }));
 
     expect(onApply).toHaveBeenCalledWith({ font_size: 30 });
   });
@@ -53,7 +53,7 @@ describe("saved format picker", () => {
     const onApply = vi.fn();
     render(<SavedFormatPicker onApply={onApply} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "고른 포맷의 캡션 모양 적용" }));
+    fireEvent.click(await screen.findByRole("button", { name: "캡션 모양 적용" }));
 
     expect(onApply).toHaveBeenCalledWith({ font_size: 48, text_color: "#FFFFFF" });
   });

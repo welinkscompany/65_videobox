@@ -23,6 +23,6 @@ describe("녹음 안내", () => {
 
   it("넉넉하면 멈춰도 된다고 말한다", () => {
     /** 더 읽어도 나아지지 않는데 계속 읽게 두면 시간만 쓴다. */
-    expect(recordingHint(VOICE_ENOUGH_SECONDS + 5)).toContain("멈추셔도");
+    expect(recordingHint(VOICE_ENOUGH_SECONDS + 5)).toContain("멈춰도");
   });
 });

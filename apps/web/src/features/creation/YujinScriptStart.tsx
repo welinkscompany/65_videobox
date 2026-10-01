@@ -18,7 +18,7 @@ const messageByDetail: Record<string, string> = {
   script_draft_took_too_long: "대본이 제 시간에 오지 않았어요. 영상 길이나 장면 수를 줄여서 다시 부탁해 주세요.",
   script_draft_empty: "대본을 받지 못했어요. 주제를 조금 더 자세히 적고 다시 눌러 주세요.",
   script_draft_not_korean: "대본이 우리말로 오지 않았어요. 주제를 조금 더 자세히 적고 다시 눌러 주세요.",
-  script_draft_topic_empty: "무엇에 대한 영상인지 먼저 적어 주세요.",
+  script_draft_topic_empty: "영상 주제를 먼저 적어 주세요.",
 };
 
 const UNKNOWN = "대본을 만들지 못했어요. 잠시 뒤 다시 눌러 주세요.";
@@ -71,7 +71,7 @@ export function YujinScriptStart({
   async function ask() {
     if (isWriting) return;
     if (!topic.trim()) {
-      setError("무엇에 대한 영상인지 먼저 적어 주세요.");
+      setError("영상 주제를 먼저 적어 주세요.");
       return;
     }
     setError(null);
@@ -100,7 +100,7 @@ export function YujinScriptStart({
     return (
       <section aria-label="유진이 쓴 대본 확인">
         <h2>{written.title}</h2>
-        <p>마음에 안 드는 곳을 고친 뒤 기획을 시작해 주세요. 유진이도 틀리니 꼭 읽어 봐 주세요.</p>
+        <p>마음에 안 드는 곳을 고친 뒤 기획을 시작해 주세요. 유진도 틀릴 수 있으니 꼭 읽어 봐 주세요.</p>
         <label htmlFor="yujin-script-text">유진이 쓴 대본</label>
         <Textarea
           id="yujin-script-text"
@@ -111,7 +111,7 @@ export function YujinScriptStart({
         />
         {/* 이 제품이 다른 점은 자산이 아니라 **고르는 일**이다(계획서 §4.2).
             대본만 주고 장면을 감추면 유진이 한 일의 절반이 안 보인다. */}
-        <p id="yujin-scene-note">대본을 고치면 장면도 달라져요. 어떤 영상을 넣을지는 기획에서 함께 정합니다.</p>
+        <p id="yujin-scene-note">대본을 고치면 장면도 달라져요. 어떤 영상을 넣을지는 기획에서 정해요.</p>
         <ul aria-label="유진이 생각한 장면" aria-describedby="yujin-scene-note">
           {written.scenes.map((scene) => (
             // 붙여 쓰면 읽어 주는 도구에서 `1번째 장면첫 캠핑...`으로 이어진다.
@@ -171,8 +171,8 @@ export function YujinScriptStart({
   return (
     <section aria-label="유진과 대본부터 시작">
       <h2>대본도 영상도 아직 없어요</h2>
-      <p>무엇에 대한 영상인지만 알려 주면 유진이 대본 초안을 써 드릴게요.</p>
-      <label htmlFor="yujin-script-topic">무엇에 대한 영상인가요</label>
+      <p>주제만 적으면 유진이 대본 초안을 써요.</p>
+      <label htmlFor="yujin-script-topic">영상 주제</label>
       <Input
         id="yujin-script-topic"
         value={topic}
@@ -206,7 +206,7 @@ export function YujinScriptStart({
         ))}
       </NativeSelect>
       <Button type="button" disabled={disabled || isWriting} onClick={() => void ask()}>
-        {isWriting ? "유진이 대본을 쓰고 있어요" : "유진에게 대본 부탁하기"}
+        {isWriting ? "대본 쓰는 중" : "유진에게 대본 부탁하기"}
       </Button>
       {isWriting ? <p role="status">잠깐이면 돼요. 이 화면을 열어 둔 채 기다려 주세요.</p> : null}
       {error ? <p role="alert">{error}</p> : null}

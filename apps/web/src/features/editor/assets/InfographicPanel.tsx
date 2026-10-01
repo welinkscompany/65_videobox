@@ -66,6 +66,8 @@ export function InfographicPanel({ onMade }: { onMade?: () => void }) {
       // 자료실에 들어갔으면 목록을 다시 읽게 한다 -- 만들고 나서 어디 갔는지
       // 안 보이면 만든 적 없는 것과 같다.
       if (result.library_asset_id) onMade?.();
+      // 서버 오류 원문은 창작자 화면이 아니라 디버깅 자리에만 남긴다(§10.13).
+      else if (result.library_error) console.warn("infographic library save failed:", result.library_error);
     } catch (error) {
       setFailed(messageFor(error));
     } finally {
@@ -75,14 +77,14 @@ export function InfographicPanel({ onMade }: { onMade?: () => void }) {
 
   return <div className="vb-infographic">
     <label className="vb-infographic__field">
-      <span>무엇에 대한 그림인가요</span>
+      <span>그림 주제</span>
       <Input value={topic} disabled={busy} placeholder="스마트스토어 판매 수수료 구조"
         onChange={(event) => setTopic(event.target.value)} />
     </label>
 
     <div className="vb-infographic__facts" role="group" aria-label="그림에 넣을 숫자">
       <p className="vb-infographic__hint">
-        여기 적은 숫자만 그림에 들어갑니다. <strong>적지 않은 숫자는 만들지 않습니다.</strong>
+        여기 적은 숫자만 그림에 들어가요. <strong>적지 않은 숫자는 지어내지 않아요.</strong>
       </p>
       {rows.map((row, index) => <div className="vb-infographic__fact" key={index}>
         <Input aria-label={`${index + 1}번째 이름`} value={row.label} disabled={busy} placeholder="네이버 결제 수수료"
@@ -114,18 +116,18 @@ export function InfographicPanel({ onMade }: { onMade?: () => void }) {
     </div> : null}
 
     <Button type="button" disabled={!ready} onClick={make} className="vb-infographic__make">
-      {busy ? "그리는 중입니다… 1~2분 걸립니다" : "인포그래픽 만들기"}
+      {busy ? "그리는 중… 1~2분 걸려요" : "인포그래픽 만들기"}
     </Button>
 
     {failed ? <p className="vb-infographic__failed" role="alert">{failed}</p> : null}
     {made ? <div className="vb-infographic__made" role="status">
       <p>
         {made.library_asset_id
-          ? <>다 만들었습니다. <strong>자료실 그림</strong>에 넣어 두었습니다 — 위 <strong>그림</strong>에서 골라 쓰세요.</>
-          : <>그림은 만들었지만 자료실에 넣지 못했습니다{made.library_error ? ` (${made.library_error})` : ""}.</>}
+          ? <>다 만들었어요. <strong>자료실 그림</strong>에 넣어 뒀으니 위 <strong>그림</strong>에서 골라 쓰세요.</>
+          : <>그림은 만들었지만 자료실에 넣지 못했어요. 잠시 뒤 다시 만들어 주세요.</>}
       </p>
       {made.attempts > 1 ? <p className="vb-infographic__hint">
-        처음 것이 아쉬워서 한 번 고쳐 만들었습니다: {made.corrected.join(" / ")}
+        처음 것이 아쉬워서 한 번 고쳐 만들었어요: {made.corrected.join(" / ")}
       </p> : null}
       {/* **기계가 못 보는 것을 말해 준다.** 숫자가 지어낸 것인지·판을 넘었는지는
           검사하지만, **글로 쓴 설명이 맞는 말인지는 검사하지 못한다.**
@@ -133,12 +135,12 @@ export function InfographicPanel({ onMade }: { onMade?: () => void }) {
           같은 그림 안의 2%와 정면으로 어긋났다. 그 한계를 숨기면 창작자가
           거짓말을 영상에 싣는다. */}
       <p className="vb-infographic__hint">
-        숫자와 자리는 검사했습니다. <strong>글로 쓴 설명은 검사하지 못하니 한 번 읽어 보세요.</strong>
+        숫자와 자리는 확인했어요. <strong>글로 쓴 설명은 확인하지 못했으니 한 번 읽어 보세요.</strong>
       </p>
       {/* **아쉬운 점을 숨기지 않는다.** 시간이 모자라 더 못 고쳤을 때 채워져 온다.
           숨기면 창작자가 다 된 줄 알고 영상에 넣는다. */}
       {made.remaining_problems.length > 0 ? <p className="vb-infographic__warning" role="alert">
-        아직 아쉬운 점이 있습니다: {made.remaining_problems.join(" / ")} — 보시고 다시 만들어도 됩니다.
+        아직 아쉬운 점: {made.remaining_problems.join(" / ")}. 보고 다시 만들어도 돼요.
       </p> : null}
     </div> : null}
   </div>;
@@ -159,21 +161,21 @@ function messageFor(error: unknown): string {
   const structured = raw && typeof raw === "object" ? (raw as { reason?: string; problems?: string }) : null;
   if (structured?.reason === "infographic_did_not_pass_checks") {
     return structured.problems
-      ? `쓸 만한 그림이 안 나와서 버렸습니다 — ${structured.problems}. 주제나 숫자를 바꿔 다시 해 보세요.`
-      : "쓸 만한 그림이 안 나왔습니다. 주제를 더 짧게 적고 다시 해 보세요.";
+      ? `쓸 만한 그림이 안 나와서 버렸어요(${structured.problems}). 주제나 숫자를 바꿔 다시 해 보세요.`
+      : "쓸 만한 그림이 안 나왔어요. 주제를 더 짧게 적고 다시 해 보세요.";
   }
   const detail = String(raw ?? (error as Error)?.message ?? "");
   if (detail.includes("bridge_not_configured") || detail.includes("generation_unavailable")) {
-    return "인포그래픽 기능이 아직 켜져 있지 않습니다. VideoBox를 다시 켜 주세요.";
+    return "인포그래픽 만들기가 아직 꺼져 있어요. VideoBox를 다시 켜 주세요.";
   }
   if (detail.includes("bridge_not_running")) {
-    return "그림을 그리는 프로그램이 꺼져 있습니다. VideoBox를 다시 켜 주세요.";
+    return "그림 그리는 프로그램이 꺼져 있어요. VideoBox를 다시 켜 주세요.";
   }
   if (detail.includes("took_too_long")) {
-    return "만드는 데 너무 오래 걸렸습니다. 숫자를 줄이고 다시 해 보세요.";
+    return "너무 오래 걸렸어요. 숫자를 줄이고 다시 해 보세요.";
   }
   if (detail.includes("did_not_pass_checks")) {
-    return "쓸 만한 그림이 안 나왔습니다. 주제를 더 짧게 적고 다시 해 보세요.";
+    return "쓸 만한 그림이 안 나왔어요. 주제를 더 짧게 적고 다시 해 보세요.";
   }
-  return "만들지 못했습니다. 잠시 뒤 다시 해 보세요.";
+  return "만들지 못했어요. 잠시 뒤 다시 해 보세요.";
 }

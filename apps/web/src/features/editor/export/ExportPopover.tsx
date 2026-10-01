@@ -78,7 +78,7 @@ export function ExportPopover({
             </a>
           ) : finalSelection.kind === "stale" ? (
             // 낡은 파일은 절대 조용히 안 준다 -- 링크를 감추고 다시 만들라고
-            // 말한다. `완성본 만들기와 자세한 상태`(2단계)가 새로 만드는 자리다.
+            // 말한다. `완성본 만들기·상태 보기`(2단계)가 새로 만드는 자리다.
             <p>완성본이 최신 편집본과 달라요. 아래에서 새로 만들어 주세요.</p>
           ) : (
             // 준비를 떠넘기지 않는다 -- 무엇이 없어서 못 받는지 말한다.
@@ -87,7 +87,7 @@ export function ExportPopover({
         </li>
         <li>
           <strong>공유 링크</strong>
-          <p>동료에게 보여 줄 링크를 만듭니다. 아래 자세한 자리에서 만들어요.</p>
+          <p>보여 줄 링크는 아래 상태 보기에서 만들어요.</p>
         </li>
         <li>
           <strong>자막 파일</strong>
@@ -109,7 +109,7 @@ export function ExportPopover({
         </li>
       </ul>
       {/* 2단계. 캡컷도 `내보내기 설정`을 한 겹 뒤에 둔다. */}
-      <Button onClick={onOpenDetails} type="button" variant="outline">완성본 만들기와 자세한 상태</Button>
+      <Button onClick={onOpenDetails} type="button" variant="outline">완성본 만들기·상태 보기</Button>
     </div>
   );
 }

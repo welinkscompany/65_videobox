@@ -35,7 +35,7 @@ const legacyStageAliases: Readonly<Record<string, { stage: ProjectStage; legacy:
 export function resolveGlobalLocation(destination: GlobalDestination) {
   // Settings currently has a sectioned owner, so keep the global destination
   // useful by resolving it to the existing general settings entry point.
-  return destination === "settings" ? "/settings/general" : `/${destination}`;
+  return destination === "settings" ? "/settings/appearance" : `/${destination}`;
 }
 
 /**

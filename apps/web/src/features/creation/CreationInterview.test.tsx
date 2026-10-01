@@ -219,7 +219,7 @@ describe("CreationInterview", () => {
     await screen.findByText("누구에게 보여줄까요?");
     fireEvent.click(screen.getByRole("button", { name: "건너뛰기" }));
 
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("답변을 저장하지 못했습니다."));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("답변을 저장하지 못했어요."));
     expect(screen.getByText("누구에게 보여줄까요?")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
     await waitFor(() => expect(answer).toHaveBeenCalledTimes(2));
@@ -283,10 +283,10 @@ describe("CreationInterview", () => {
     window.localStorage.setItem("videobox.draft-readiness.project_1", "readiness_gap");
     render(<CreationInterview projectId="project_1" />);
 
-    expect(await screen.findByText("누락된 장면은 빈 구간으로 남습니다. 이 초안은 내보낼 수 없어요.")).toBeVisible();
+    expect(await screen.findByText("영상이 없는 장면은 빈 구간으로 남아요. 이 초안은 내보낼 수 없어요.")).toBeVisible();
     expect(screen.getByRole("button", { name: "빈 구간 포함 초안 만들기" })).toBeDisabled();
     expect(create).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByLabelText("빈 구간을 남긴 채 편집용 초안을 만들겠습니다"));
+    fireEvent.click(screen.getByLabelText("빈 구간을 남긴 채 편집용 초안 만들기"));
     fireEvent.click(screen.getByRole("button", { name: "빈 구간 포함 초안 만들기" }));
 
     await waitFor(() => expect(create).toHaveBeenCalledWith("project_1", {
@@ -328,7 +328,7 @@ describe("CreationInterview", () => {
     const create = vi.spyOn(api, "createAtomicDraftBundle").mockResolvedValue({ session_id: "editing_1" } as never);
     render(<CreationInterview projectId="project_1" />);
 
-    const confirmation = await screen.findByLabelText("빈 구간을 남긴 채 편집용 초안을 만들겠습니다");
+    const confirmation = await screen.findByLabelText("빈 구간을 남긴 채 편집용 초안 만들기");
     fireEvent.click(confirmation);
     await Promise.resolve();
 
@@ -349,17 +349,17 @@ describe("CreationInterview", () => {
     const retry = vi.spyOn(api, "retryDraftReadiness").mockResolvedValueOnce(readinessB).mockResolvedValueOnce(readinessA);
     render(<CreationInterview projectId="project_1" />);
 
-    const confirmation = await screen.findByLabelText("빈 구간을 남긴 채 편집용 초안을 만들겠습니다");
+    const confirmation = await screen.findByLabelText("빈 구간을 남긴 채 편집용 초안 만들기");
     fireEvent.click(confirmation);
     expect(confirmation).toBeChecked();
 
     fireEvent.click(screen.getByRole("button", { name: "다시 준비" }));
     await waitFor(() => expect(retry).toHaveBeenCalledWith("project_1", "readiness_a", 3));
-    await waitFor(() => expect(screen.getByLabelText("빈 구간을 남긴 채 편집용 초안을 만들겠습니다")).not.toBeChecked());
+    await waitFor(() => expect(screen.getByLabelText("빈 구간을 남긴 채 편집용 초안 만들기")).not.toBeChecked());
 
     fireEvent.click(screen.getByRole("button", { name: "다시 준비" }));
     await waitFor(() => expect(retry).toHaveBeenLastCalledWith("project_1", "readiness_b", 4));
-    await waitFor(() => expect(screen.getByLabelText("빈 구간을 남긴 채 편집용 초안을 만들겠습니다")).not.toBeChecked());
+    await waitFor(() => expect(screen.getByLabelText("빈 구간을 남긴 채 편집용 초안 만들기")).not.toBeChecked());
     expect(screen.getByRole("button", { name: "빈 구간 포함 초안 만들기" })).toBeDisabled();
   });
 
@@ -374,7 +374,7 @@ describe("CreationInterview", () => {
     render(<CreationInterview projectId="project_1" />);
 
     fireEvent.click(await screen.findByRole("button", { name: "다시 준비" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("다시 준비하지 못했습니다");
+    expect(await screen.findByRole("alert")).toHaveTextContent("다시 준비하지 못했어요");
   });
 
   it("surfaces candidate skip failures in the readiness workspace", async () => {
@@ -388,7 +388,7 @@ describe("CreationInterview", () => {
     render(<CreationInterview projectId="project_1" />);
 
     fireEvent.click(await screen.findByRole("button", { name: "제품 장면 건너뛰기" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("장면을 건너뛰지 못했습니다");
+    expect(await screen.findByRole("alert")).toHaveTextContent("장면을 건너뛰지 못했어요");
   });
 
   it("saves each B-roll candidate's chosen seconds with the current readiness revision", async () => {
@@ -475,7 +475,7 @@ describe("CreationInterview", () => {
     Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: vi.fn().mockRejectedValue(new Error("denied")) } });
     render(<CreationInterview projectId="project_1" />);
     fireEvent.click(await screen.findByRole("button", { name: "마이크로 녹음 시작" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("마이크를 사용할 수 없습니다");
+    expect(await screen.findByRole("alert")).toHaveTextContent("마이크를 쓸 수 없어요");
   });
 
   it("uploads a stopped microphone recording through the narration endpoint and offers retry", async () => {
@@ -488,7 +488,7 @@ describe("CreationInterview", () => {
     render(<CreationInterview projectId="project_1" />);
     fireEvent.click(await screen.findByRole("button", { name: "마이크로 녹음 시작" }));
     fireEvent.click(await screen.findByRole("button", { name: "녹음 마치기" }));
-    await screen.findByText("소리 파일을 준비하지 못했습니다.");
+    await screen.findByText("소리 파일을 준비하지 못했어요.");
     fireEvent.click(screen.getByRole("button", { name: "녹음 다시 올리기" }));
     await waitFor(() => expect(upload).toHaveBeenCalledTimes(2));
     expect(upload.mock.calls[0][1]).toBeInstanceOf(File);

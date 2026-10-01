@@ -177,8 +177,8 @@ describe("EditorWorkbench", () => {
     openMaterialDock();
     fireEvent.click(await screen.findByRole("button", { name: "제품 사진 원본 미리보기" }));
 
-    expect(screen.getByLabelText("제품 사진 소스 미리보기")).toBeInTheDocument();
-    expect(screen.getByLabelText("제품 사진 소스 미리보기").tagName).toBe("IMG");
+    expect(screen.getByLabelText("제품 사진 원본 재생")).toBeInTheDocument();
+    expect(screen.getByLabelText("제품 사진 원본 재생").tagName).toBe("IMG");
     expect(container.querySelectorAll("audio, video")).toHaveLength(0);
     expect(container.querySelectorAll("img")).toHaveLength(1);
   });
@@ -192,10 +192,10 @@ describe("EditorWorkbench", () => {
 
     openMaterialDock();
     fireEvent.click(await screen.findByRole("button", { name: "현장 오디오 원본 미리보기" }));
-    expect(screen.getByLabelText("현장 오디오 소스 미리보기").tagName).toBe("AUDIO");
+    expect(screen.getByLabelText("현장 오디오 원본 재생").tagName).toBe("AUDIO");
     expect(container.querySelectorAll("audio, video")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "배경 음악 1 원본 미리보기" }));
-    expect(screen.getByLabelText("배경 음악 1 소스 미리보기").tagName).toBe("AUDIO");
+    expect(screen.getByLabelText("배경 음악 1 원본 재생").tagName).toBe("AUDIO");
     expect(container.querySelectorAll("audio, video")).toHaveLength(1);
   });
 
@@ -212,7 +212,7 @@ describe("EditorWorkbench", () => {
     expect(container.querySelectorAll("audio, video")).toHaveLength(0);
     await act(async () => resolvePreview("/api/proxy/video-1"));
 
-    expect(await screen.findByLabelText("HEVC 영상 소스 미리보기")).toHaveAttribute("src", "/api/proxy/video-1");
+    expect(await screen.findByLabelText("HEVC 영상 원본 재생")).toHaveAttribute("src", "/api/proxy/video-1");
     expect(container.querySelectorAll("audio, video")).toHaveLength(1);
   });
 
@@ -227,9 +227,9 @@ describe("EditorWorkbench", () => {
     fireEvent.click(screen.getByRole("button", { name: "첫 영상 원본 미리보기" }));
     fireEvent.click(screen.getByRole("button", { name: "둘째 영상 원본 미리보기" }));
     await act(async () => resolvers[0]("/api/proxy/old"));
-    expect(screen.queryByLabelText("첫 영상 소스 미리보기")).toBeNull();
+    expect(screen.queryByLabelText("첫 영상 원본 재생")).toBeNull();
     await act(async () => resolvers[1]("/api/proxy/new"));
-    expect(await screen.findByLabelText("둘째 영상 소스 미리보기")).toHaveAttribute("src", "/api/proxy/new");
+    expect(await screen.findByLabelText("둘째 영상 원본 재생")).toHaveAttribute("src", "/api/proxy/new");
   });
 
   it("uses only a selected narration clip as the asset apply target and forwards it upward", () => {
@@ -523,7 +523,7 @@ describe("EditorWorkbench", () => {
     render(<EditorWorkbench view={currentView} />);
     expect(screen.getByRole("region", { name: "미리보기" })).toBeInTheDocument();
     expect(screen.getByLabelText("편집본 미리보기")).toHaveAttribute("src", "/api/projects/project-a/exact-previews/g4/content");
-    expect(screen.getByRole("region", { name: "타임라인" })).toHaveTextContent("1개 트랙");
+    expect(screen.getByRole("region", { name: "타임라인" })).toHaveTextContent("트랙 1개");
   });
 
   it("uses the Inspector registry instead of exposing an unsupported B-roll track", () => {
@@ -539,7 +539,7 @@ describe("EditorWorkbench", () => {
     // **갱신 이유(2026-08-22).** 문구만 바뀌었다 -- owner 지시로 화면 문구를
     // 설명 문장에서 키워드 중심으로 옮기는 중이다. 지키려는 것은 "다룰 항목이
     // 없을 때 화면이 그 사실을 말한다"이지 그 문장 자체가 아니었다.
-    expect(screen.getByText("이 명령이 다루는 항목 없음")).toBeInTheDocument();
+    expect(screen.getByText("고칠 항목 없음")).toBeInTheDocument();
   });
 
   it("uses an audio element for a narration audition and never mounts a second player", () => {
@@ -551,8 +551,8 @@ describe("EditorWorkbench", () => {
     const { container } = render(<EditorWorkbench view={narrationView} />);
     openMaterialDock();
     fireEvent.click(screen.getByRole("button", { name: "내레이션 · 1번째 장면 원본 열기" }));
-    expect(screen.getByLabelText("내레이션 · 1번째 장면 소스 미리보기").tagName).toBe("AUDIO");
-    expect(screen.getByLabelText("내레이션 · 1번째 장면 소스 미리보기")).not.toHaveAttribute("autoplay");
+    expect(screen.getByLabelText("내레이션 · 1번째 장면 원본 재생").tagName).toBe("AUDIO");
+    expect(screen.getByLabelText("내레이션 · 1번째 장면 원본 재생")).not.toHaveAttribute("autoplay");
     expect(container.querySelectorAll("audio, video")).toHaveLength(1);
   });
 
@@ -576,7 +576,7 @@ describe("EditorWorkbench", () => {
     render(<EditorWorkbench view={narrationView} />);
     openMaterialDock();
     fireEvent.click(screen.getByRole("button", { name: "내레이션 · 1번째 장면 원본 열기" }));
-    expect(screen.getByLabelText("내레이션 · 1번째 장면 소스 미리보기").tagName).toBe("AUDIO");
+    expect(screen.getByLabelText("내레이션 · 1번째 장면 원본 재생").tagName).toBe("AUDIO");
   });
 
   it("resets selection, seek, and audition media when a different route reuses the same segment id", () => {
@@ -590,7 +590,7 @@ describe("EditorWorkbench", () => {
     const rendered = render(<EditorWorkbench view={routeA as never} />);
     openMaterialDock();
     fireEvent.click(screen.getByRole("button", { name: "내레이션 · 1번째 장면 원본 열기" }));
-    expect(screen.getByLabelText("내레이션 · 1번째 장면 소스 미리보기")).toBeInTheDocument();
+    expect(screen.getByLabelText("내레이션 · 1번째 장면 원본 재생")).toBeInTheDocument();
     fireEvent.click(clipSelectionButton("clip-a"));
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "1");
 
@@ -603,7 +603,7 @@ describe("EditorWorkbench", () => {
       tracks: [{ ...routeA.tracks[0], clips: [{ ...routeA.tracks[0].clips[0], clipId: "clip-b" }] }],
     } as never} />);
 
-    expect(screen.queryByLabelText("내레이션 · 1번째 장면 소스 미리보기")).toBeNull();
+    expect(screen.queryByLabelText("내레이션 · 1번째 장면 원본 재생")).toBeNull();
     expect(clipSelectionButton("clip-b")).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "0");
   });
@@ -786,8 +786,8 @@ describe("EditorWorkbench", () => {
     } as const;
     render(<EditorWorkbench view={overlayView} />);
     openMaterialDock();
-    fireEvent.click(screen.getByRole("button", { name: "화면 표시 · 1번째 장면 원본 열기" }));
-    expect(screen.getByLabelText("화면 표시 · 1번째 장면 소스 미리보기").tagName).toBe("VIDEO");
+    fireEvent.click(screen.getByRole("button", { name: "화면 요소 · 1번째 장면 원본 열기" }));
+    expect(screen.getByLabelText("화면 요소 · 1번째 장면 원본 재생").tagName).toBe("VIDEO");
   });
 
   // Task 5: 얹은 것이 영상이면 `overlayType`이 `image_overlay`(사진과 같은 종류)라도
@@ -801,38 +801,38 @@ describe("EditorWorkbench", () => {
     } as const;
     render(<EditorWorkbench view={overlayVideoView} />);
     openMaterialDock();
-    fireEvent.click(screen.getByRole("button", { name: "화면 표시 · 1번째 장면 원본 열기" }));
-    expect(screen.getByLabelText("화면 표시 · 1번째 장면 소스 미리보기").tagName).toBe("VIDEO");
+    fireEvent.click(screen.getByRole("button", { name: "화면 요소 · 1번째 장면 원본 열기" }));
+    expect(screen.getByLabelText("화면 요소 · 1번째 장면 원본 재생").tagName).toBe("VIDEO");
   });
 
   it("starts with output variants collapsed, expands on demand, and remembers the choice per project", async () => {
     const { unmount } = render(<EditorWorkbench view={view} />);
-    const toggle = screen.getByRole("button", { name: "출력 변형 펼치기" });
+    const toggle = screen.getByRole("button", { name: "가로·세로 비교 펼치기" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     // Collapsed: only the header/toggle are present, none of the expanded body.
-    expect(screen.queryByRole("tablist", { name: "출력 변형 보기" })).toBeNull();
-    expect(screen.queryByText("현재 마스터 편집본을 기준으로 출력 변형을 확인합니다.")).toBeNull();
+    expect(screen.queryByRole("tablist", { name: "화면 비율" })).toBeNull();
+    expect(screen.queryByText("마스터 편집본 기준으로 가로·세로를 봐요.")).toBeNull();
 
     fireEvent.click(toggle);
-    expect(await screen.findByRole("button", { name: "출력 변형 접기" })).toHaveAttribute("aria-expanded", "true");
+    expect(await screen.findByRole("button", { name: "가로·세로 비교 접기" })).toHaveAttribute("aria-expanded", "true");
     // Expanded: everything that was there before this task is still reachable.
-    expect(screen.getByRole("tablist", { name: "출력 변형 보기" })).toBeInTheDocument();
-    expect(screen.getByText("현재 마스터 편집본을 기준으로 출력 변형을 확인합니다.")).toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "화면 비율" })).toBeInTheDocument();
+    expect(screen.getByText("마스터 편집본 기준으로 가로·세로를 봐요.")).toBeInTheDocument();
 
     unmount();
     // Same project+session: remembers expanded.
     render(<EditorWorkbench view={view} />);
-    expect(screen.getByRole("button", { name: "출력 변형 접기" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "가로·세로 비교 접기" })).toHaveAttribute("aria-expanded", "true");
   });
 
   it("keeps a fresh project's output variants collapsed even after another project was expanded", async () => {
     const { unmount } = render(<EditorWorkbench view={view} />);
-    fireEvent.click(screen.getByRole("button", { name: "출력 변형 펼치기" }));
-    expect(await screen.findByRole("button", { name: "출력 변형 접기" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "가로·세로 비교 펼치기" }));
+    expect(await screen.findByRole("button", { name: "가로·세로 비교 접기" })).toBeInTheDocument();
     unmount();
 
     render(<EditorWorkbench view={{ ...view, projectId: "project-b", sessionId: "session-b" }} />);
-    expect(screen.getByRole("button", { name: "출력 변형 펼치기" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: "가로·세로 비교 펼치기" })).toHaveAttribute("aria-expanded", "false");
   });
 
   it("excludes an image overlay from the video or audio audition player", () => {
@@ -842,7 +842,7 @@ describe("EditorWorkbench", () => {
       tracks: [{ trackId: "overlay", role: "overlay", clips: [{ clipId: "clip-image", segmentId: "segment-image", type: "overlay", assetId: "asset-image", assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: "image_overlay", overlayPayload: {} }] }],
     } as const;
     const { container } = render(<EditorWorkbench view={imageOverlayView} />);
-    expect(screen.queryByRole("button", { name: "화면 표시 · 1번째 장면 원본 열기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "화면 요소 · 1번째 장면 원본 열기" })).toBeNull();
     expect(container.querySelectorAll("video, audio")).toHaveLength(1);
     expect(screen.getByLabelText("편집본 미리보기")).toBeInTheDocument();
   });
@@ -1081,7 +1081,7 @@ describe("편집기에서 내보내기", () => {
     const dialog = await screen.findByRole("dialog", { name: "내보내기" });
     expect(await within(dialog).findByRole("list", { name: "내보낼 곳" })).toBeInTheDocument();
 
-    fireEvent.click(within(dialog).getByRole("button", { name: "완성본 만들기와 자세한 상태" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "완성본 만들기·상태 보기" }));
     expect(await within(dialog).findByTestId("review-and-output-page")).toBeInTheDocument();
     expect(within(dialog).getByTestId("outputs-page")).toBeInTheDocument();
     // 이 문구가 다시 나타나면 그 링크가 되살아난 것이다 -- 누르면 `/review`로

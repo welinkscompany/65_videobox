@@ -41,13 +41,13 @@ const jobTypeCopy: Record<string, string> = {
 };
 
 const jobStatusCopy: Record<string, string> = {
-  pending: "차례를 기다리고 있어요",
-  queued: "차례를 기다리고 있어요",
-  running: "진행 중이에요",
-  succeeded: "완료됐어요",
-  failed: "다시 확인이 필요해요",
-  blocked: "직접 확인이 필요해요",
-  cancelled: "멈췄어요",
+  pending: "대기 중",
+  queued: "대기 중",
+  running: "진행 중",
+  succeeded: "완료",
+  failed: "실패",
+  blocked: "확인 필요",
+  cancelled: "멈춤",
 };
 
 export function canRetryJob(job: JobRecord) {
@@ -187,13 +187,13 @@ export function JobRecovery({
       mutationSucceeded = true;
     } catch {
       if (isCurrentRetry()) {
-        setMessage("자동으로 다시 시작하지 못했어요. 해당 화면에서 직접 다시 실행해 주세요.");
+        setMessage("자동으로 다시 시작하지 못했어요. 원래 화면에서 다시 실행해 주세요.");
       }
     } finally {
       if (isCurrentRetry()) {
         const refreshed = await load();
         if (mutationSucceeded && refreshed && isCurrentRetry()) {
-          setMessage("작업을 다시 시작했어요. 최신 상태를 확인했습니다.");
+          setMessage("작업을 다시 시작했어요.");
         }
       }
       if (retryInFlight.current?.id === token.id) {
@@ -234,14 +234,14 @@ export function JobRecovery({
           <article key={key} data-vb-job-row="true" data-testid={`job-row-${job.job_id}`} className="vb-job-row grid min-w-0 gap-1 rounded-md border p-2">
             {scope === "global" && job.project_name ? <strong>{job.project_name}</strong> : null}
             <strong>{jobTypeCopy[job.job_type] ?? "기타 작업"}</strong>
-            <span>{jobStatusCopy[job.status] ?? "상태를 확인하고 있어요"}</span>
+            <span>{jobStatusCopy[job.status] ?? "상태 확인 중"}</span>
             {typeof job.progress_percent === "number" ? <span>{job.progress_percent}% {job.status === "succeeded" ? "완료" : "진행 중"}</span> : null}
             {formatJobTime(job.started_at) ? <span>시작 {formatJobTime(job.started_at)}</span> : null}
             {formatJobTime(job.finished_at) ? <span>완료 {formatJobTime(job.finished_at)}</span> : null}
             {job.status === "failed" ? <span role="status">실패했어요. 원래 화면에서 다시 실행해 주세요.</span> : null}
             {job.status === "blocked" && job.error_message ? <span role="alert">{job.error_message}</span> : null}
             {job.status === "blocked"
-              ? <span>자동 재시도 대신 원래 화면에서 직접 다시 실행해 주세요.</span>
+              ? <span>원래 화면에서 다시 실행해 주세요.</span>
               : null}
             {retryableJobKeys.has(key) ? (
               <Button type="button" size="sm" variant="outline" disabled={busyKey !== null} onClick={() => void retry(job)}>

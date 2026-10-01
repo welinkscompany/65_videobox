@@ -111,7 +111,7 @@ export function SourceVideoStart({
   return (
     <section aria-label="찍어 둔 영상으로 시작">
       <h2>찍어 둔 영상이 있어요</h2>
-      <p>영상에서 말을 받아써 대본을 만들어 드릴게요. 올린 영상은 그대로 본편으로 씁니다.</p>
+      <p>영상 속 말을 받아써 대본을 만들어요. 올린 영상은 본편으로 그대로 써요.</p>
       <label htmlFor="source-video-file">찍어 둔 영상 선택</label>
       {/* 길이 안내는 **재서** 적었다. 2026-08-21 실측으로 3분 20초짜리가 24초에
           끝났다(대략 8배속). 중간에서 끊는 벽이 330초이므로 길이만 보면 20분도
@@ -129,7 +129,7 @@ export function SourceVideoStart({
         onChange={(event) => { setFile(event.target.files?.[0] ?? null); setError(null); }}
       />
       <Button type="button" disabled={disabled || isReading} onClick={() => void read()}>
-        {isReading ? "영상에서 말을 받아쓰고 있어요" : "영상에서 대본 만들기"}
+        {isReading ? "받아쓰는 중" : "영상에서 대본 만들기"}
       </Button>
       {isReading ? <p role="status">영상 길이에 따라 몇 분 걸릴 수 있어요. 이 화면을 열어 둔 채 기다려 주세요.</p> : null}
       {error ? <p role="alert">{error}</p> : null}

@@ -138,7 +138,7 @@ describe("캡션 모양 고르기", () => {
       expect(options[0]).toHaveTextContent("Highlight");
     });
     // 고른 것이 최근이라는 표시는 드롭다운 아래 한 줄로 남는다.
-    expect(screen.getByText("최근에 썼어요")).toBeVisible();
+    expect(screen.getByText("최근 사용")).toBeVisible();
   });
 });
 
@@ -223,7 +223,7 @@ describe("즐겨찾기할 수 없는 모양", () => {
 
     render(<CaptionPresetPicker projectId="project-a" onApply={vi.fn()} currentStyle={{ font_family: "Pretendard", font_size: 28 }} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "이 모양 저장해 두기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "지금 모양 저장" }));
 
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     // 즐겨찾기가 걸리려면 `project:`로 시작해야 한다.
@@ -245,7 +245,7 @@ describe("즐겨찾기할 수 없는 모양", () => {
     const onApply = vi.fn();
 
     render(<CaptionPresetPicker projectId="project-a" onApply={onApply} currentStyle={snapshot} />);
-    fireEvent.click(await screen.findByRole("button", { name: "이 모양 저장해 두기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "지금 모양 저장" }));
 
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     // 저장된 것은 스냅샷 그대로여야 한다.

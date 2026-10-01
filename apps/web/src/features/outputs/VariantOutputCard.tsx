@@ -25,7 +25,7 @@ export function VariantOutputCard({
       <CardHeader>
         <CardTitle>{label}</CardTitle>
         <CardDescription>
-          {playable ? (confirmed ? "결과 확인됨 · 다시 재생할 수 있어요." : "실제 결과를 재생한 뒤 확인해 주세요.") : item.status === "failed" ? "이 출력만 다시 확인해 주세요." : item.status === "running" || item.status === "pending" ? "출력을 만드는 중이에요." : "출력 대기"}
+          {playable ? (confirmed ? "확인함" : "재생해 보고 결과 확인을 눌러 주세요.") : item.status === "failed" ? "만들지 못했어요. 이 출력만 다시 만들어 주세요." : item.status === "running" || item.status === "pending" ? "만드는 중" : "대기 중"}
         </CardDescription>
       </CardHeader>
       <CardContent>

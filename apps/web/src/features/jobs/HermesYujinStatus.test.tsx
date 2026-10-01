@@ -35,7 +35,7 @@ describe("HermesYujinStatus", () => {
     ["starting", "유진 연결을 준비하고 있어요."],
     ["http_ready", "유진 연결은 됐지만 대화 확인은 아직이에요."],
     ["provider_ready", "유진이 답변을 준비하고 있어요."],
-    ["chat_verified", "유진과 대화할 준비가 확인됐어요."],
+    ["chat_verified", "유진과 대화할 수 있어요."],
     ["degraded", "최근에는 유진과 대화가 원활하지 않았어요."],
   ] as const)("shows plain creator copy for %s", async (state, copy) => {
     vi.spyOn(api, "getHermesYujinStatus").mockResolvedValue(status(state));
@@ -55,7 +55,7 @@ describe("HermesYujinStatus", () => {
         resolveRefresh = resolve;
       }));
     render(<HermesYujinStatus />);
-    expect(await screen.findByText("유진과 대화할 준비가 확인됐어요.")).toBeVisible();
+    expect(await screen.findByText("유진과 대화할 수 있어요.")).toBeVisible();
 
     const refresh = screen.getByRole("button", { name: "다시 확인" });
     fireEvent.click(refresh);
@@ -65,7 +65,7 @@ describe("HermesYujinStatus", () => {
     expect(getStatus).toHaveBeenCalledTimes(2);
     resolveRefresh(status("stopped", "2026-07-30T11:59:59Z"));
     await waitFor(() => expect(refresh).toBeEnabled());
-    expect(screen.getByText("유진과 대화할 준비가 확인됐어요.")).toBeVisible();
+    expect(screen.getByText("유진과 대화할 수 있어요.")).toBeVisible();
     expect(screen.queryByText("유진과 연결할 수 없어요.")).not.toBeInTheDocument();
   });
 

@@ -28,7 +28,7 @@ export function YujinMemoryPanel({
       className="vb-editor-workbench__summary"
     >
       <h2>기억</h2>
-      <p>내가 확인한 편집 취향만 저장합니다.</p>
+      <p>내가 확인한 편집 취향만 저장해요.</p>
       <div>
         <label>
           기억 종류
@@ -135,7 +135,7 @@ function MemoryCandidateStatus({
     if (candidate.retryable) {
       return (
         <div>
-          <p>저장 처리가 오래 걸리고 있어요. 다시 확인할 수 있어요.</p>
+          <p>저장이 오래 걸리고 있어요.</p>
           <Button
             type="button"
             onClick={() => void memory.onStore(candidate.candidateId)}
@@ -150,7 +150,7 @@ function MemoryCandidateStatus({
   if (candidate.error === "delete") {
     return (
       <div>
-        <p>기억을 삭제하지 못했어요. 다시 시도할 수 있어요.</p>
+        <p>기억을 삭제하지 못했어요.</p>
         <Button
           type="button"
           onClick={() => void memory.onDelete(candidate.candidateId)}

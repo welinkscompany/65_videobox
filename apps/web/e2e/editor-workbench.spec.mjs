@@ -297,19 +297,19 @@ test("server-backed output variants keep revision lineage through materialize, l
   await page.route("**/playback-manifest", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(manifest) }));
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/projects/local-draft/editor?session_id=editor-workbench-e2e");
-  await page.getByRole("button", { name: "출력 변형 펼치기" }).click();
+  await page.getByRole("button", { name: "가로·세로 비교 펼치기" }).click();
   await page.getByRole("tab", { name: "세로" }).click();
-  await expect(page.getByText("서버 변형 버전 1")).toBeVisible();
+  await expect(page.getByText("세로 버전 1")).toBeVisible();
   await page.getByRole("button", { name: "크롭 저장" }).click();
   await expect.poll(() => patchBodies.length).toBe(1);
-  await expect(page.getByText("서버 변형 버전 2")).toBeVisible();
+  await expect(page.getByText("세로 버전 2")).toBeVisible();
   // 단추 문구는 "크롭·자막 잠금"이 아니라 "크롭·캡션 잠금"이다
   // (`VariantServerControls.tsx`) -- 출력 변형 조작 안에서는 "캡션"으로
   // 부른다(편집기 오른쪽 도크의 "캡션 조정 항목"과 같은 용어).
   await page.getByRole("button", { name: "크롭·캡션 잠금" }).click();
   await expect.poll(() => patchBodies.length).toBe(2);
-  await expect(page.getByText("출력 변형을 저장했어요.")).toBeVisible();
-  await expect(page.getByText("서버 변형 버전 3")).toBeVisible();
+  await expect(page.getByText("가로·세로 버전을 저장했어요.")).toBeVisible();
+  await expect(page.getByText("세로 버전 3")).toBeVisible();
   await page.getByRole("button", { name: "세로 변형 준비" }).click();
   await expect.poll(() => materializations.length).toBe(1);
   await page.getByRole("button", { name: "하이라이트 변형 만들기" }).click();

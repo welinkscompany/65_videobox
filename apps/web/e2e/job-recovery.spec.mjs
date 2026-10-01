@@ -28,8 +28,8 @@ test("job status lazily retries a global row with the row project and refreshes 
   await expect(recovery.getByRole("button", { name: "다시 실행" })).toBeDisabled();
   releaseRetry();
 
-  await expect(recovery.getByText("작업을 다시 시작했어요. 최신 상태를 확인했습니다.")).toBeVisible();
-  await expect(recovery.getByText("완료됐어요")).toBeVisible();
+  await expect(recovery.getByText("작업을 다시 시작했어요.")).toBeVisible();
+  await expect(recovery.getByText("완료", { exact: true })).toBeVisible();
   await expect(recovery.getByRole("button", { name: "다시 실행" })).toHaveCount(0);
   await dialog.getByRole("button", { name: "Close" }).click();
   await expect(dialog).toHaveCount(0);

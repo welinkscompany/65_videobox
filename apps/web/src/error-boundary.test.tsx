@@ -14,7 +14,7 @@ describe("ErrorBoundary", () => {
       </ErrorBoundary>,
     );
 
-    expect(screen.getByRole("alert")).toHaveTextContent("작업 화면을 복구하지 못했습니다");
+    expect(screen.getByRole("alert")).toHaveTextContent("화면을 불러오지 못했어요");
     expect(screen.getByText(/timeline payload is invalid/)).toBeInTheDocument();
   });
 });

@@ -81,7 +81,7 @@ export function TranscriptPanel({
       {/* 시간을 여기서 못 고치는 이유를 한 줄로 말한다. 예전에는 이 안내가
           아래에 붙은 요약 절(`CaptionLane`)에 있었는데, 그 절은 바로 위 목록이
           이미 보여 주는 것을 한 벌 더 쌓고 있었다 -- 안내만 남기고 걷어냈다. */}
-      <p>캡션 시간은 연결된 내레이션 구간을 따릅니다.</p>
+      <p>캡션 시간은 내레이션 구간을 따라가요.</p>
       {selectedEntry ? <>
         <label htmlFor="vb-transcript-caption">캡션 텍스트</label>
         <Textarea aria-label={`${selectedEntry.segmentId} 캡션 텍스트`} disabled={isSaving} id="vb-transcript-caption" onChange={(event) => handleDraftChange(event.target.value)} onKeyDown={handleEditorKeyDown} value={draft} />

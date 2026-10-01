@@ -49,6 +49,23 @@ const sourceStatusLabel: Readonly<Record<string, string>> = {
   stale: "현재 편집본 기준",
 };
 
+/**
+ * 빈 구간 이유를 창작자 말로 옮긴다(§10.13). 백엔드가 내보내는 값은
+ * `editor_playback_manifest._gap_contract`의 기본값 `asset_gap`, 초안
+ * 준비(`local_project_store`)가 적는 문장 하나, 예전 기록에 남은
+ * `asset_required`다. 모르는 값은 원문 대신 `미디어 없음`으로 말한다 --
+ * 코드가 화면에 새는 것보다 덜 구체적인 편이 낫다.
+ */
+const gapReasonLabels: Readonly<Record<string, string>> = {
+  asset_gap: "미디어 없음",
+  asset_required: "미디어 없음",
+  "장면을 보여 줄 영상이 없어요.": "영상 없음",
+};
+
+export function gapReasonLabel(reason: string | null | undefined): string {
+  return gapReasonLabels[String(reason ?? "").trim()] ?? "미디어 없음";
+}
+
 const laneLabel: Readonly<Record<TimelineLane, string>> = {
   narration: "내레이션",
   broll: "영상",
@@ -896,7 +913,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
         스크롤 안에 숨어 있었다 -- 자리가 모자란 게 아니라 글자가 먹고 있었다. */}
     <div className="vb-editor-workbench__timeline-head">
       <h2>타임라인</h2>
-      <p>{view.tracks.length}개 트랙 · {view.captions.length}개 캡션 · {view.gaps.length}개 미디어 공백 · {sourceStatusLabel[view.source.status] ?? "최신 여부 확인 중"}</p>
+      <p>트랙 {view.tracks.length}개 · 캡션 {view.captions.length}개 · 빈 구간 {view.gaps.length}개 · {sourceStatusLabel[view.source.status] ?? "최신 여부 확인 중"}</p>
       {/* 조작 설명 한 줄을 뺐다(owner 지시 2026-08-22: 설명 문장을 키워드로).
           클릭해서 재생 위치를 보는 것은 타임라인이면 다 그렇고, 화살표·Home·End는
           눌러 보면 안다. 캡컷 타임라인에도 이런 안내가 없다. */}
@@ -1109,9 +1126,9 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     {/* 아래 상태 줄들도 같은 이유로 한 줄에 모은다. 하나하나는 짧은 조각인데
         한 줄씩 차지하면 눈금과 트랙이 밀려 스크롤 안으로 들어간다. */}
     <div className="vb-editor-workbench__timeline-foot">
-      {visibleGaps.map((gap) => <p key={gap.gapId}>미디어 공백: {gap.reason}</p>)}
+      {visibleGaps.map((gap) => <p key={gap.gapId}>빈 구간: {gapReasonLabel(gap.reason)}</p>)}
       {caption ? <p>현재 캡션: {caption.text}</p> : <p>현재 캡션 없음</p>}
-      {selectedPlacementIds.length > 1 ? <p>선택한 독립 항목: {selectedPlacementIds.length}개</p> : null}
+      {selectedPlacementIds.length > 1 ? <p>고른 항목 {selectedPlacementIds.length}개</p> : null}
       {/* §10.13: the snap target id is an internal key (caption:<segment>:start)
           and meant nothing to the owner. The kind and the time are the parts that
           actually tell them where the playhead landed. */}
@@ -1122,7 +1139,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
           이미 살아 있는 영역이다. */}
       {mutationWaitNotice ? <p aria-label="편집 기다린 시간">{mutationWaitNotice}</p> : null}
       <output aria-label="재생 위치" data-seconds={formatSeconds(state.playheadSec)}>{formatSeconds(state.playheadSec)}초</output>
-      {draftProjection.rects.length === 0 && visibleGaps.length === 0 ? <p>표시할 타임라인 항목이 없습니다.</p> : null}
+      {draftProjection.rects.length === 0 && visibleGaps.length === 0 ? <p>타임라인이 비어 있어요.</p> : null}
     </div>
   </section>;
 }

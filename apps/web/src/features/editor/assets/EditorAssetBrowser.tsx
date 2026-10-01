@@ -161,11 +161,31 @@ const orientationFilters: readonly { value: "all" | EditorAssetOrientation; labe
 function targetLabel(target: EditorAssetTarget | null): string {
   return target
     ? `적용 구간: ${target.startSec.toFixed(2)}–${target.endSec.toFixed(2)}초`
-    : "적용할 내레이션 구간을 먼저 선택하세요.";
+    : "적용할 구간을 먼저 골라 주세요.";
 }
 
 /** 한 번에 그리는 카드 수. 한 화면에서 훑을 수 있는 만큼이다. */
 const FIRST_PAGE = 8;
+
+/**
+ * 분위기 단추가 될 수 있는 짧은 낱말 태그인가.
+ *
+ * 미디어 분석은 갈래(장소·장면·날씨…)마다 값을 적고, 그 값이 자산 태그로
+ * 합쳐진다. 모델이 갈래 값에 설명 문장을 40자씩 끊어 넣는 일이 있어
+ * (`장면 1 : 화면 중앙에 …`, `흐림.`) 태그를 전부 단추로 그리면 문장
+ * 조각마다 `분위기 … 빼기`가 생겼다(실사용 2026-10-01). 검색에는 그대로
+ * 쓰고(`editorAssetProjection`), 단추로만 거른다.
+ */
+const CHIP_TAG_MAX_LENGTH = 20;
+function isChipTag(tag: string): boolean {
+  const trimmed = tag.trim();
+  return Boolean(trimmed)
+    && trimmed.length <= CHIP_TAG_MAX_LENGTH
+    && !/[.:;!?。,，\n]/.test(trimmed)
+    // 실화면(2026-10-01)에 `+` 하나만 남은 조각과 `+`로 시작하는 이어짐 조각이 남았다.
+    && !trimmed.startsWith("+")
+    && /\p{L}/u.test(trimmed);
+}
 
 export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply, onApplyOverlay, targetHasOverlay = false, previewStates = {}, onRefreshExactPreview, projectId, onMediaAdded, transitionTarget, onInspectorAction, transcript, script, sourceCheck, analysisPanel, pane: controlledPane, onPaneChange, renderPaneTabs = true }: Props) {
   const [removingCardId, setRemovingCardId] = useState<string | null>(null);
@@ -180,7 +200,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
       const usage = await api.getLibraryAssetUsage(sourceLibraryAssetId);
       const reference = usage.locations.find((location) => location.project_id === projectId && location.materialized_asset_id === card.assetId);
       if (!reference?.reference_id) {
-        setRemoveMessage("프로젝트 참조 위치를 찾지 못했어요. 자료실에서 상태를 확인해 주세요.");
+        setRemoveMessage("이 프로젝트에서 쓰는 자리를 찾지 못했어요. 자료실에서 확인해 주세요.");
         return;
       }
       await api.removeLibraryReference(sourceLibraryAssetId, reference.reference_id);
@@ -330,7 +350,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
           <DialogContent className="vb-dialog-content">
             <DialogHeader>
               <DialogTitle>촬영본 가져오기</DialogTitle>
-              <DialogDescription>따로 모아 둔 영상에서 골라 이 프로젝트로 가져옵니다.</DialogDescription>
+              <DialogDescription>따로 모아 둔 영상에서 골라 가져와요.</DialogDescription>
             </DialogHeader>
             <ImportFromFootageInbox projectId={projectId} onImported={onMediaAdded} />
           </DialogContent>
@@ -339,7 +359,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
           <DialogContent className="vb-dialog-content">
             <DialogHeader>
               <DialogTitle>인포그래픽 만들기</DialogTitle>
-              <DialogDescription>숫자를 적어 주면 그림 한 장으로 만들어 자료실에 넣습니다.</DialogDescription>
+              <DialogDescription>숫자를 적으면 그림 한 장으로 만들어 자료실에 넣어요.</DialogDescription>
             </DialogHeader>
             <InfographicPanel onMade={onMediaAdded} />
           </DialogContent>
@@ -348,7 +368,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
           <DialogContent className="vb-dialog-content">
             <DialogHeader>
               <DialogTitle>내레이션</DialogTitle>
-              <DialogDescription>내 목소리로 대본을 읽어 만들고, 들어 본 뒤 고릅니다.</DialogDescription>
+              <DialogDescription>내 목소리로 대본을 읽어 만들고, 들어 본 뒤 골라요.</DialogDescription>
             </DialogHeader>
             <VoiceMaterialPanel projectId={projectId} />
           </DialogContent>
@@ -394,7 +414,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
     {taste.error ? <p className="vb-editor-assets__detail" role="status">{taste.error}</p> : null}
     {tasteReady && (excludedCreators.length || excludedTags.length) ? (
       <div className="vb-editor-assets__taste" role="group" aria-label="유진이 빼 둔 것">
-        <p className="vb-editor-assets__detail">유진이 추천에서 빼 두고 있는 것</p>
+        <p className="vb-editor-assets__detail">유진 추천에서 뺀 것</p>
         {excludedCreators.map((creator) => (
           <Button
             key={`creator:${creator}`}
@@ -442,7 +462,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
         return <article key={card.id} className={`vb-editor-assets__card${isSound ? " vb-editor-assets__card--row" : ""}`}
           draggable
           onDragStart={(event) => writeAssetDrag(event.dataTransfer, card.id)}
-          title="타임라인의 장면 위로 끌어다 놓을 수 있어요">
+          title="타임라인 장면 위로 끌어다 놓기">
           {card.thumbnailUrl ? (
             <img
               className="vb-editor-assets__thumb"
@@ -475,7 +495,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
           <p className="vb-editor-assets__detail vb-editor-assets__attribution" title={card.license}>
             {card.sourceMetadata.attributionRequired ? "출처 표기 필요" : "출처 표기 불필요"}
           </p>
-          <p className="vb-editor-assets__reason">직접 선택한 미디어</p>
+          <p className="vb-editor-assets__reason">직접 고른 미디어</p>
           {previewState?.status === "preparing" ? <p role="status">원본 미리보기를 준비하고 있어요</p> : null}
           {previewState?.status === "failed" ? <p role="alert">원본 미리보기를 준비하지 못했어요. 편집과 적용은 계속할 수 있어요.</p> : null}
           <p className="vb-editor-assets__card-target">{targetLabel(target)}</p>
@@ -486,7 +506,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
                   ? "유진이 먼저 고려해요."
                   : choice === "never"
                     ? "유진이 추천에서 빼요."
-                    : "유진에게 이 미디어를 어떻게 다룰지 알려 줄 수 있어요."}
+                    : "유진 추천에 쓸지 정해 주세요."}
               </p>
               <Button
                 className="vb-editor-assets__filter"
@@ -527,7 +547,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
                   {`만든이 ${creator} 빼기`}
                 </Button>
               ) : null}
-              {card.sourceMetadata.tags.map((tag) => {
+              {card.sourceMetadata.tags.filter(isChipTag).map((tag) => {
                 const stored = canonicalPreferenceTag(tag);
                 if (!stored) return null;
                 return (
@@ -553,7 +573,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
           ) : null}
           <div className="vb-editor-assets__actions">
             <Button type="button" aria-label={`${card.title} ${previewState?.status === "failed" ? "다시 준비" : "원본 미리보기"}`} disabled={!card.previewUrl || previewState?.status === "preparing"} onClick={() => onPreview(card)}>{previewState?.status === "failed" ? "다시 준비" : "원본 미리보기"}</Button>
-            {previewState?.status === "failed" && onRefreshExactPreview ? <Button type="button" variant="outline" onClick={onRefreshExactPreview}>정확한 미리보기 새로고침</Button> : null}
+            {previewState?.status === "failed" && onRefreshExactPreview ? <Button type="button" variant="outline" onClick={onRefreshExactPreview}>편집본 미리보기 새로 만들기</Button> : null}
             {/* 사진이 장면에 닿는 길은 **둘**이다(owner 요청 2026-09-06):
                 화면 자체가 되거나(아래 `화면으로 깔기`), 화면 위에 얹히거나
                 (`화면에 얹기`). 사진 카드에서 `적용`이라는 이름을 쓰지 않는
@@ -652,7 +672,7 @@ function TextPane({
     });
   };
   return <div className="vb-editor-assets__text-pane">
-    <p className="vb-editor-assets__target">{target ? targetLabel(target) : "글자를 얹을 장면을 먼저 선택하세요."}</p>
+    <p className="vb-editor-assets__target">{target ? targetLabel(target) : "글자를 얹을 장면을 먼저 골라 주세요."}</p>
     <Button type="button" variant="outline" disabled={disabled || !segmentId} onClick={() => add("머리글")}>머리글 추가</Button>
     <Button type="button" variant="outline" disabled={disabled || !segmentId} onClick={() => add("본문")}>본문 추가</Button>
     <p className="vb-editor-assets__hint">얹은 뒤 글자·크기·자리는 오른쪽 세부 정보에서 고쳐요.</p>
@@ -668,7 +688,7 @@ function TransitionPane({
   disabled: boolean;
   onInspectorAction?: (action: InspectorAction) => void | Promise<void>;
 }) {
-  if (!target) return <p className="vb-editor-assets__empty">장면을 먼저 고르면 넘어오는 방법을 고를 수 있어요.</p>;
+  if (!target) return <p className="vb-editor-assets__empty">장면을 먼저 골라 주세요.</p>;
   if (!target.hasPrevious) return <p className="vb-editor-assets__empty">첫 장면에는 넘어올 앞 장면이 없어요.</p>;
   const apply = (value: string | null) => onInspectorAction?.({
     kind: "set-transition",
@@ -676,7 +696,7 @@ function TransitionPane({
     transition: value === null ? null : { type: value, durationSec: DEFAULT_SCENE_TRANSITION_DURATION_SEC },
   });
   return <div className="vb-editor-assets__transitions">
-    <p className="vb-editor-assets__detail">고른 장면으로 넘어올 때의 모습입니다.</p>
+    <p className="vb-editor-assets__detail">앞 장면에서 고른 장면으로 넘어가는 방법</p>
     <Button type="button" variant="outline" disabled={disabled || !onInspectorAction} onClick={() => void apply(null)}>바로 넘기기 적용</Button>
     {SCENE_TRANSITION_CHOICES.map((choice) => (
       <Button key={choice.value} type="button" variant="outline" disabled={disabled || !onInspectorAction} onClick={() => void apply(choice.value)}>

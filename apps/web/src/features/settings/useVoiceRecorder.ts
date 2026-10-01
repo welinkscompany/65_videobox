@@ -93,5 +93,5 @@ export function recordingHint(seconds: number): string {
     return `${seconds}초 — ${VOICE_MIN_SECONDS}초는 넘겨 주세요. 짧으면 목소리가 잘 안 닮아요.`;
   }
   if (seconds < VOICE_ENOUGH_SECONDS) return `${seconds}초 — 충분해요. 더 읽으면 더 좋아요.`;
-  return `${seconds}초 — 넉넉해요. 이제 멈추셔도 됩니다.`;
+  return `${seconds}초 — 넉넉해요. 이제 멈춰도 돼요.`;
 }

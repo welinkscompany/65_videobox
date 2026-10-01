@@ -16,7 +16,7 @@ const draft = {
 };
 
 const typeTopic = (value = "집에서 라면 맛있게 끓이는 법") =>
-  fireEvent.change(screen.getByLabelText("무엇에 대한 영상인가요"), { target: { value } });
+  fireEvent.change(screen.getByLabelText("영상 주제"), { target: { value } });
 
 /** 대본도 찍어 둔 영상도 없는 사람이 첫 걸음을 떼는 길.
  *
@@ -81,7 +81,7 @@ describe("유진이 대본 초안 쓰기", () => {
     typeTopic();
     fireEvent.click(screen.getByRole("button", { name: "유진에게 대본 부탁하기" }));
 
-    const busy = await screen.findByRole("button", { name: "유진이 대본을 쓰고 있어요" });
+    const busy = await screen.findByRole("button", { name: "대본 쓰는 중" });
     expect(busy).toBeDisabled();
 
     fireEvent.click(busy);
@@ -126,7 +126,7 @@ describe("유진이 대본 초안 쓰기", () => {
     fireEvent.click(screen.getByRole("button", { name: "유진에게 대본 부탁하기" }));
 
     expect(write).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert")).toHaveTextContent(/무엇에 대한 영상인지/);
+    expect(screen.getByRole("alert")).toHaveTextContent(/영상 주제를 먼저/);
   });
 
   it("받은 대본을 다 지우면 그 글로는 시작할 수 없다", async () => {
@@ -191,6 +191,6 @@ describe("유진이 대본 초안 쓰기", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "주제 다시 적기" }));
 
-    expect(screen.getByLabelText("무엇에 대한 영상인가요")).toBeVisible();
+    expect(screen.getByLabelText("영상 주제")).toBeVisible();
   });
 });

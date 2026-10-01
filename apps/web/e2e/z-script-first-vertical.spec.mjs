@@ -13,7 +13,7 @@ async function reset(page) {
 test("gap-only approval preserves returned gap IDs and blocks final render and CapCut", async ({ page }) => {
   await reset(page);
   await page.goto("/projects/local-draft/create");
-  const placeholderConfirmation = page.getByLabel("빈 구간을 남긴 채 편집용 초안을 만들겠습니다");
+  const placeholderConfirmation = page.getByLabel("빈 구간을 남긴 채 편집용 초안 만들기");
   await expect(placeholderConfirmation).toBeVisible();
   await placeholderConfirmation.check();
   await page.getByRole("button", { name: "빈 구간 포함 초안 만들기" }).click();
@@ -80,11 +80,11 @@ test("ready-assets approval uses returned IDs and provides current-revision play
   await expect(video).toHaveJSProperty("muted", false);
 
   await page.goto("/projects/local-draft/outputs");
-  await expect(page.getByText("현재 편집본 미리보기가 준비되었어요.")).toBeVisible();
-  await expect(page.getByText("자막이 준비되었어요.")).toBeVisible();
+  await expect(page.getByText("현재 편집본 미리보기가 준비됐어요.")).toBeVisible();
+  await expect(page.getByText("자막이 준비됐어요.")).toBeVisible();
   await expect(page.getByLabel("완성본 재생")).toBeVisible();
-  await expect(page.getByText("CapCut 초안이 준비되었어요.")).toBeVisible();
-  await expect(page.getByText("실제 CapCut Desktop에서 열기와 가져오기는 별도로 확인해야 해요.")).toBeVisible();
+  await expect(page.getByText("CapCut 초안이 준비됐어요.")).toBeVisible();
+  await expect(page.getByText("CapCut 앱에서 실제로 열리는지는 직접 확인해 주세요.")).toBeVisible();
   await expect(page.getByText("가로·세로 출력", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "가로·세로 출력 만들기" }).click();
   await expect(page.getByLabel("가로 영상 재생")).toBeVisible();
@@ -112,11 +112,11 @@ test("ready-assets approval uses returned IDs and provides current-revision play
     }));
   }
   await page.getByRole("button", { name: "결과 확인" }).first().click();
-  await expect(page.getByText("결과 확인됨 · 다시 재생할 수 있어요.")).toBeVisible();
+  await expect(page.getByText("확인함")).toBeVisible();
   await expect(page.locator("audio")).toHaveCount(0);
   await expect(page.locator("video")).toHaveCount(3);
   await page.getByRole("button", { name: "CapCut에 등록" }).click();
-  await expect(page.getByText("CapCut 등록 상태가 준비되었어요.")).toBeVisible();
+  await expect(page.getByText("CapCut에 등록했어요.")).toBeVisible();
 
   expect((await page.request.post(`${fakeApiBaseUrl}/__e2e/mark-outputs-stale`)).status()).toBe(200);
   await page.getByRole("button", { name: "상태 다시 확인", exact: true }).click();
@@ -132,11 +132,11 @@ test("ready-assets approval uses returned IDs and provides current-revision play
   const recoveredOutputs = await (await page.request.post(`${fakeApiBaseUrl}/__e2e/mark-outputs-current`)).json();
   expect(recoveredOutputs.output_ids.final).toMatch(/-r2$/);
   await page.getByRole("button", { name: "상태 다시 확인", exact: true }).click();
-  await expect(page.getByText("현재 편집본 미리보기가 준비되었어요.")).toBeVisible();
+  await expect(page.getByText("현재 편집본 미리보기가 준비됐어요.")).toBeVisible();
   await expect(page.getByText("완성본을 확인할 수 있어요.")).toBeVisible();
-  await expect(page.getByText("CapCut 초안이 준비되었어요.")).toBeVisible();
+  await expect(page.getByText("CapCut 초안이 준비됐어요.")).toBeVisible();
   await expect(page.getByLabel("완성본 재생")).toHaveAttribute("src", new RegExp(`${recoveredOutputs.output_ids.final}/content$`));
-  await expect(page.getByText(`로컬 저장 위치: local://${recoveredOutputs.output_ids.capcut}`)).toBeVisible();
+  await expect(page.getByText(`저장 위치: local://${recoveredOutputs.output_ids.capcut}`)).toBeVisible();
   await page.getByRole("button", { name: "편집에서 미리보기 열기" }).click();
   await expect(page.getByLabel("편집본 미리보기")).toHaveAttribute("src", new RegExp(`${recoveredOutputs.output_ids.exact}/content$`));
 

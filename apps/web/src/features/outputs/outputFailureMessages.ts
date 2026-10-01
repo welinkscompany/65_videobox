@@ -19,12 +19,12 @@ const FINAL_RENDER_FAILURES: Record<string, string> = {
   // `assert_timeline_output_allowed`)를 타므로 위 세 사유도 변형본에서
   // 그대로 나올 수 있고, 아래는 변형본 전용 실패다(local_pipeline.py의
   // `start_variant_renders`/`_materialize_variant_for_output`).
-  stale_master_revision: "마스터 편집본이 그 사이에 바뀌었어요. 화면을 새로 고친 뒤 다시 만들어 주세요.",
-  variant_session_mismatch: "이 변형이 지금 편집본과 연결돼 있지 않아요. 화면을 새로 고친 뒤 다시 시도해 주세요.",
+  stale_master_revision: "원래 편집본이 그 사이에 바뀌었어요. 화면을 새로 고친 뒤 다시 만들어 주세요.",
+  variant_session_mismatch: "이 출력이 지금 편집본과 연결돼 있지 않아요. 화면을 새로 고친 뒤 다시 시도해 주세요.",
   // 마스터가 바뀌었는데 이 변형이 그 변화를 아직 안 받아들였을 때(task_3dc11426).
   // 아래 체크박스 목록 밑에 뜨는 `VariantConflictPanel`에서 바로 풀 수 있다 --
   // 그 화면과 다른 말을 하지 않게 같은 뜻으로 짧게 안내한다.
-  unresolved_variant_conflicts: "마스터가 바뀌어서 이 출력이 막혔어요. 아래 목록에서 어떻게 맞출지 고르면 다시 만들 수 있어요.",
+  unresolved_variant_conflicts: "원래 편집본이 바뀌어서 이 출력이 막혔어요. 아래 목록에서 어떻게 맞출지 고르면 다시 만들 수 있어요.",
   // 서버가 렌더를 맡을 일꾼을 못 띄웠을 때(routers/outputs.py) -- 만드는
   // 요청 자체는 받았지만 시작이 안 된 경우다.
   worker_start_failed: "출력을 시작하지 못했어요. 잠시 후 다시 시도해 주세요.",
@@ -62,7 +62,7 @@ const STALE_OUTPUT_REASONS: ReadonlyArray<readonly [string, string]> = [
   ["media revision", "쓰던 파일이 바뀌었어요. 그 파일을 다시 넣은 뒤 만들어 주세요."],
   ["missing or unavailable", "쓰던 파일을 찾지 못했어요. 그 파일이 자리에 있는지 확인해 주세요."],
   ["asset identity", "쓰던 파일이 다른 것으로 바뀌었어요. 그 파일을 다시 넣어 주세요."],
-  ["variant", "가로세로 변형본이 그 사이에 바뀌었어요. 화면을 새로 고친 뒤 다시 만들어 주세요."],
+  ["variant", "가로·세로 출력이 그 사이에 바뀌었어요. 화면을 새로 고친 뒤 다시 만들어 주세요."],
 ];
 
 function outputFailureMessage(reason: string | null | undefined, fallback: string) {

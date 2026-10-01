@@ -122,7 +122,7 @@ function PreviewSharePage() {
   return (
     <main className="vb-preview-share" aria-label="공유된 미리보기">
       {failed ? (
-        <p>이 링크를 열 수 없어요. 만료되었거나 취소된 링크일 수 있어요.</p>
+        <p>열 수 없는 링크예요. 기간이 지났거나 취소됐을 수 있어요.</p>
       ) : (
         <video
           controls
@@ -165,7 +165,7 @@ const workspaceRoute = createRoute({
       if (!projects.some((project) => project.project_id === params.projectId)) {
         throw redirect({ href: resolveWorkspaceLocation(params.projectId, "home"), replace: true });
       }
-      throw redirect({ href: `/settings/general?project_id=${encodeURIComponent(params.projectId)}`, replace: true });
+      throw redirect({ href: `/settings/appearance?project_id=${encodeURIComponent(params.projectId)}`, replace: true });
     }
     // **독립 "미디어" 단계 화면이 편집기 도크로 접혔다**(2026-08-27 결정
     // §순서 2, 실행 2026-09-01). 이 stage로 오는 URL은 두 벌이다(`/media`가
@@ -324,8 +324,12 @@ function ProjectsPage() {
   // 이름은 자동으로 붙이고 나중에 이름 바꾸기로 고친다.
   const [quickStartBusy, setQuickStartBusy] = useState<"blank" | null>(null);
   const [quickStartError, setQuickStartError] = useState<string | null>(null);
-  const autoProjectName = (label: string) =>
-    `${label} ${new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}`;
+  // 시각만 붙이면 날마다 같은 이름이 쌓인다 -- 날짜를 같이 붙인다(2026-10-01).
+  const autoProjectName = (label: string) => {
+    const now = new Date();
+    const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    return `${label} ${now.getMonth() + 1}월 ${now.getDate()}일 ${time}`;
+  };
   async function startBlankProject() {
     setQuickStartBusy("blank");
     setQuickStartError(null);
@@ -346,7 +350,7 @@ function ProjectsPage() {
         // 창작자가 또 만들려고 한다. 목록만 새로고침하고 사실대로 말한다.
         await router.options.context.catalog.refresh();
         await router.invalidate();
-        setQuickStartError("프로젝트는 만들어졌지만 편집판을 열지 못했어요. 방금 만든 프로젝트에서 이어가 주세요.");
+        setQuickStartError("프로젝트는 만들었지만 편집판을 열지 못했어요. 목록에서 방금 만든 프로젝트를 열어 주세요.");
       }
     } catch {
       setQuickStartError("편집판을 열지 못했어요. 다시 시도해 주세요.");
@@ -361,7 +365,7 @@ function ProjectsPage() {
       projects={projects}
       section="home"
       onNavigate={(nextProjectId, nextSection) => void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) })}
-      onOpenSettings={() => void navigate({ to: "/settings/general" })}
+      onOpenSettings={() => void navigate({ to: "/settings/appearance" })}
     >
     <main data-testid="projects-catalog" className="vb-catalog">
       {/* `VideoBox` 이름표를 뺐다 -- 위 띠가 이미 말한다. 캡컷 홈에도 가운데에
@@ -393,7 +397,7 @@ function ProjectsPage() {
           적으라고** 했다(2026-08-20, 진짜 백엔드에 e2e를 붙여 처음 돌려 보고 나왔다).
           첫 사용자에게 다른 문을 만들지 않는다 -- 시작하는 길은 위의 같은 단추다. */}
       {projects.length === 0 ? (
-        <p className="vb-catalog-empty">아직 만든 영상이 없어요. 위에서 새 프로젝트를 시작하면 여기에 모아 드릴게요.</p>
+        <p className="vb-catalog-empty">아직 만든 영상이 없어요. + 새로 만들기로 시작해 보세요.</p>
       ) : (
         // 캡컷 첫 화면의 "최근 프로젝트" 그리드 자리(owner 캡처 2026-08-29). 목록
         // 자체는 이미 있던 그대로다 -- 그리드 위에 제목만 더한다.
@@ -505,16 +509,16 @@ function ProjectsPage() {
                   type="button"
                   variant="destructive"
                   disabled={management.busyKey === `delete:${archivedProject.project_id}`}
-                  aria-label={`${archivedProject.name} 영구 삭제 · 한 번 더 확인할게요`}
+                  aria-label={`${archivedProject.name} 영구 삭제 확정`}
                   onClick={() => { management.setDeleteConfirm(null); void management.run(`delete:${archivedProject.project_id}`, () => deletePermanentlyAndReload(archivedProject.project_id)); }}
-                >영구 삭제 · 한 번 더 확인할게요</Button>
+                >영구 삭제 확정</Button>
               ) : management.deleteConfirm?.projectId === archivedProject.project_id && management.deleteConfirm.stage === 1 ? (
                 <Button
                   type="button"
                   variant="destructive"
-                  aria-label={`${archivedProject.name} 삭제 1차 확인 · 되돌릴 수 없어요`}
+                  aria-label={`${archivedProject.name} 삭제 확인 · 되돌릴 수 없음`}
                   onClick={() => management.setDeleteConfirm({ projectId: archivedProject.project_id, stage: 2 })}
-                >삭제 1차 확인 · 되돌릴 수 없어요</Button>
+                >삭제 확인 · 되돌릴 수 없음</Button>
               ) : (
                 <Button
                   type="button"
@@ -550,7 +554,7 @@ function GlobalShell({ section, assetKind = null, children }: { section: "librar
     section={section}
     assetKind={assetKind}
     onNavigate={(nextProjectId, nextSection) => void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) })}
-    onOpenSettings={() => void navigate({ to: "/settings/general" })}
+    onOpenSettings={() => void navigate({ to: "/settings/appearance" })}
   >{children}</RoutedProductShell>;
 }
 
@@ -795,7 +799,7 @@ function WorkspacePage() {
     void navigate({ to: resolveProjectStage(nextProjectId, nextStage) });
   };
   const openSettings = () => void navigate({
-    to: "/settings/general",
+    to: "/settings/appearance",
     search: { project_id: projectId } as never,
   });
   // `/home`은 단계가 아니라 프로젝트 첫 화면이다. 같은 `plan` 단계로 읽히지만
@@ -910,7 +914,7 @@ function CanonicalEditorEntry({ projectId, onNavigate }: { projectId: string; on
       if (!session) {
         // 예전 문구는 `먼저 영상 초안을 만들어 주세요.`였다. 편집기를 열었는데
         // **잠긴 문**을 만난 것처럼 읽혔다. 지금은 여기가 시작하는 자리다.
-        setMessage("아직 편집할 영상이 없어요. 어떤 영상을 만들지 정하면 여기에 펼쳐 드릴게요.");
+        setMessage("아직 편집할 영상이 없어요. 어떤 영상을 만들지 먼저 정해 주세요.");
         setHasNoDraft(true);
         return;
       }
@@ -956,7 +960,7 @@ function SettingsRoutePage() {
   const projectId = requestedProjectId || resolveLastValidProjectId(window.localStorage.getItem(lastProjectKey), projects) || projects[0]?.project_id;
   if (!projectId) return <ProjectsPage />;
   const settingsLocation = (nextSection: typeof validSections[number]) => `/settings/${nextSection}?project_id=${encodeURIComponent(projectId)}`;
-  return <RoutedProductShell projectId={projectId} projects={projects} section="settings" onNavigate={(nextProjectId, nextSection) => void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) })} onOpenSettings={() => void navigate({ to: settingsLocation("general") })}>
+  return <RoutedProductShell projectId={projectId} projects={projects} section="settings" onNavigate={(nextProjectId, nextSection) => void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) })} onOpenSettings={() => void navigate({ to: settingsLocation("appearance") })}>
     <SettingsPage projectId={projectId} section={section as typeof validSections[number]} onNavigate={(nextSection) => void navigate({ to: settingsLocation(nextSection) })} />
   </RoutedProductShell>;
 }

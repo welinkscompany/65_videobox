@@ -85,7 +85,7 @@ describe("HomeYujinChat", () => {
 
     render(<HomeYujinChat projectId="project-a" />);
 
-    expect(await screen.findByText("유진 대화 · 편집 필요")).toBeVisible();
+    expect(await screen.findByText("편집판을 한 번 열면 유진과 이야기할 수 있어요.")).toBeVisible();
     expect(screen.queryByLabelText("유진에게 물어보기")).toBeNull();
     expect(create).not.toHaveBeenCalled();
   });

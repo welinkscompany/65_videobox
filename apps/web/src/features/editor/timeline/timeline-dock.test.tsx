@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import type { EditorViewModel } from "../editorViewModel";
-import { TimelineDock } from "./TimelineDock";
+import { gapReasonLabel, TimelineDock } from "./TimelineDock";
 
 afterEach(cleanup);
 
@@ -635,7 +635,9 @@ describe("TimelineDock", () => {
     expect(screen.queryByText("o-late")).toBeNull();
     expect(screen.getByLabelText("눈금 0초")).toBeInTheDocument();
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "0");
-    expect(screen.getByText("미디어 공백: asset_required")).toBeInTheDocument();
+    // §10.13: 내부 이유 코드(`asset_required`)는 화면에 나가지 않는다.
+    expect(screen.getByText("빈 구간: 미디어 없음")).toBeInTheDocument();
+    expect(screen.queryByText(/asset_required/)).toBeNull();
     expect(screen.getByText("현재 캡션: 첫 자막")).toBeInTheDocument();
     expect(screen.getByText((_, element) => element?.textContent === "스냅: 항목 시작 (0초)" )).toBeInTheDocument();
 
@@ -1125,7 +1127,7 @@ describe("TimelineDock", () => {
     expect(timelineClip("n-1")).toHaveAttribute("data-selected", "true");
 
     rerender(<TimelineDock view={{ ...view, tracks: [], captions: [], gaps: [] }} viewportWidthPx={400} />);
-    expect(screen.getByText("표시할 타임라인 항목이 없습니다.")).toBeInTheDocument();
+    expect(screen.getByText("타임라인이 비어 있어요.")).toBeInTheDocument();
   });
 
   it("keeps a clip's displayed ordinal stable across scrolling instead of renumbering the visible batch", () => {
@@ -1161,6 +1163,17 @@ describe("TimelineDock", () => {
       .toEqual(Array.from({ length: 17 }, (_, index) => `bulk-${100 + index}`));
     // 반열린 구간이다 -- 356.4~360초짜리는 360초에서 끝나므로 안 걸린다.
     expect(laterClips.some((clip) => clip.getAttribute("data-clip-id") === "bulk-99")).toBe(false);
+  });
+});
+
+describe("빈 구간 이유", () => {
+  it("백엔드가 내보내는 이유를 창작자 말로 옮기고, 모르는 코드는 원문 대신 일반 문구로 말한다", () => {
+    expect(gapReasonLabel("asset_gap")).toBe("미디어 없음");
+    expect(gapReasonLabel("asset_required")).toBe("미디어 없음");
+    expect(gapReasonLabel("장면을 보여 줄 영상이 없어요.")).toBe("영상 없음");
+    expect(gapReasonLabel("some_new_internal_code")).toBe("미디어 없음");
+    expect(gapReasonLabel("")).toBe("미디어 없음");
+    expect(gapReasonLabel(undefined)).toBe("미디어 없음");
   });
 });
 

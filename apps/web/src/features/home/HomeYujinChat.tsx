@@ -93,7 +93,7 @@ export function HomeYujinChat({ projectId }: { projectId: string }) {
     <section className="vb-home-chat" aria-label="유진과 이야기하기">
       <h2>유진에게 물어보기</h2>
       {sessionId === null ? (
-        <p>유진 대화 · 편집 필요</p>
+        <p>편집판을 한 번 열면 유진과 이야기할 수 있어요.</p>
       ) : (
         <>
           <div className="vb-home-chat-history">

@@ -9,7 +9,7 @@ const statusCopy: Record<HermesYujinStatusDto["state"], string> = {
   starting: "유진 연결을 준비하고 있어요.",
   http_ready: "유진 연결은 됐지만 대화 확인은 아직이에요.",
   provider_ready: "유진이 답변을 준비하고 있어요.",
-  chat_verified: "유진과 대화할 준비가 확인됐어요.",
+  chat_verified: "유진과 대화할 수 있어요.",
   degraded: "최근에는 유진과 대화가 원활하지 않았어요.",
 };
 

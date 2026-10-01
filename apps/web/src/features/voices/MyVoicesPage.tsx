@@ -100,7 +100,7 @@ export function MyVoicesPage({
   return <main className="vb-my-voices" data-testid="my-voices-page">
     <header className="vb-my-voices__header">
       <h1>내 목소리</h1>
-      <p>프로젝트마다 녹음한 목소리를 한자리에 모았어요. 들어 보고 이름을 붙이거나 지울 수 있어요.</p>
+      <p>프로젝트마다 녹음한 목소리를 모았어요. 들어 보고 이름을 붙이거나 지울 수 있어요.</p>
     </header>
     {failed ? <p role="alert">목소리 목록을 지금 불러오지 못했어요. 잠시 뒤 다시 열어 주세요.</p> : null}
     {deleteFailed ? <p role="alert">`{deleteFailed}`을(를) 지우지 못했어요. 그대로 남아 있으니 잠시 뒤 다시 해 주세요.</p> : null}

@@ -149,7 +149,7 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
   const currentMedia = mode.kind === "idle" ? null : mode.media;
   const isImageAudition = mode.kind === "audition" && mode.media.mediaKind === "image";
   const visibleAuditionIssue = mode.kind === "audition" ? auditionIssue : null;
-  const mediaLabel = mode.kind === "audition" ? `${sourceLabel(localSources, auditionRequest, mode.media.id)} 소스 미리보기` : "편집본 미리보기";
+  const mediaLabel = mode.kind === "audition" ? `${sourceLabel(localSources, auditionRequest, mode.media.id)} 원본 재생` : "편집본 미리보기";
   const activeCaption = mode.kind === "exact" ? captions.find((caption) => timelineTime >= caption.startSec && timelineTime < caption.endSec) : null;
   // 재생 위치를 더는 되돌리지 않으므로, 화면에 보이는 순간과 재생 위치가 갈릴 수 있다.
   // 갈렸으면 말해 준다 -- 말없이 다른 순간을 보여 주는 것이 되돌리는 것보다 나쁘다.
@@ -274,7 +274,7 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
   };
 
   return <section ref={stageRef} className="vb-preview-stage" aria-label="미리보기" tabIndex={0} onKeyDown={onStageKeyDown} onBlur={onStageBlur}>
-    <header className="vb-preview-stage__header"><div><p className="vb-preview-stage__eyebrow">{mode.kind === "audition" ? "소스 미리보기" : "편집본 미리보기"}</p><h2>{mode.kind === "audition" ? "원본을 확인하는 중" : "현재 편집 결과"}</h2></div>{mode.kind === "audition" && exact.kind === "current" && <button data-native-control="return-exact" type="button" onClick={showExact}>편집본으로 돌아가기</button>}</header>
+    <header className="vb-preview-stage__header"><div><p className="vb-preview-stage__eyebrow">{mode.kind === "audition" ? "원본 미리보기" : "편집본 미리보기"}</p><h2>{mode.kind === "audition" ? "원본 보기" : "편집 결과"}</h2></div>{mode.kind === "audition" && exact.kind === "current" && <button data-native-control="return-exact" type="button" onClick={showExact}>편집본으로 돌아가기</button>}</header>
     <div className="vb-preview-stage__media-shell" aria-busy={exact.kind === "pending" || exact.kind === "running"}>
       {visibleAuditionIssue
         ? <div className="vb-preview-stage__empty"><strong>원본 화면을 열지 못했어요</strong><p role="alert">{visibleAuditionIssue}</p></div>
@@ -300,7 +300,7 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
           진짜 실패는 그대로 실패라고 말한다 -- 안내가 고장까지 덮으면 안 된다. */}
       {!currentMedia && (projectIsEmpty
         ? <div className="vb-preview-stage__empty"><strong>여기에 영상이 나와요</strong><p>왼쪽 <b>미디어</b>에서 파일을 더하면 이 자리에 보여요.</p></div>
-        : <div className="vb-preview-stage__empty"><strong>{exact.label}</strong><p>{exact.copy}</p><button data-native-control="refresh-exact" type="button" onClick={() => void refresh()} disabled={!onRefresh || refreshing}>{refreshing ? "미리보기 요청 중" : "미리보기 새로 만들기"}</button>{refreshError && <p role="alert">{refreshError}</p>}</div>)}
+        : <div className="vb-preview-stage__empty"><strong>{exact.label}</strong><p>{exact.copy}</p><button data-native-control="refresh-exact" type="button" onClick={() => void refresh()} disabled={!onRefresh || refreshing}>{refreshing ? "미리보기 만드는 중" : "미리보기 새로 만들기"}</button>{refreshError && <p role="alert">{refreshError}</p>}</div>)}
     </div>
     {/* **재생줄은 사라지지 않는다(2026-09-04).** owner: "스페이스바를 누르면
         멈춰야 되는데 그것도 안되고". 기능은 원래 있었는데(전역 핸들러) 재생할
@@ -309,9 +309,9 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
         눌리지 않는 단추라도 있는 편이 낫다: 없으면 고장인지 내 잘못인지 모른다.
         (실시간 타임라인 재생은 별개의 큰 일이라 이번 범위가 아니다.) */}
     {!isImageAudition && !visibleAuditionIssue && <div className="vb-preview-stage__playback" data-idle={currentMedia ? undefined : "true"}><div className="vb-preview-stage__transport"><button data-native-control="step-back" type="button" disabled={!currentMedia} onClick={() => stepFrame(-1)} aria-label="이전 프레임">◀｜</button><button data-native-control="toggle-playback" type="button" disabled={!currentMedia} onClick={togglePlayback} aria-label="재생 또는 일시정지">재생 / 일시정지</button><button data-native-control="step-forward" type="button" disabled={!currentMedia} onClick={() => stepFrame(1)} aria-label="다음 프레임">｜▶</button><button data-native-control="toggle-mute" type="button" disabled={!currentMedia} onClick={() => setMuted((current) => !current)} aria-label={muted ? "음소거 해제" : "음소거"} aria-pressed={muted}>{muted ? "음소거 해제" : "음소거"}</button>{loopRange && <button data-native-control="toggle-repeat" type="button" onClick={() => setRepeating((current) => !current)} aria-label="선택한 장면 반복" aria-pressed={repeating}>반복</button>}<button data-native-control="toggle-fullscreen" type="button" disabled={!currentMedia} onClick={toggleFullscreen} aria-label="미리보기 전체화면" aria-pressed={isFullscreen}>전체화면</button></div>{currentMedia ? <output aria-live="off">타임라인 {timelineTime.toFixed(1)}{timelineTimeSuffix}</output> : <output aria-live="off">아직 재생할 영상이 없어요</output>}</div>}
-    {showsADifferentMoment && <p role="status" aria-label="미리보기 위치 안내" aria-live="polite" className="vb-preview-stage__elsewhere">이 화면은 타임라인 {timelineTime.toFixed(1)}초의 모습입니다. 재생 위치는 그보다 바깥에 있어 아직 볼 수 없어요.</p>}
+    {showsADifferentMoment && <p role="status" aria-label="미리보기 위치 안내" aria-live="polite" className="vb-preview-stage__elsewhere">지금 화면은 타임라인 {timelineTime.toFixed(1)}초 모습이에요. 재생 위치는 아직 미리보기 밖이에요.</p>}
     {mode.kind === "exact" && <p role="status" aria-label="현재 캡션" aria-live="polite" aria-atomic="true" className="vb-preview-stage__caption-transcript vb-preview-stage__visually-hidden">{activeCaption ? `현재 캡션: ${activeCaption.text}` : "현재 캡션 없음"}</p>}
-    <p role="status" aria-live="polite" className="vb-preview-stage__status">{mode.kind === "exact" ? `캡션은 영상에 포함되어 재생됩니다. ${exact.copy} 타임라인 ${timelineTime.toFixed(1)}초` : mode.kind === "audition" ? isImageAudition ? "소스 이미지 미리보기" : `소스 미리보기 · 타임라인 ${timelineTime.toFixed(1)}초` : `${projectIsEmpty ? "아직 넣은 영상이 없어요." : exact.copy} 타임라인 ${timelineTime.toFixed(1)}초`}</p>
+    <p role="status" aria-live="polite" className="vb-preview-stage__status">{mode.kind === "exact" ? `캡션도 함께 재생돼요. ${exact.copy} 타임라인 ${timelineTime.toFixed(1)}초` : mode.kind === "audition" ? isImageAudition ? "원본 그림 미리보기" : `원본 미리보기 · 타임라인 ${timelineTime.toFixed(1)}초` : `${projectIsEmpty ? "아직 넣은 영상이 없어요." : exact.copy} 타임라인 ${timelineTime.toFixed(1)}초`}</p>
   </section>;
 }
 
@@ -323,5 +323,5 @@ function exactMediaId(exact: Extract<ReturnType<typeof toExactPreviewState>, { k
   return `exact:${exact.url}`;
 }
 function sourceLabel(sources: readonly AuditionSource[], auditionRequest: AuditionRequest | null | undefined, id: string): string {
-  return sources.find((source) => source.id === id)?.label ?? (auditionRequest?.source.id === id ? auditionRequest.source.label : "선택한 소스");
+  return sources.find((source) => source.id === id)?.label ?? (auditionRequest?.source.id === id ? auditionRequest.source.label : "고른 원본");
 }

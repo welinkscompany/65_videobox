@@ -124,7 +124,7 @@ export function TimelineReviewSections({
       <p>검토</p>
       <h1>영상 검토</h1>
       <p>장면 · 추천 상태</p>
-      <p>{approved ? "현재 편집본의 검토가 승인되었어요." : "현재 편집본을 검토하고 있어요."}</p>
+      <p>{approved ? "현재 편집본의 검토를 승인했어요." : "현재 편집본을 검토하고 있어요."}</p>
       {approved ? (
         <>
           <p>이제 내보내기 화면에서 자막과 완성본을 만들 수 있어요.</p>
@@ -249,7 +249,7 @@ function recommendationTypeLabel(type: string) {
 
 function segmentTargetLabel(review: ReviewSnapshot, segmentId: string) {
   const index = review.segments.findIndex((segment) => segment.segment_id === segmentId);
-  if (index < 0) return "해당 장면";
+  if (index < 0) return "알 수 없는 장면";
   const text = review.segments[index].text.trim();
   return text ? `${index + 1}번째 장면 · ${text}` : `${index + 1}번째 장면`;
 }

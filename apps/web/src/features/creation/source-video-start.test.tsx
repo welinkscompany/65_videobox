@@ -65,7 +65,7 @@ describe("찍어 둔 영상으로 시작", () => {
     const button = screen.getByRole("button", { name: "영상에서 대본 만들기" });
     fireEvent.click(button);
 
-    const busy = await screen.findByRole("button", { name: "영상에서 말을 받아쓰고 있어요" });
+    const busy = await screen.findByRole("button", { name: "받아쓰는 중" });
     expect(busy).toBeDisabled();
     expect(screen.getByRole("status")).toHaveTextContent(/몇 분/);
 

@@ -94,7 +94,7 @@ describe("cut toolbar", () => {
     expect(outside.split.hint).toContain("재생 위치");
 
     const nothingPicked = cutToolbarState({ clips, selectedSegmentId: null, playheadSec: 3 });
-    expect(nothingPicked.split.hint).toContain("고르세요");
+    expect(nothingPicked.split.hint).toContain("먼저 골라");
 
     expect(cutToolbarState({ clips, selectedSegmentId: "s1", playheadSec: 2 }).join.hint).toContain("첫 장면");
   });

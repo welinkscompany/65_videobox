@@ -189,7 +189,7 @@ describe("내보내기 팝오버", () => {
     const onOpenDetails = vi.fn();
 
     render(<ExportPopover projectId="project-a" onOpenDetails={onOpenDetails} />);
-    fireEvent.click(await screen.findByRole("button", { name: "완성본 만들기와 자세한 상태" }));
+    fireEvent.click(await screen.findByRole("button", { name: "완성본 만들기·상태 보기" }));
 
     await waitFor(() => expect(onOpenDetails).toHaveBeenCalled());
   });

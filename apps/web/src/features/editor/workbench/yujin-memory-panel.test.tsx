@@ -252,7 +252,7 @@ describe("Yujin memory panel", () => {
       />,
     );
     expect(within(panel).getByText(
-      "기억을 삭제하지 못했어요. 다시 시도할 수 있어요.",
+      "기억을 삭제하지 못했어요.",
     )).toBeVisible();
     fireEvent.click(within(panel).getByRole(
       "button", { name: "삭제 다시 시도" },

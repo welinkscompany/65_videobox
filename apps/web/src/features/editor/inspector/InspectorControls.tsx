@@ -549,7 +549,7 @@ export function InspectorControls({
       <h3>고른 장면</h3>
       {/* 두 문장을 한 줄로 줄였다. `나누기`가 재생 위치에서 자른다는 것은 눌러 보면
           알고, 여기서 꼭 알아야 하는 것은 **이 아래가 언제 필요한가**뿐이다. */}
-      <p>재생 위치가 이 장면 밖일 때 아래를 씁니다</p>
+      <p>재생 위치가 이 장면 밖일 때 여기서 고쳐요.</p>
       {selectedSegment ? (
         <>
           <p>{`${selectedSegment.startSec.toFixed(2)}–${selectedSegment.endSec.toFixed(2)}초 구간`}</p>
@@ -651,7 +651,7 @@ export function InspectorControls({
           {loadApprovedTtsCandidates ? (
             <fieldset>
               <legend>내레이션 음성</legend>
-              {selectedSegment.ttsReplacement ? <p>청취 승인한 음성이 적용되어 있어요.</p> : <p>청취 승인한 후보를 골라 명시적으로 적용할 수 있어요.</p>}
+              {selectedSegment.ttsReplacement ? <p>청취 승인한 음성이 들어가 있어요.</p> : <p>청취 승인한 음성을 골라 적용해요.</p>}
               {!ttsRequested ? <Button disabled={disabled} onClick={() => setTtsRequest(ttsScope)} type="button">승인한 음성 불러오기</Button> : null}
               {ttsLoadState === "loading" ? <p>승인한 음성을 불러오는 중이에요.</p> : null}
               {ttsLoadState === "error" ? (
@@ -660,7 +660,7 @@ export function InspectorControls({
                   <Button disabled={disabled} onClick={() => setTtsRetryToken((current) => current + 1)} type="button">승인한 음성 다시 불러오기</Button>
                 </>
               ) : null}
-              {ttsLoadState === "ready" && !ttsCandidates.length ? <p>이 구간에는 청취 승인된 음성이 없어요.</p> : null}
+              {ttsLoadState === "ready" && !ttsCandidates.length ? <p>이 구간에는 청취 승인한 음성이 없어요.</p> : null}
               {ttsCandidates.length ? (
                 <label>
                   승인한 음성
@@ -688,7 +688,7 @@ export function InspectorControls({
       {target?.kind === "media" ? (
         <fieldset>
           <legend>{target.label}</legend>
-          <p>현재 미디어가 연결되어 있어요.</p>
+          <p>이 장면에 들어간 미디어예요.</p>
           {!target.clearOnly ? (
             <>
               {/* 캡컷처럼 묶는다(owner 지시 2026-09-02). **탭이 하나뿐이면 안 그린다** --
@@ -815,7 +815,7 @@ export function InspectorControls({
                       <option key={choice.value} value={choice.value}>{`${choice.label} (${choice.hint})`}</option>
                     ))}
                   </NativeSelect>
-                  <small>세로 숏폼에서 좌우가 잘리면 전체 담기를 고르세요.</small>
+                  <small>세로 숏폼에서 좌우가 잘리면 전체 담기를 골라 주세요.</small>
                 </label>
               ) : null}
               {/* 변형(캡컷 동영상 탭 대조, 2026-09-01). 화면 맞춤이 "원본을 이
@@ -872,7 +872,7 @@ export function InspectorControls({
                       <option key={choice.value} value={choice.value}>{choice.label}</option>
                     ))}
                   </NativeSelect>
-                  <small>안 고르면 장면마다 알아서 움직입니다.</small>
+                  <small>안 고르면 장면마다 알아서 움직여요.</small>
                 </label>
               ) : null}
               {/* 색감(`sceneFilters.ts`). 만든 여섯 개만 보여 준다 -- 캡컷 필터
@@ -895,7 +895,7 @@ export function InspectorControls({
                       (`capcut_looks.py`). 우리가 그리는 그림과 같지 않으므로
                       고르는 자리에서 미리 말해 둔다 -- 조용히 다른 그림을
                       주지 않는다. */}
-                  <small>캡컷으로 넘기면 비슷한 색감으로 바뀝니다.</small>
+                  <small>캡컷으로 넘기면 비슷한 색감으로 바뀌어요.</small>
                 </label>
               ) : null}
               {/* 음량 바로 아래. 이게 꺼져 있으면 `소리 크기`는 아무 일도 하지

@@ -50,7 +50,7 @@ const cards: readonly EditorAssetCard[] = [
     durationLabel: "2초",
     status: "이용 불가 · 검증됨",
     audioPresence: "오디오 있음",
-    license: "검증 또는 이용 가능 상태 확인 필요",
+    license: "사용 가능 여부 확인 필요",
     canApply: false,
     previewUrl: "/api/media-library/assets/sfx-1/preview",
     sourceMetadata: { tags: ["효과음"], source: "Starter", creator: "Creator", officialLicenseUrl: "", attributionRequired: false, attributionText: "" },
@@ -106,7 +106,7 @@ describe("EditorAssetBrowser", () => {
     expect(onPreview).toHaveBeenCalledWith(cards[0]);
     expect(screen.getByRole("status")).toHaveTextContent("적용 구간: 3.00–7.00초");
     expect(screen.getByRole("article")).toHaveTextContent("적용 구간: 3.00–7.00초");
-    expect(screen.getByText("직접 선택한 미디어")).toBeVisible();
+    expect(screen.getByText("직접 고른 미디어")).toBeVisible();
     expect(container.querySelectorAll("audio, video")).toHaveLength(0);
   });
 
@@ -175,8 +175,8 @@ describe("EditorAssetBrowser", () => {
     const onApply = vi.fn();
     const { rerender } = render(<EditorAssetBrowser cards={cards} target={null} isSaving={false} onPreview={vi.fn()} onApply={onApply} />);
 
-    expect(screen.getByRole("status")).toHaveTextContent("적용할 내레이션 구간을 먼저 선택하세요.");
-    screen.getAllByRole("article").forEach((card) => expect(card).toHaveTextContent("적용할 내레이션 구간을 먼저 선택하세요."));
+    expect(screen.getByRole("status")).toHaveTextContent("적용할 구간을 먼저 골라 주세요.");
+    screen.getAllByRole("article").forEach((card) => expect(card).toHaveTextContent("적용할 구간을 먼저 골라 주세요."));
     expect(screen.getByRole("button", { name: "제품 사진 적용" })).toBeDisabled();
     openAudioPane();
     expect(screen.getByRole("button", { name: "효과음 1 적용" })).toBeDisabled();
@@ -323,7 +323,7 @@ describe("EditorAssetBrowser", () => {
 
     rerender(<EditorAssetBrowser cards={[video]} target={{ segmentId: "seg-1", startSec: 0, endSec: 1 }} isSaving={false} onPreview={onPreview} onApply={vi.fn()} previewStates={{ [video.id]: { status: "failed" } }} onRefreshExactPreview={onRefreshExactPreview} />);
     fireEvent.click(screen.getByRole("button", { name: "HEVC 영상 다시 준비" }));
-    fireEvent.click(screen.getByRole("button", { name: "정확한 미리보기 새로고침" }));
+    fireEvent.click(screen.getByRole("button", { name: "편집본 미리보기 새로 만들기" }));
     expect(onPreview).toHaveBeenCalledWith(video);
     expect(onRefreshExactPreview).toHaveBeenCalledOnce();
     expect(screen.getByRole("button", { name: "HEVC 영상 적용" })).toBeEnabled();
@@ -493,6 +493,24 @@ describe("유진에게 알려 주는 자산 취향", () => {
     await waitFor(() => expect(write).toHaveBeenLastCalledWith("project-a", {
       pin_asset: [], exclude_asset: [], exclude_creator: [], exclude_tag: ["음악"],
     }));
+  });
+
+  it("분석이 남긴 문장 조각은 분위기 단추로 만들지 않는다", async () => {
+    // 실사용(2026-10-01): 미디어 분석 갈래 값에 설명 문장이 40자씩 끊겨
+    // 들어와 `분위기 장면 1 : 화면 중앙에 … 빼기`, `분위기 흐림. 빼기`처럼
+    // 줄마다 단추가 생겼다. 짧은 낱말 태그만 단추가 된다.
+    vi.spyOn(apiModule.api, "getDirectorPreferences").mockResolvedValue(saved as never);
+    const analysed: EditorAssetCard = {
+      ...cards[0]!,
+      sourceMetadata: {
+        ...cards[0]!.sourceMetadata,
+        tags: ["산책", "장면 1 : 화면 중앙에 직사각형 돌바닥 보행로가 가까운 곳에서 멀리까지", "흐림.", "아주 길게 이어지는 스무 글자를 넘는 태그 하나", "+", "+린하게 회전"],
+      },
+    };
+    render(<EditorAssetBrowser cards={[analysed]} projectId="project-a" target={null} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} />);
+
+    expect(await screen.findByRole("button", { name: "제품 사진의 분위기 산책 빼기" })).toBeInTheDocument();
+    expect(screen.queryAllByRole("button", { name: /분위기 .* 빼기/ })).toHaveLength(1);
   });
 
   it("저장에 실패하면 눌린 상태를 되돌리고 그렇게 말한다", async () => {

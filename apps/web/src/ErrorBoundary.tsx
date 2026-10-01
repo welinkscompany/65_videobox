@@ -26,9 +26,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         <main className="mx-auto grid min-h-screen max-w-3xl place-items-center p-6" aria-labelledby="workspace-error-heading">
           <section className="grid w-full gap-4 rounded-xl border bg-card p-6 text-card-foreground shadow-sm" role="alert">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">작업 화면</p>
-            <h1 id="workspace-error-heading">작업 화면을 복구하지 못했습니다</h1>
+            <h1 id="workspace-error-heading">화면을 불러오지 못했어요</h1>
             <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-              화면을 다시 그리지 못했습니다. 다시 시도를 눌러 주세요. 그래도 같으면 이 화면을 닫았다가 다시 열어 보세요.
+              다시 시도를 눌러 주세요. 그래도 안 되면 창을 닫았다가 다시 열어 주세요.
             </p>
             <details className="text-xs text-muted-foreground">
               <summary>자세한 내용</summary>

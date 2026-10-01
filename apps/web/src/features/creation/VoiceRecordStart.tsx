@@ -158,7 +158,7 @@ export function VoiceRecordStart({
         {heard.retake_candidates.length ? (
           <section aria-label="다시 들어볼 구간">
             <h3>다시 들어볼 구간</h3>
-            <p>발음이 흐릿하거나 다시 말씀하신 것 같은 곳이에요. 뺄지 남길지 직접 골라 주세요 -- 기본은 빼는 쪽이에요.</p>
+            <p>발음이 흐릿하거나 다시 말씀하신 것 같은 곳이에요. 뺄지 남길지 골라 주세요. 기본은 빼기예요.</p>
             <ul>
               {heard.retake_candidates.map((candidate) => (
                 <li key={candidate.segment_index}>
@@ -206,12 +206,12 @@ export function VoiceRecordStart({
   return (
     <section aria-label="목소리 녹음으로 시작">
       <h2>목소리만 있어요</h2>
-      <p>마이크로 바로 녹음하면 말을 받아써 대본을 만들어 드려요. 발음이 흐릿하거나 다시 말씀하신 곳도 찾아 드릴게요.</p>
+      <p>녹음하면 말을 받아써 대본을 만들어요. 발음이 흐릿하거나 다시 말한 곳도 찾아요.</p>
       {recording ? (
         <Button type="button" disabled={disabled} onClick={stopRecording}>대본 녹음 마치기</Button>
       ) : (
         <Button type="button" disabled={disabled || isReading} onClick={() => void startRecording()}>
-          {isReading ? "받아쓰는 중이에요" : "마이크로 대본 녹음 시작"}
+          {isReading ? "받아쓰는 중" : "마이크로 대본 녹음 시작"}
         </Button>
       )}
       {recording ? <p role="status">녹음 중이에요. 다 말씀하셨으면 대본 녹음 마치기를 눌러 주세요.</p> : null}
@@ -228,7 +228,7 @@ export function VoiceRecordStart({
         onChange={(event) => { setFile(event.target.files?.[0] ?? null); setError(null); }}
       />
       <Button type="button" disabled={disabled || isReading || recording} onClick={() => void readFile()}>
-        {isReading ? "받아쓰는 중이에요" : "파일에서 대본 만들기"}
+        {isReading ? "받아쓰는 중" : "파일에서 대본 만들기"}
       </Button>
       {isReading ? <p role="status">녹음 길이에 따라 몇 분 걸릴 수 있어요. 이 화면을 열어 둔 채 기다려 주세요.</p> : null}
       {error ? <p role="alert">{error}</p> : null}

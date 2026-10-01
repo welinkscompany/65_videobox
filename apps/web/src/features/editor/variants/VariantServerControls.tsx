@@ -36,13 +36,13 @@ export function VariantServerControls({
   // 숏폼 **첫 화면 제목 띠**. 유진이 숏폼을 고를 때 같이 짜므로 화면이 하는 일은
   // 지금 걸린 것을 보여 주고 끄고 켜는 것이다 -- 목록과 지금 값은 한 쌍이다.
   const titleBand = variant.kind === "vertical_highlight" ? shortsTitleBand(variant) : null;
-  return <section className="vb-editor-variants__server-controls" aria-label={`${label} 서버 변형 제어`}>
+  return <section className="vb-editor-variants__server-controls" aria-label={`${label} 버전 조정`}>
     <div className="vb-editor-variants__server-line">
-      <strong>서버 변형 버전 {variant.variant_revision}</strong>
+      <strong>{label} 버전 {variant.variant_revision}</strong>
       <span>마스터 버전 {variant.source_session_revision}</span>
-      {hasConflicts ? <span role="status">서버 충돌 {variant.conflicts.length}건</span> : <span>서버 연결됨</span>}
+      {hasConflicts ? <span role="status">마스터와 다른 곳 {variant.conflicts.length}건</span> : <span>마스터와 맞음</span>}
     </div>
-    {hasConflicts ? <p className="vb-editor-variants__server-warning">마스터 변경을 확인해야 적용할 수 있어요.</p> : null}
+    {hasConflicts ? <p className="vb-editor-variants__server-warning">마스터가 바뀌었어요. 달라진 곳을 먼저 정해 주세요.</p> : null}
     <div className="vb-editor-variants__server-actions">
       <Button type="button" variant="outline" disabled={busy || hasConflicts} onClick={() => void onMaterialize(variant)}>{label} 변형 준비</Button>
       <Button type="button" variant="outline" disabled={busy} onClick={() => void onPatch(variant, { overrides: { crop: { mode: "creator_adjusted" } } })}>크롭 저장</Button>

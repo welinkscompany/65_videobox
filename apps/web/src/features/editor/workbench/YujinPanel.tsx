@@ -13,6 +13,7 @@ import { sceneTransitionLabel } from "../inspector/sceneTransitions";
 import { frameFitLabel } from "../inspector/frameFits";
 
 const staleProposalMessage = "편집본이 바뀌어서 이 추천은 그대로 적용할 수 없어요.";
+const outdatedProposalNotice = "편집이 바뀌어 이 추천은 지난 편집 기준이에요.";
 
 const yujinThinkingMessages: Readonly<Record<YujinThinking["phase"], string>> = {
   answering: "유진이 생각하고 있어요. 답이 오면 화면이 저절로 바뀌어요.",
@@ -75,7 +76,7 @@ function mediaKindLabel(kind: RightDockCandidate["sourceMediaKind"]) {
     image: "이미지",
     bgm: "배경 음악",
     sfx: "효과음",
-    output_variant: "출력 변형",
+    output_variant: "가로·세로 버전",
   }[kind] ?? "미디어";
 }
 
@@ -100,7 +101,7 @@ function controlSummary(controls: Readonly<Record<string, unknown>>) {
     if (name === "text") return "문구 변경";
     if (name === "style") return "캡션 모양 변경";
     if (name === "candidate_id") return "승인한 음성";
-    if (name === "overlay_kind") return "오버레이 변경";
+    if (name === "overlay_kind") return "화면 요소 변경";
     return null;
   }).filter((value): value is string => value !== null);
   return labels.join(", ") || "기본 설정";
@@ -315,7 +316,7 @@ export function YujinPanel({
   const runStatusAnnouncement = runState.kind === "complete"
     ? "유진 답변을 받았어요."
     : runState.kind === "unavailable"
-    ? `${runState.message} 수동 편집을 계속할 수 있어요.`
+    ? `${runState.message} 직접 편집은 계속할 수 있어요.`
     : null;
 
   return <section aria-label="유진" className="vb-yujin-panel">
@@ -383,11 +384,12 @@ export function YujinPanel({
           대화 안에 두지 별도 탭에 두지 않는다). 완성된 작업 목록과 같은
           자리(이 `history` 스크롤 안)에 둔다. */}
       {proposal ? <div aria-label="제안 편집본" className="vb-yujin-panel__proposal-meta">
-        <p>{`제안 기준 편집본 ${proposal.baseSessionRevision}`}</p>
-        <p>{`현재 편집본 ${proposal.currentRevision}`}</p>
+        {/* 내부 편집 번호(`제안 기준 편집본 6`·`현재 편집본 7`)는 창작자에게
+            뜻이 없다(§10.13). 같으면 아무 말도 하지 않고, 다르면 그 사실만
+            한 줄로 말한다. 막힘·오류 상태에서는 위 안내가 이미 같은 말을 한다. */}
         {matchModeLabel(proposal.matchMode) ? <p>{matchModeLabel(proposal.matchMode)}</p> : null}
         {proposalIsOutOfDate && state !== "blocked" && state !== "error" ? <>
-          <p role="status">{staleProposalMessage}</p>
+          <p role="status">{outdatedProposalNotice}</p>
           {onRefreshProposal ? <Button type="button" disabled={state === "analysis_running" || state === "applying"} onClick={() => void onRefreshProposal()}>지금 편집본으로 다시 추천받기</Button> : null}
         </> : null}
       </div> : null}
@@ -429,7 +431,7 @@ export function YujinPanel({
               ? <><strong className="vb-editor-right-dock__candidate-scene">{candidate.targetSceneLabel.trim()}</strong>{" "}<span>{candidateTitle(candidate)}</span></>
               : candidateTitle(candidate)}</label>
             <p>{candidate.previewSummary}</p>
-            <p>{`후보 상태: ${candidateDeclaresActionable ? "적용 가능" : "수동 적용"}`}</p>
+            <p>{`후보 상태: ${candidateDeclaresActionable ? "바로 적용" : "직접 적용"}`}</p>
             <dl>
               <dt>미디어</dt><dd>{mediaKindLabel(candidate.sourceMediaKind)}</dd>
               <dt>적용 설정</dt><dd>{controlSummary(candidate.supportedControls ?? {})}</dd>
@@ -438,7 +440,7 @@ export function YujinPanel({
           </article>;
         })}
         {recommendationCandidates.length > shownCandidates ? <Button type="button" variant="outline" onClick={() => setShownCandidates((count) => count + CANDIDATE_PAGE)}>{`추천 ${recommendationCandidates.length - shownCandidates}개 더 보기`}</Button> : null}
-      </div> : (proposal ? <p>아직 추천이 없어요. 직접 편집을 계속하거나 유진에게 요청할 수 있어요.</p> : null)}
+      </div> : (proposal ? <p>아직 추천이 없어요. 유진에게 요청해 보세요.</p> : null)}
       {proposal && proposalIsReady && onApplyProposal ? <Button type="button" disabled={state === "applying" || !selectedCandidatesAreActionable} onClick={() => void onApplyProposal(proposal.proposalId, activeCandidateIds)}>{activeCandidateIds.length > 1 ? `고른 추천 ${activeCandidateIds.length}개 적용` : "선택한 추천 적용"}</Button> : null}
       {readOnlyFindings.length ? <section aria-label="검사 결과">
         <h2>검사 결과</h2>
@@ -481,7 +483,16 @@ export function YujinPanel({
     </> : null}
     <label htmlFor="vb-eugene-request">유진에게 요청하기</label>
     <div ref={composerContainerRef}>
-      <Textarea id="vb-eugene-request" disabled={composerDisabled} value={draft} onChange={(event) => onDraftChange(event.target.value)} placeholder="예: 이 구간에 어울리는 영상을 추천해 줘" />
+      {/* Enter는 보내기, Shift+Enter는 줄 바꿈(캡컷·채팅 앱과 같은 손버릇).
+          한글 입력기가 글자를 **조합하는 중**의 Enter는 글자를 확정하는
+          키라 보내면 마지막 글자가 잘리거나 두 번 간다 -- 그때는 그냥 둔다
+          (`isComposing`, 일부 브라우저는 keyCode 229로만 알린다). */}
+      <Textarea id="vb-eugene-request" disabled={composerDisabled} value={draft} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={(event) => {
+        if (event.key !== "Enter" || event.shiftKey) return;
+        if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+        event.preventDefault();
+        submit();
+      }} placeholder="예: 이 구간에 어울리는 영상을 추천해 줘" />
     </div>
     <Button type="button" disabled={!canSend} onClick={submit}>{thinking ? YUJIN_THINKING_BUTTON_TEXT : "요청 보내기"}</Button>
     {onCreateEditingProposal && messages.some((message) => message.role === "assistant")
@@ -492,7 +503,7 @@ export function YujinPanel({
     {editingProposal ? <><Button type="button" variant="outline" onClick={() => setEditingProposalOpen(true)}>편집안 보기</Button><p role="status">{editingProposal.summary}</p>
       <Dialog open={editingProposalOpen} onOpenChange={setEditingProposalOpen}>
         <DialogContent className="vb-dialog-content">
-          <DialogHeader><DialogTitle>편집안</DialogTitle><DialogDescription>아직 적용되지 않았어요. 내용을 확인한 뒤 직접 적용해 주세요.</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>편집안</DialogTitle><DialogDescription>아직 적용 전이에요. 확인하고 적용해 주세요.</DialogDescription></DialogHeader>
           <p>{editingProposal.summary}</p>
           <ul aria-label="바뀌는 항목">{editingProposal.operationSummaries.map((summary, index) => <li key={`${index}:${summary}`}>{summary}</li>)}</ul>
           {editingProposal.followUpQuestions.length ? <div aria-label="이어서 물어보기">{editingProposal.followUpQuestions.map((question) => <Button key={question} type="button" variant="outline" onClick={() => onDraftChange(question)}>{question}</Button>)}</div> : null}

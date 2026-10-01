@@ -67,7 +67,7 @@ export function cutToolbarState({
   const index = ordered.findIndex((clip) => clip.segmentId === selectedSegmentId);
   const selected = index >= 0 ? ordered[index] : null;
   if (!selected) {
-    const pickFirst = "아래 타임라인에서 장면을 먼저 고르세요.";
+    const pickFirst = "타임라인에서 장면을 먼저 골라 주세요.";
     return {
       split: disabled("분할", pickFirst),
       join: disabled("앞과 붙이기", pickFirst),
@@ -89,28 +89,28 @@ export function cutToolbarState({
 
   return {
     split: splittable
-      ? { enabled: true, label: "분할", hint: "재생 위치에서 두 장면으로 나눕니다. (Ctrl+B)", action: { kind: "split-narration", segmentId: selected.segmentId, splitSec: playheadSec } }
-      : disabled("분할", "재생 위치를 고른 장면 안으로 옮기세요. 그 자리에서 나눕니다."),
+      ? { enabled: true, label: "분할", hint: "재생 위치에서 두 장면으로 나누기 (Ctrl+B)", action: { kind: "split-narration", segmentId: selected.segmentId, splitSec: playheadSec } }
+      : disabled("분할", "재생 위치를 고른 장면 안으로 옮겨 주세요. 그 자리에서 나눠요."),
     join: previous
-      ? { enabled: true, label: "앞과 붙이기", hint: "앞 장면과 하나로 합칩니다.", action: { kind: "merge-narration", leftSegmentId: previous.segmentId, rightSegmentId: selected.segmentId } }
-      : disabled("앞과 붙이기", "첫 장면 앞에는 붙일 것이 없습니다."),
+      ? { enabled: true, label: "앞과 붙이기", hint: "앞 장면과 하나로 합치기", action: { kind: "merge-narration", leftSegmentId: previous.segmentId, rightSegmentId: selected.segmentId } }
+      : disabled("앞과 붙이기", "첫 장면이라 붙일 앞 장면이 없어요."),
     // 뺀 장면은 타임라인에서 사라져 다시 고를 수 없다(실제 앱에서 확인).
     // 그래서 이 단추는 되돌리지 못한다 -- 되돌리기는 `실행 취소`가, 다시 넣기는
     // 인스펙터의 `유지`가 맡는다. 여기서 되돌림을 흉내 내면 누를 수 없는 단추가 된다.
     drop: {
       enabled: true,
       label: "빼기",
-      hint: "고른 장면을 영상에서 뺍니다. (Delete) 되돌리려면 실행 취소를 누르세요.",
+      hint: "고른 장면 빼기 (Delete) · 실행 취소로 되돌리기",
       action: { kind: "set-cut-action", segmentId: selected.segmentId, cutAction: "remove" },
     },
     copyToNext: !carried
-      ? disabled("다음 장면에도", "이 장면에 옮길 재료가 없습니다. 왼쪽에서 먼저 골라 적용하세요.")
+      ? disabled("다음 장면에도", "이 장면에 옮길 재료가 없어요. 왼쪽에서 먼저 골라 적용해 주세요.")
       : !next
-      ? disabled("다음 장면에도", "마지막 장면 뒤에는 붙일 곳이 없습니다.")
+      ? disabled("다음 장면에도", "마지막 장면이라 다음 장면이 없어요.")
       : {
           enabled: true,
           label: "다음 장면에도",
-          hint: "이 장면의 재료를 다음 장면에도 그대로 씁니다.",
+          hint: "이 장면의 재료를 다음 장면에도 그대로 쓰기",
           action: { kind: "save-media", mediaKind: carried.mediaKind, segmentId: next.segmentId, assetId: carried.assetId, controls: carried.controls },
         },
   };

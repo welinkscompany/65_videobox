@@ -121,8 +121,8 @@ function libraryLicense(asset: MediaLibraryAsset): string {
     : "출처 표기 불필요";
   const details = `라이선스: ${license} · ${attribution}`;
   if (asset.available && asset.verified) return details;
-  if (!asset.official_license_url.trim() && !asset.attribution_required) return "검증 또는 이용 가능 상태 확인 필요";
-  return `검증 또는 이용 가능 상태 확인 필요 · ${details}`;
+  if (!asset.official_license_url.trim() && !asset.attribution_required) return "사용 가능 여부 확인 필요";
+  return `사용 가능 여부 확인 필요 · ${details}`;
 }
 
 function libraryStatus(asset: MediaLibraryAsset): string {

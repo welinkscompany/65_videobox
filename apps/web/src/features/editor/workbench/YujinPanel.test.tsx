@@ -281,6 +281,29 @@ describe("YujinPanel", () => {
     }
   });
 
+  it("Enter로 보내고 Shift+Enter는 줄을 바꾸며, 한글 조합 중에는 보내지 않는다", () => {
+    const onSendMessage = vi.fn();
+    renderOpen({ draft: "이 구간 영상 추천해 줘", onSendMessage });
+    const composer = screen.getByLabelText("유진에게 요청하기");
+
+    // 한글 입력기가 글자를 조합하는 중의 Enter는 글자를 확정하는 키다.
+    fireEvent.keyDown(composer, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(composer, { key: "Enter", keyCode: 229 });
+    fireEvent.keyDown(composer, { key: "Enter", shiftKey: true });
+    expect(onSendMessage).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(composer, { key: "Enter" });
+    expect(onSendMessage).toHaveBeenCalledTimes(1);
+    expect(onSendMessage).toHaveBeenCalledWith("이 구간 영상 추천해 줘");
+  });
+
+  it("보낼 수 없을 때는 Enter도 보내지 않는다", () => {
+    const onSendMessage = vi.fn();
+    renderOpen({ draft: "   ", onSendMessage });
+    fireEvent.keyDown(screen.getByLabelText("유진에게 요청하기"), { key: "Enter" });
+    expect(onSendMessage).not.toHaveBeenCalled();
+  });
+
   it("preserves the composer and conversation scroll while closing and reopening", () => {
     function Persistent() {
       const [open, setOpen] = useState(true);
@@ -789,10 +812,11 @@ describe("추천 후보", () => {
     // `전체 담기`가 들어오면서 "채운다"만으로는 어느 쪽인지 알 수 없게 됐다.
     // 이름은 `inspector/frameFits.ts` 한 벌을 따른다.
     expect(screen.getByText("꽉 채우기")).toBeVisible();
-    expect(screen.getByText("제안 기준 편집본 6")).toBeVisible();
-    expect(screen.getByText("현재 편집본 7")).toBeVisible();
-    expect(screen.getByText("후보 상태: 적용 가능")).toBeVisible();
-    expect(screen.getByText("후보 상태: 수동 적용")).toBeVisible();
+    // 내부 편집 번호(6·7)는 창작자에게 뜻이 없다. 달라졌다는 사실만 한 줄로.
+    expect(screen.getByText("편집이 바뀌어 이 추천은 지난 편집 기준이에요.")).toBeVisible();
+    expect(screen.queryByText(/편집본 6|편집본 7/)).toBeNull();
+    expect(screen.getByText("후보 상태: 바로 적용")).toBeVisible();
+    expect(screen.getByText("후보 상태: 직접 적용")).toBeVisible();
     expect(screen.getByRole("radio", { name: "B-003 선택" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "선택한 추천 적용" })).toBeDisabled();
     expect(container.querySelectorAll("audio, video")).toHaveLength(0);
@@ -941,7 +965,7 @@ describe("대화형 편집안", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "편집안 보기" }));
-    expect(screen.getByRole("dialog", { name: "편집안" })).toHaveTextContent("아직 적용되지 않았어요");
+    expect(screen.getByRole("dialog", { name: "편집안" })).toHaveTextContent("아직 적용 전이에요");
     fireEvent.click(screen.getByRole("button", { name: "이 구간 미리보기" }));
     fireEvent.click(screen.getByRole("button", { name: "이 편집안 적용" }));
     fireEvent.click(screen.getByRole("button", { name: "자막도 짧게 할까요?" }));

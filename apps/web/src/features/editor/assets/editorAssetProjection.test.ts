@@ -17,7 +17,7 @@ describe("editor asset projection", () => {
   it("filters a normalized list by type and query without losing unavailable license truth", () => {
     const cards = projectEditorAssets({ projectId: "p", brollAssets: [], libraryAssets: [{ library_asset_id: "sfx-1", asset_id: "sfx", media_type: "sfx", duration_seconds: 2, version: "v1", verified: false, available: false, tags: ["license"], source: "Starter", creator: "Creator", official_license_url: "", attribution_required: false, attribution_text: "" }] });
 
-    expect(filterEditorAssets(cards, { type: "sfx", query: "license" })).toEqual([expect.objectContaining({ canApply: false, license: "검증 또는 이용 가능 상태 확인 필요" })]);
+    expect(filterEditorAssets(cards, { type: "sfx", query: "license" })).toEqual([expect.objectContaining({ canApply: false, license: "사용 가능 여부 확인 필요" })]);
   });
 
   it("reports B-roll audio only from explicit metadata and reports supported library audio truthfully", () => {
@@ -96,8 +96,8 @@ describe("editor asset projection", () => {
     ]);
     expect(cards.slice(4)).toEqual([
       expect.objectContaining({ id: "library:music-1", assetId: "starter-music", libraryAssetId: "music-1", previewUrl: "/api/media-library/assets/music-1/preview", canApply: true, license: "라이선스: https://license.invalid/music · 출처 표기 필요: Creator 표기" }),
-      expect.objectContaining({ id: "library:sfx-unavailable", libraryAssetId: "sfx-unavailable", canApply: false, license: "검증 또는 이용 가능 상태 확인 필요" }),
-      expect.objectContaining({ id: "library:music-unverified", libraryAssetId: "music-unverified", canApply: false, license: "검증 또는 이용 가능 상태 확인 필요" }),
+      expect.objectContaining({ id: "library:sfx-unavailable", libraryAssetId: "sfx-unavailable", canApply: false, license: "사용 가능 여부 확인 필요" }),
+      expect.objectContaining({ id: "library:music-unverified", libraryAssetId: "music-unverified", canApply: false, license: "사용 가능 여부 확인 필요" }),
     ]);
   });
 

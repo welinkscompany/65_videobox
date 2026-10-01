@@ -448,7 +448,7 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
       )));
       setMessage(
         decision === "approved"
-          ? "청취 승인을 저장했어요. 편집본 적용은 편집 화면에서 따로 진행해 주세요."
+          ? "청취 승인을 저장했어요. 편집본에 넣는 건 편집 화면에서 해 주세요."
           : "청취 거부를 저장했어요. 현재 내레이션은 바뀌지 않아요.",
       );
     } catch {
@@ -622,11 +622,11 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
         <Button disabled={isBusy || loadState !== "ready" || !youtubeUrl.trim()} onClick={() => void importFromYoutube()} type="button">
           {actionName === "youtube-import" ? "영상에서 가져오는 중" : "유튜브 링크로 배우기"}
         </Button>
-        <p className="vb-setting-note">목소리는 바로 후보 만들기에 쓸 수 있어요. 컷 빠르기·색감은 참고용으로 보여만 드려요 -- 실제 편집에 자동으로 입히지 않아요.</p>
+        <p className="vb-setting-note">목소리는 바로 후보 만들기에 쓸 수 있어요. 컷 빠르기·색감은 참고로만 보여 주고, 편집에 자동으로 입히지 않아요.</p>
         {youtubeImportResult ? (
           <section aria-label="유튜브 영상에서 배운 스타일">
             <p>{`컷 빠르기: 평균 ${youtubeImportResult.pacing.average_clip_duration_sec.toFixed(1)}초마다 전환 (장면 ${youtubeImportResult.pacing.clip_count}개, 가장 짧은 구간 ${youtubeImportResult.pacing.shortest_clip_sec.toFixed(1)}초 · 가장 긴 구간 ${youtubeImportResult.pacing.longest_clip_sec.toFixed(1)}초)`}</p>
-            <p>{`색감: 밝기 ${youtubeImportResult.color.average_brightness.toFixed(0)}/255, ${youtubeImportResult.color.warm_cool_bias > 0 ? "따뜻한" : youtubeImportResult.color.warm_cool_bias < 0 ? "차가운" : "중립적인"} 톤`}</p>
+            <p>{`색감: 밝기 ${youtubeImportResult.color.average_brightness.toFixed(0)}/255, ${youtubeImportResult.color.warm_cool_bias > 0 ? "따뜻한" : youtubeImportResult.color.warm_cool_bias < 0 ? "차가운" : "중간"} 톤`}</p>
           </section>
         ) : null}
       </div>

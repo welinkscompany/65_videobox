@@ -119,7 +119,7 @@ const FINAL_RENDER_POLL_INTERVAL_MS = 5000;
 
 function exactPreviewDescription(state: ExactPreviewState | undefined) {
   switch (state) {
-    case "current": return "현재 편집본 미리보기가 준비되었어요.";
+    case "current": return "현재 편집본 미리보기가 준비됐어요.";
     case "pending":
     case "running": return "미리보기를 준비하고 있어요.";
     case "failed": return "미리보기를 만들지 못했어요.";
@@ -1369,7 +1369,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
         </li>
         <li>
           <strong>출력</strong>
-          <span>{canRenderSubtitle ? "자막과 완성본을 만들 수 있어요." : "앞 단계 완료 필요"}</span>
+          <span>{canRenderSubtitle ? "준비됨" : "앞 단계 완료 필요"}</span>
         </li>
       </ol>
     </section> : null}
@@ -1389,7 +1389,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
       <Card>
         <CardHeader><CardTitle>숏폼</CardTitle><CardDescription>{shortFormDescription}</CardDescription></CardHeader>
         <CardContent>
-          <p>한 번 누르면 유진이 퍼질 대목을 골라 세로 숏폼으로 만들고, 여기에서 바로 내려받을 수 있어요.</p>
+          <p>다 만들면 여기서 바로 내려받을 수 있어요.</p>
           {!timelineJob ? <p>편집 화면에서 장면을 채우고 저장하면 여기에서 만들 수 있어요.</p> : null}
           {timelineJob && !canRenderSubtitle ? <p>검토 승인과 확인할 항목을 모두 마친 뒤 숏폼을 만들 수 있어요.</p> : null}
           {/* 문구가 **빠를 때나 느릴 때나** 같은 말이어야 한다. 지금은 기계가
@@ -1403,15 +1403,15 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
       <Card>
         <CardHeader><CardTitle>편집본 미리보기</CardTitle><CardDescription>{exactPreviewDescription(currentState?.exactPreviewState)}</CardDescription></CardHeader>
         <CardContent>
-          <p>재생은 편집 화면의 한 플레이어에서 확인해 주세요.</p>
+          <p>재생은 편집 화면에서 확인해 주세요.</p>
           <Button onClick={onOpenEditor}>편집에서 미리보기 열기</Button>
         </CardContent>
       </Card>
       <Card>
         <CardHeader><CardTitle>가로·세로 출력</CardTitle><CardDescription>{variantRenderSummary(variantItems)}</CardDescription></CardHeader>
         <CardContent>
-          <p>성공한 출력은 서로 독립적으로 재생하고, 실패한 출력만 다시 만들 수 있어요.</p>
-          {variantError ? <p role="status">출력 변형 상태를 확인하지 못했어요.</p> : null}
+          <p>출력마다 따로 재생할 수 있고, 실패한 것만 다시 만들 수 있어요.</p>
+          {variantError ? <p role="status">가로·세로 출력 상태를 확인하지 못했어요.</p> : null}
           {variantOptions.map((option) => (
               <label key={option.variant_id}>
                 <input
@@ -1443,7 +1443,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
           같은 영상이 한 화면에 두 번 보인다. */}
       {variantItems.filter((item) => item !== shortFormItem).map((item) => renderVariantOutputCard(item))}
       <Card>
-        <CardHeader><CardTitle>자막</CardTitle><CardDescription>{currentSubtitle ? "자막이 준비되었어요." : staleSubtitle ? "자막이 최신 편집본과 달라요." : currentState?.subtitle?.status === "failed" || currentState?.subtitleRecord?.status === "failed" ? subtitleFailureMessage(currentState?.subtitleRecord?.error_message) : timelineJob ? "현재 편집본의 자막을 만들 수 있어요." : "아직 자막이 없어요."}</CardDescription></CardHeader>
+        <CardHeader><CardTitle>자막</CardTitle><CardDescription>{currentSubtitle ? "자막이 준비됐어요." : staleSubtitle ? "자막이 최신 편집본과 달라요." : currentState?.subtitle?.status === "failed" || currentState?.subtitleRecord?.status === "failed" ? subtitleFailureMessage(currentState?.subtitleRecord?.error_message) : timelineJob ? "현재 편집본의 자막을 만들 수 있어요." : "아직 자막이 없어요."}</CardDescription></CardHeader>
         <CardContent>
           {subtitleError ? <p>{subtitleFailureMessage(subtitleRejectedReason ?? currentState?.subtitleRecord?.error_message)} 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
           {!timelineJob ? <p>편집 화면에서 장면을 채우고 저장하면 여기에서 만들 수 있어요.</p> : null}
@@ -1476,7 +1476,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
               중간 공유. 토큰 하나가 이 완성본 하나에만 닿는다 — 앱에 로그인이 없어도
               그 사람은 이 링크로만 영상을 볼 수 있다. */}
           {currentFinal ? <div className="vb-preview-share">
-            <Button disabled={isCreatingPreviewShare} onClick={() => void handleCreatePreviewShare()}>{isCreatingPreviewShare ? "공유 링크 만드는 중" : "동료에게 공유 링크 만들기"}</Button>
+            <Button disabled={isCreatingPreviewShare} onClick={() => void handleCreatePreviewShare()}>{isCreatingPreviewShare ? "공유 링크 만드는 중" : "공유 링크 만들기"}</Button>
             {previewShareErrorProjectId === projectId ? <p>공유 링크를 만들지 못했어요. 다시 시도해 주세요.</p> : null}
             {previewShareProjectId === projectId && previewShareId ? (
               previewShareRevoked ? (
@@ -1485,13 +1485,13 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
                 <p>
                   동료에게 이 링크를 보내 주세요: <input data-native-control="preview-share-url" readOnly value={previewShareUrl} onFocus={(event) => event.currentTarget.select()} />
                   {" "}
-                  <Button variant="outline" disabled={isRevokingPreviewShare} onClick={() => void handleRevokePreviewShare()}>{isRevokingPreviewShare ? "취소하는 중" : "이 링크 취소하기"}</Button>
+                  <Button variant="outline" disabled={isRevokingPreviewShare} onClick={() => void handleRevokePreviewShare()}>{isRevokingPreviewShare ? "취소하는 중" : "링크 취소"}</Button>
                 </p>
               ) : (
                 <p>
-                  공유 링크가 활성 상태예요. 주소는 처음 만들 때만 보여드려요.
+                  공유 링크가 열려 있어요. 주소는 처음 만들 때만 보여요.
                   {" "}
-                  <Button variant="outline" disabled={isRevokingPreviewShare} onClick={() => void handleRevokePreviewShare()}>{isRevokingPreviewShare ? "취소하는 중" : "이 링크 취소하기"}</Button>
+                  <Button variant="outline" disabled={isRevokingPreviewShare} onClick={() => void handleRevokePreviewShare()}>{isRevokingPreviewShare ? "취소하는 중" : "링크 취소"}</Button>
                 </p>
               )
             ) : null}
@@ -1511,7 +1511,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
           </div> : null}
           {currentFinal && !founderUploadDecision ? <div className="vb-upload-approval">
             {uploadApprovalProjectId === projectId && uploadApprovalQueued === true
-              ? <p>대표님 결재함에 올렸어요. 승인하시면 업로드를 진행할 수 있어요.</p>
+              ? <p>대표님 결재함에 올렸어요. 승인하시면 올릴 수 있어요.</p>
               : uploadApprovalProjectId === projectId && uploadApprovalQueued === false
                 ? <p>결재함이 아직 연결돼 있지 않아요. 이 완성본은 준비돼 있으니 연결되면 다시 요청해 주세요.</p>
                 : <p>이 완성본을 업로드해도 될지 대표님 결재함에 물어보세요.</p>}
@@ -1546,10 +1546,10 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
               placeholder="예: 내 브이로그 포맷"
               onChange={(event) => setFormatName(event.target.value)}
             />
-            <Button disabled={isSavingFormat} onClick={() => void handleSaveFormat()}>이 포맷 저장하기</Button>
+            <Button disabled={isSavingFormat} onClick={() => void handleSaveFormat()}>포맷 저장</Button>
           </div> : null}
-          {staleFinal ? <p>편집에서 새 완성본 만들기를 실행해 주세요.</p> : null}
-          {finalRender?.status === "failed" ? <p>완성본 다시 만들기를 눌러 새 작업을 시작할 수 있어요.</p> : null}
+          {staleFinal ? <p>완성본 만들기를 다시 눌러 주세요.</p> : null}
+          {finalRender?.status === "failed" ? <p>완성본 다시 만들기를 눌러 주세요.</p> : null}
           {/* 화면이 스스로 상태를 다시 읽으므로(위 폴링 효과) "다시 확인해
               주세요"처럼 직접 누르라는 말은 더는 맞지 않는다 -- 완성되면 이
               화면이 저절로 바뀐다. */}
@@ -1564,30 +1564,30 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle>CapCut 초안</CardTitle><CardDescription>{currentCapcutDraft ? "CapCut 초안이 준비되었어요." : staleCapcutDraft ? "CapCut 초안이 최신 편집본과 달라요." : capcutDraft?.status === "failed" ? capcutDraftFailureMessage(capcutDraft?.error_message) : hasPendingCapcut ? "CapCut 초안을 만드는 중이에요." : timelineJob ? "현재 편집본의 CapCut 초안을 만들 수 있어요." : "아직 CapCut 초안이 없어요."}</CardDescription></CardHeader>
+        <CardHeader><CardTitle>CapCut 초안</CardTitle><CardDescription>{currentCapcutDraft ? "CapCut 초안이 준비됐어요." : staleCapcutDraft ? "CapCut 초안이 최신 편집본과 달라요." : capcutDraft?.status === "failed" ? capcutDraftFailureMessage(capcutDraft?.error_message) : hasPendingCapcut ? "CapCut 초안을 만드는 중이에요." : timelineJob ? "현재 편집본의 CapCut 초안을 만들 수 있어요." : "아직 CapCut 초안이 없어요."}</CardDescription></CardHeader>
         <CardContent>
           {capcutError ? <p>{capcutDraftFailureMessage(capcutRejectedReason ?? capcutDraft?.error_message)} 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
           {!timelineJob ? <p>편집 화면에서 장면을 채우고 저장하면 여기에서 만들 수 있어요.</p> : null}
           {timelineJob && !canRenderSubtitle ? <p>검토 승인과 확인할 항목을 모두 마친 뒤 CapCut 초안을 만들 수 있어요.</p> : null}
           {hasPendingCapcut ? <p>완료될 때까지 기다린 뒤 상태를 다시 확인해 주세요.</p> : null}
-          {capcutDraft?.status === "failed" ? <p>CapCut 초안 다시 만들기를 눌러 새 작업을 시작할 수 있어요.</p> : null}
+          {capcutDraft?.status === "failed" ? <p>CapCut 초안 다시 만들기를 눌러 주세요.</p> : null}
           {staleCapcutDraft ? <p>현재 편집본으로 CapCut 초안을 새로 만들어 주세요.</p> : null}
-          {currentCapcutDraft && capcutDraft.export ? <p>로컬 저장 위치: {capcutDraft.export.file_uri}</p> : null}
+          {currentCapcutDraft && capcutDraft.export ? <p>저장 위치: {capcutDraft.export.file_uri}</p> : null}
           {currentCapcutDraft && capcutDraft.export?.notes.length ? <p>일부 효과는 CapCut에서 확인해 주세요.</p> : null}
-          {capcutHandoff?.status === "ready" ? <p>{capcutHandoff.reused ? "기존 CapCut 등록 정보를 다시 사용해요." : "CapCut 등록 상태가 준비되었어요."}</p> : null}
+          {capcutHandoff?.status === "ready" ? <p>{capcutHandoff.reused ? "이미 등록한 CapCut 정보를 다시 써요." : "CapCut에 등록했어요."}</p> : null}
           {/* **어디에 들어갔는지 자리를 그대로 보여 준다.** 등록만 됐다고 하고
               자리를 안 알려 주면 owner는 CapCut에서 어느 것을 열어야 하는지 모른다. */}
           {capcutHandoff?.status === "ready" && capcutHandoff.registered_project_path ? <p>CapCut에서 열 자리: {capcutHandoff.registered_project_path}</p> : null}
-          {capcutHandoffInProgress ? <p>CapCut 등록이 진행 중이에요. 잠시 후 상태를 다시 확인해 주세요.</p> : null}
-          {capcutHandoff?.status === "failed" ? <p>CapCut 등록을 완료하지 못했어요. 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
-          {capcutHandoffError ? <p>CapCut 등록 상태를 확인하지 못했어요. 상태를 다시 확인한 뒤 시도해 주세요.</p> : null}
-          {currentCapcutDraft ? <p>실제 CapCut Desktop에서 열기와 가져오기는 별도로 확인해야 해요.</p> : null}
+          {capcutHandoffInProgress ? <p>CapCut에 등록하는 중이에요. 잠시 후 상태를 다시 확인해 주세요.</p> : null}
+          {capcutHandoff?.status === "failed" ? <p>CapCut에 등록하지 못했어요. 다시 시도해 주세요.</p> : null}
+          {capcutHandoffError ? <p>CapCut 등록 상태를 확인하지 못했어요. 상태 다시 확인을 눌러 주세요.</p> : null}
+          {currentCapcutDraft ? <p>CapCut 앱에서 실제로 열리는지는 직접 확인해 주세요.</p> : null}
           {/* **무엇을 하면 되는지 서버가 말한 그대로 보여 준다.** 예전에는 "연결
               상태를 확인해 주세요"라고만 했는데, 그 말로는 owner가 할 수 있는
               일이 없었다. 지금은 진단이 캡컷 다리에게 직접 물어보고 이유를
               돌려준다 -- 다리가 꺼졌으면 켜는 법까지 이 줄에 담겨 온다. */}
           {capcutHandoffBlockedReason ? <p>{capcutHandoffBlockedReason}</p> : null}
-          {currentState?.diagnostics ? <p>CapCut 연결 상태는 준비 여부만 표시하며, 실제 Desktop 완료를 뜻하지 않아요.</p> : null}
+          {currentState?.diagnostics ? <p>CapCut 연결 상태는 준비 여부만 알려 줘요.</p> : null}
           {!currentState?.diagnostics ? <p>CapCut 연결 상태는 지금 확인할 수 없어요. 잠시 후 다시 확인해 주세요.</p> : null}
           <Button disabled={!canExportCapcutDraft || isExportingCurrentCapcutDraft} onClick={() => void handleExportCapcutDraft()}>{isExportingCurrentCapcutDraft ? "CapCut 초안 만드는 중" : capcutDraft?.status === "failed" || capcutError ? "CapCut 초안 다시 만들기" : "CapCut 초안 만들기"}</Button>
           {canRegisterCapcutHandoff ? <Button variant="outline" disabled={isRegisteringCurrentCapcutHandoff || capcutHandoffBlockedReason !== null} onClick={() => void handleRegisterCapcutHandoff()}>{isRegisteringCurrentCapcutHandoff ? "CapCut 등록 중" : capcutHandoff?.status === "failed" || capcutHandoffError ? "CapCut 등록 다시 시도" : "CapCut에 등록"}</Button> : null}

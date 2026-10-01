@@ -23,7 +23,7 @@ describe("TranscriptPanel", () => {
     expect(screen.queryByText(/개 연결 캡션/)).toBeNull();
     expect(screen.queryByText(/^선택한 캡션:/)).toBeNull();
     // 안내 한 줄은 남는다 -- 캡션 시간을 왜 못 고치는지 여기서만 말한다.
-    expect(screen.getByText("캡션 시간은 연결된 내레이션 구간을 따릅니다.")).toBeInTheDocument();
+    expect(screen.getByText("캡션 시간은 내레이션 구간을 따라가요.")).toBeInTheDocument();
   });
 
   it("selects and seeks the same segment from the transcript row", () => {

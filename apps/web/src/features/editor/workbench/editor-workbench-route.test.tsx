@@ -1729,7 +1729,7 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
 
-    expect(await screen.findByText("편집 세션 정보가 일치하지 않아요. 다시 열어 주세요.")).toBeVisible();
+    expect(await screen.findByText("편집 내용이 맞지 않아요. 다시 열어 주세요.")).toBeVisible();
     expect(screen.queryByRole("region", { name: "편집 작업판" })).toBeNull();
   });
 
@@ -2151,7 +2151,7 @@ describe("EditorWorkbenchRoute", () => {
     const { rerender } = render(<EditorWorkbenchRoute projectId="project-a" sessionId={null} />);
     expect(screen.getByText("편집 세션을 찾을 수 없어요. 다시 열어 주세요.")).toBeVisible();
     rerender(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    expect(await screen.findByText("편집 세션 정보가 일치하지 않아요. 다시 열어 주세요.")).toBeVisible();
+    expect(await screen.findByText("편집 내용이 맞지 않아요. 다시 열어 주세요.")).toBeVisible();
     expect(load).toHaveBeenCalledTimes(1);
   });
 
@@ -2382,7 +2382,7 @@ describe("EditorWorkbenchRoute", () => {
     vi.mocked(api.startExactPreview).mockClear();
     fireEvent.click(screen.getByRole("button", { name: "미리보기 새로 만들기" }));
 
-    expect(await screen.findByText("편집 세션 정보가 일치하지 않아요. 다시 열어 주세요.")).toBeVisible();
+    expect(await screen.findByText("편집 내용이 맞지 않아요. 다시 열어 주세요.")).toBeVisible();
     expect(screen.queryByRole("region", { name: "편집 작업판" })).toBeNull();
   });
 
@@ -3293,7 +3293,7 @@ describe("EditorWorkbenchRoute", () => {
     await openInspector();
     fireEvent.click(screen.getByRole("button", { name: "재생성 범위 미리보기" }));
 
-    expect(await screen.findByText("영향 범위를 확인하지 못했어요. 직접 편집은 계속할 수 있어요.")).toBeVisible();
+    expect(await screen.findByText("바뀌는 범위를 확인하지 못했어요. 직접 편집은 계속할 수 있어요.")).toBeVisible();
     expect(screen.getByRole("button", { name: "부분 재생성 실행" })).toBeDisabled();
     expect(run).not.toHaveBeenCalled();
   });
@@ -3393,7 +3393,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(runButton);
 
     expect(await screen.findByText(message)).toBeVisible();
-    expect(screen.getByText("부분 재생성을 완료하지 못했어요. 영향 범위를 다시 확인해 주세요.")).toBeVisible();
+    expect(screen.getByText("부분 재생성을 마치지 못했어요. 바뀌는 범위를 다시 확인해 주세요.")).toBeVisible();
     expect(screen.queryByText("선택한 범위를 다시 만들고 있어요.")).toBeNull();
     expect(run).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(manifestLoad).toHaveBeenCalledTimes(2));
@@ -4183,8 +4183,9 @@ describe("EditorWorkbenchRoute", () => {
     // 누르지 않았는데 스스로 다시 물어본다.
     await waitFor(() => expect(refresh).toHaveBeenCalledWith("project-a", "proposal-1"));
     await waitFor(() => expect(
-      screen.queryByText("편집본이 바뀌어서 이 추천은 그대로 적용할 수 없어요."),
+      screen.queryByText("편집이 바뀌어 이 추천은 지난 편집 기준이에요."),
     ).toBeNull());
+    expect(screen.queryByText("편집본이 바뀌어서 이 추천은 그대로 적용할 수 없어요.")).toBeNull();
   });
 
   it("disables stale Yujin Apply before materialize or edit mutation", async () => {
@@ -5293,9 +5294,9 @@ describe("서버 출력 변형 연결", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await screen.findByRole("region", { name: "편집 작업판" });
-    fireEvent.click(screen.getByRole("button", { name: "출력 변형 펼치기" }));
+    fireEvent.click(screen.getByRole("button", { name: "가로·세로 비교 펼치기" }));
     fireEvent.click(screen.getByRole("tab", { name: "세로" }));
-    expect(await screen.findByText("서버 변형 버전 3")).toBeVisible();
+    expect(await screen.findByText("세로 버전 3")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "크롭 저장" }));
     await waitFor(() => expect(patch).toHaveBeenCalledWith("project-a", "vertical-full", expect.objectContaining({ expected_variant_revision: 3 })));
     fireEvent.click(screen.getByRole("button", { name: "세로 변형 준비" }));
@@ -5334,7 +5335,7 @@ describe("서버 출력 변형 연결", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await screen.findByRole("region", { name: "편집 작업판" });
     // 펼침 상태는 화면이 기억한다 -- 앞 시험이 이미 펼쳐 뒀을 수 있다.
-    const expand = screen.queryByRole("button", { name: "출력 변형 펼치기" });
+    const expand = screen.queryByRole("button", { name: "가로·세로 비교 펼치기" });
     if (expand) fireEvent.click(expand);
     fireEvent.click(screen.getByRole("tab", { name: "세로" }));
     fireEvent.click(await screen.findByRole("button", { name: "세로 변형 준비" }));
@@ -5377,7 +5378,7 @@ describe("숏폼 화면 정직성", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await screen.findByRole("region", { name: "편집 작업판" });
-    const expand = screen.queryByRole("button", { name: "출력 변형 펼치기" });
+    const expand = screen.queryByRole("button", { name: "가로·세로 비교 펼치기" });
     if (expand) fireEvent.click(expand);
     fireEvent.click(screen.getByRole("tab", { name: "세로" }));
     fireEvent.click(await screen.findByRole("button", { name: "하이라이트 변형 만들기" }));
@@ -5424,7 +5425,7 @@ describe("숏폼 화면 정직성", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await screen.findByRole("region", { name: "편집 작업판" });
-    const expand = screen.queryByRole("button", { name: "출력 변형 펼치기" });
+    const expand = screen.queryByRole("button", { name: "가로·세로 비교 펼치기" });
     if (expand) fireEvent.click(expand);
     fireEvent.click(await screen.findByRole("button", { name: "숏폼 다시 만들기" }));
 
@@ -5474,7 +5475,7 @@ describe("숏폼 화면 정직성", () => {
       />,
     );
     await screen.findByRole("region", { name: "편집 작업판" });
-    const expand = screen.queryByRole("button", { name: "출력 변형 펼치기" });
+    const expand = screen.queryByRole("button", { name: "가로·세로 비교 펼치기" });
     if (expand) fireEvent.click(expand);
     fireEvent.click(await screen.findByRole("button", { name: "숏폼을 편집본으로 펼치기" }));
 
@@ -5520,7 +5521,7 @@ describe("숏폼 화면 정직성", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await screen.findByRole("region", { name: "편집 작업판" });
-    const expand = screen.queryByRole("button", { name: "출력 변형 펼치기" });
+    const expand = screen.queryByRole("button", { name: "가로·세로 비교 펼치기" });
     if (expand) fireEvent.click(expand);
     fireEvent.click(screen.getByRole("tab", { name: "세로" }));
     const before = board.mock.calls.length;

@@ -15,7 +15,7 @@ export function VariantSelector({
   selected: VariantKind | "side_by_side";
   onSelect: (kind: VariantKind | "side_by_side") => void;
 }>) {
-  return <div className="vb-editor-variants__selector" role="tablist" aria-label="출력 변형 보기">
+  return <div className="vb-editor-variants__selector" role="tablist" aria-label="화면 비율">
     {choices.map((choice) => <Button
       key={choice.kind}
       type="button"

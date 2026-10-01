@@ -20,13 +20,13 @@ import { Input } from "../../components/ui/input";
  *  같은 이름을 다시 쓰면 그 시험이 깨진다. */
 
 const analysisStatusCopy: Record<string, string> = {
-  queued: "분석을 기다리고 있어요",
-  running: "미디어를 살펴보고 있어요",
-  succeeded: "준비가 끝났어요",
-  needs_review: "확인이 필요해요",
-  failed: "분석을 마치지 못했어요",
-  blocked: "분석을 진행할 수 없어요",
-  cancelled: "분석을 멈췄어요",
+  queued: "분석 대기",
+  running: "분석 중",
+  succeeded: "준비됨",
+  needs_review: "확인 필요",
+  failed: "분석 실패",
+  blocked: "분석 불가",
+  cancelled: "분석 멈춤",
 };
 
 function assetTitle(asset: BrollAsset | undefined, index: number) {
@@ -114,7 +114,7 @@ export function MediaAnalysisStatusPanel({ projectId }: { projectId: string }) {
           <article key={item.analysis_id} className="vb-media-analysis-panel__item" aria-label={`${label} 분석`}>
             <p className="vb-media-analysis-panel__title">{label}</p>
             <p className="vb-media-analysis-panel__status">
-              {analysisStatusCopy[item.status] ?? "상태를 확인하고 있어요"} · {item.progress_percent}%
+              {analysisStatusCopy[item.status] ?? "상태 확인 중"} · {item.progress_percent}%
             </p>
             {item.error_message ? <p className="vb-media-analysis-panel__error">분석을 마치지 못했어요. 직접 선택하거나 다시 시도해 주세요.</p> : null}
             {(item.status === "succeeded" || item.status === "needs_review") ? (

@@ -99,6 +99,6 @@ describe("자동 캡션", () => {
 
     render(<AutoCaptionCard {...props} />);
 
-    expect(await screen.findByText(/말이 있는 장면의 캡션을 새로 씁니다/)).toBeVisible();
+    expect(await screen.findByText(/말이 있는 장면의 캡션을 새로 써요/)).toBeVisible();
   });
 });

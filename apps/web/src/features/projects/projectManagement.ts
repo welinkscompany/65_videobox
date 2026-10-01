@@ -22,7 +22,7 @@ import { useState } from "react";
  */
 export type ProjectDeleteConfirm = { projectId: string; stage: 1 | 2 } | null;
 
-export const projectActionFailureMessage = "프로젝트 작업에 실패했어요. 다시 시도해 주세요.";
+export const projectActionFailureMessage = "프로젝트를 바꾸지 못했어요. 다시 시도해 주세요.";
 
 export function useProjectManagement() {
   const [error, setError] = useState<string | null>(null);

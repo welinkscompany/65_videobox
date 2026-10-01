@@ -64,7 +64,7 @@ export async function runCaptionTranslationWithProgress(input: {
 export function captionTranslationOutcomeMessage(outcome: CaptionTranslationOutcome): string {
   if (outcome.kind === "succeeded") {
     return outcome.missingCount > 0
-      ? `${outcome.missingCount}개 장면은 옮기지 못했어요. 그 장면은 원래 캡션 그대로 나가요. 다시 눌러 주시면 남은 장면만 다시 해 봐요.`
+      ? `${outcome.missingCount}개 장면은 옮기지 못했어요. 그 장면은 원래 자막으로 나가요. 다시 누르면 남은 장면만 옮겨요.`
       : "자막을 번역했어요.";
   }
   if (outcome.kind === "timed_out") {

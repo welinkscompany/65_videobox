@@ -64,6 +64,19 @@ describe("InfographicPanel", () => {
     expect(create.mock.calls[0][0].style).toBe("editorial");
   });
 
+  it("자료실에 못 넣었을 때 서버 오류 원문을 창작자에게 보이지 않는다", async () => {
+    vi.spyOn(api, "createInfographic").mockResolvedValue(
+      madeResult({ library_asset_id: null, library_error: "OSError: [Errno 28] No space left on device" }),
+    );
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    render(<InfographicPanel />);
+    await readyThenFill();
+    make();
+
+    expect(await screen.findByText(/그림은 만들었지만 자료실에 넣지 못했어요/)).toBeTruthy();
+    expect(screen.queryByText(/OSError|Errno|No space/)).toBeNull();
+  });
+
   it("적어 준 숫자를 그대로 보낸다", async () => {
     const create = vi.spyOn(api, "createInfographic").mockResolvedValue(madeResult());
     render(<InfographicPanel />);
@@ -93,7 +106,7 @@ describe("InfographicPanel", () => {
     await readyThenFill();
     make();
 
-    const busy = await screen.findByRole("button", { name: /그리는 중입니다/ });
+    const busy = await screen.findByRole("button", { name: /그리는 중/ });
     expect(busy).toHaveProperty("disabled", true);
     expect(busy.textContent).toContain("1~2분");
     release(madeResult());
