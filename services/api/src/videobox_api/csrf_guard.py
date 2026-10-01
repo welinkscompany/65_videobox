@@ -20,7 +20,11 @@ owner가 악성 웹페이지를 열어 두면 그 페이지의 크로스오리�
 
 from __future__ import annotations
 
+import os
+
 from fastapi import HTTPException, Request, status
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 #: 개발 서버·컨테이너가 화면을 내주는 자리(`docker/workspace-nginx.conf`).
 #: Tauri 셸이 다른 origin(예: `tauri://`)으로 뜨게 되면 여기 추가해야 한다.
@@ -49,4 +53,66 @@ def require_trusted_origin(request: Request) -> None:
         )
 
 
-__all__ = ["TRUSTED_ORIGINS", "require_trusted_origin"]
+#: 2026-10-01 보안 점검 H1: DNS 리바인딩 방어. 공격자 도메인을 127.0.0.1로
+#: 다시 풀게 하면 브라우저는 그 페이지를 같은 출처로 보지만, `Host` 헤더에는
+#: 여전히 공격자 도메인이 실린다. 그래서 Host가 아래 이름이 아니면 거절한다.
+#: `host.docker.internal`은 도커 안 호출자(MCP 등)가 쓰는 이름이고 공격자가
+#: 브라우저에 그 이름을 쓰게 할 방법이 없다. `testserver`는 TestClient 기본값.
+#: 다른 이름이 필요하면 `VIDEOBOX_ALLOWED_HOSTS`(쉼표 구분)로 더한다.
+DEFAULT_ALLOWED_HOSTS = (
+    "127.0.0.1",
+    "localhost",
+    "[::1]",
+    "::1",
+    "host.docker.internal",
+    "testserver",
+)
+
+
+def allowed_hosts_from_environment() -> list[str]:
+    extra = [
+        item.strip()
+        for item in os.environ.get("VIDEOBOX_ALLOWED_HOSTS", "").split(",")
+        if item.strip()
+    ]
+    return [*DEFAULT_ALLOWED_HOSTS, *extra]
+
+
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+class TrustedOriginMiddleware:
+    """상태를 바꾸는 **모든** 요청에 `require_trusted_origin`과 같은 규칙을 건다.
+
+    승인 문 넷에만 붙어 있던 검사를 전역으로 올린다(2026-10-01 보안 점검 H1·M1:
+    쓰기 라우트 약 185개 중 나머지는 크로스오리진 POST·DELETE를 그대로 받았다).
+    Origin이 없는 요청은 지금처럼 통과한다.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope.get("method", "GET") not in _SAFE_METHODS:
+            origin = None
+            for key, value in scope.get("headers", ()):
+                if key == b"origin":
+                    origin = value.decode("latin-1")
+                    break
+            if origin is not None and origin not in TRUSTED_ORIGINS:
+                response = JSONResponse(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    content={"detail": {"reason": "untrusted_origin"}},
+                )
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+__all__ = [
+    "DEFAULT_ALLOWED_HOSTS",
+    "TRUSTED_ORIGINS",
+    "TrustedOriginMiddleware",
+    "allowed_hosts_from_environment",
+    "require_trusted_origin",
+]

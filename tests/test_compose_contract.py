@@ -513,3 +513,28 @@ def test_every_service_declares_its_restart_policy_and_the_daily_stack_survives_
     all_services = set(base["services"]) | set(overlay["services"])
     assert all_services == set(_EXPECTED_RESTART_POLICY), "a service has no restart decision"
     assert declared == _EXPECTED_RESTART_POLICY
+
+
+def test_the_proxy_refuses_framing_and_hides_its_version() -> None:
+    """2026-10-01 보안 점검 M4: 응답에 보안 헤더가 하나도 없었다. 악성 페이지가
+    VideoBox를 투명 iframe으로 덮어 "영구 삭제"를 누르게 할 수 있었다(클릭재킹).
+    Tauri 창은 최상위 창이라 이 헤더의 영향을 받지 않는다."""
+    config = (ROOT / "docker/workspace-nginx.conf").read_text(encoding="utf-8")
+    assert "server_tokens off;" in config
+    assert "add_header X-Frame-Options DENY always;" in config
+    assert "frame-ancestors 'none'" in config
+    assert "add_header X-Content-Type-Options nosniff always;" in config
+    # location 블록 안에 add_header가 하나라도 있으면 server 단의 헤더가 통째로
+    # 사라진다(nginx 상속 규칙). 헤더는 server 단에만 둔다.
+    for block in re.findall(r"location[^{]*\{([^}]*)\}", config):
+        assert "add_header" not in block
+
+
+def test_the_page_shell_is_never_served_from_a_stale_cache() -> None:
+    """재빌드 뒤 브라우저가 캐시한 옛 index.html로 옛 번들을 돌렸다(2026-10-01 실측).
+    화면 뼈대는 매번 새로 묻고, 해시가 박힌 번들만 오래 둔다."""
+    config = (ROOT / "docker/workspace-nginx.conf").read_text(encoding="utf-8")
+    shell = re.search(r"location / \{([^}]*)\}", config)
+    assert shell is not None and "expires -1;" in shell.group(1)
+    assets = re.search(r"location /assets/ \{([^}]*)\}", config)
+    assert assets is not None and "expires 1y;" in assets.group(1)

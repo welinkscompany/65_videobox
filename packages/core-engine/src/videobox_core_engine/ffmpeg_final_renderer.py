@@ -340,6 +340,20 @@ def _escaped_filter_path(path: str) -> str:
     return path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
 
 
+def _escaped_filter_text(text: str) -> str:
+    """drawtext `text=`에 **따옴표 없이** 넣을 값.
+
+    ffmpeg은 이 값을 두 번 푼다: 먼저 필터 그래프(`\\ ' [ ] , ;`), 다음에 필터
+    옵션(`\\ ' :`). 그래서 옵션 단계 이스케이프를 먼저 하고, 그 결과를 그래프
+    단계에서 한 번 더 이스케이프한다. 2026-10-01 보안 점검 M2: 예전에는 작은따옴표
+    안에서 `\\'`를 써서 따옴표가 거기서 닫혔고, 뒤의 `,`로 필터를 끼워 넣을 수
+    있었다(임의 파일 내용이 영상에 그려짐). `9,900원; '반값'` 같은 평범한 글줄도
+    렌더가 깨졌다.
+    """
+    option_level = "".join("\\" + ch if ch in "\\':" else ch for ch in text)
+    return "".join("\\" + ch if ch in "\\'[],;" else ch for ch in option_level)
+
+
 def _overlay_block_bottom_px(
     *, line_count: int, video_height: int, caption_band: tuple[int, int] | None
 ) -> int:
@@ -400,11 +414,11 @@ def export_overlay_text_filters(
     bottom_offset = video_height - block_bottom + _OVERLAY_BOX_BORDER_PX
     filters: list[str] = []
     for line_index, line in enumerate(lines):
-        escaped = line.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
+        escaped = _escaped_filter_text(line)
         rise_px = (len(lines) - 1 - line_index) * _OVERLAY_LINE_PITCH_PX
         y_expression = f"h-{bottom_offset}-text_h" + (f"-{rise_px}" if rise_px else "")
         filters.append(
-            f"drawtext=fontfile='{font}':text='{escaped}':x=(w-text_w)/2:y={y_expression}:"
+            f"drawtext=fontfile='{font}':text={escaped}:expansion=none:x=(w-text_w)/2:y={y_expression}:"
             f"fontsize={_OVERLAY_FONT_SIZE_PX}:fontcolor=white:box=1:boxcolor=black@0.65:"
             f"boxborderw={_OVERLAY_BOX_BORDER_PX}:enable='between(t,{start_sec},{end_sec})'"
         )

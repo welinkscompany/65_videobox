@@ -20,6 +20,7 @@ from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from videobox_api.orchestration import (
     ApiOrchestrator,
@@ -27,6 +28,7 @@ from videobox_api.orchestration import (
     build_local_only_runtime_service,
 )
 from videobox_api.asset_browser_preview_service import AssetBrowserPreviewService
+from videobox_api.csrf_guard import TrustedOriginMiddleware, allowed_hosts_from_environment
 from videobox_api.provider_factories import _build_pycapcut_exporter, _build_scene_image_provider, _build_scene_video_provider, _build_stt_provider, _build_tts_provider
 from videobox_api.response_normalizers import (
     _build_preflight_review_prediction,
@@ -1011,6 +1013,9 @@ def create_app(
     # 일부러 터뜨리지 않고도 형식과 핸들러가 붙었는지 확인된다.
     _LOGGER.info("VideoBox 시작 -- 기록 설정 완료")
     app = FastAPI(title="VideoBox API", version="0.1.0", lifespan=_media_analysis_lifespan)
+    # 2026-10-01 보안 점검 H1: Host 검사(DNS 리바인딩)와 전역 Origin 검사(CSRF).
+    app.add_middleware(TrustedOriginMiddleware)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts_from_environment())
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:

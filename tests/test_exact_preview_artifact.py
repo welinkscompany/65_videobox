@@ -320,7 +320,9 @@ def test_plan_renderer_draws_assetless_export_text_overlay_from_canonical_plan(t
     graph = renderer.build_plan_filter_graph(composition_plan=plan, source_indices={})
 
     assert "drawtext=" in graph
-    assert "O\\'Brien\\: safe" in graph
+    # 옵션 단계(`\'`, `\:`)와 그래프 단계(`\\`, `\'`)를 둘 다 거친 모양이다
+    # (2026-10-01 보안 점검 M2 -- `tests/test_overlay_text_filter_injection.py`).
+    assert "text=O\\\\\\'Brien\\\\: safe:" in graph
     assert "between(t,1.0,2.0)" in graph
 
 
