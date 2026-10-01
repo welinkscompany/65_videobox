@@ -1666,6 +1666,14 @@ class MaterializeLibraryAssetRequest(BaseModel):
     project_id: str
 
 
+class UpdateLibraryAssetFavoriteRequest(BaseModel):
+    """자료실 즐겨찾기 켜기·끄기 (2026-10-01)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    favorite: bool
+
+
 class UpdateLibraryAssetRightsRequest(BaseModel):
     """자산을 누가 만들었고 써도 되는가 (AK W1215-4). 남의 것은 허락 내용을 적는다."""
 

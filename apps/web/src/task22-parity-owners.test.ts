@@ -145,7 +145,7 @@ const nativeControlAllowlist = {
     reason: "The outputs surface owns the explicit variant selection controls before a render request is submitted, and the read-only share-link field it shows after creating one (select-to-copy, not a form input).",
   },
   "features/library/LibraryPreviewPane.tsx": {
-    controls: ["button:library-correct-media-type", "button:library-permanent-delete", "button:library-permanent-delete-confirm", "button:library-restore", "button:library-rights-save", "button:library-trash", "input:library-rights-license-note", "select:library-rights-source"],
+    controls: ["button:library-correct-media-type", "button:library-favorite", "button:library-permanent-delete", "button:library-permanent-delete-confirm", "button:library-restore", "button:library-rights-save", "button:library-trash", "input:library-rights-license-note", "select:library-rights-source"],
     reason: "The library preview pane owns the explicit restore, trash, and two-stage permanent-delete lifecycle actions for a trashed asset, plus the kind correction the owner needs because VideoBox now sorts one drop folder by content (owner decision 2026-09-07), and the rights source (own footage / AI / licensed third party) that unlocks monetized upload approval (AK W1215-4, 2026-09-28).",
   },
   "features/media/SceneImageStudio.tsx": {
@@ -278,7 +278,7 @@ describe("Task 22 canonical production owners", () => {
       expect(router).toMatch(owner);
     }
     expect(router).toMatch(/params\.section === "settings"/);
-    expect(router).toMatch(/\/settings\/general/);
+    expect(router).toMatch(/\/settings\/appearance/);
     expect(router).toMatch(/<SettingsPage\b/);
   });
 
@@ -294,7 +294,7 @@ describe("Task 22 canonical production owners", () => {
     expect(outputTests).toContain("keeps retained final output visible when the exact-preview status read fails");
     expect(e2e).toContain("/exact-previews/exact-e2e-");
     expect(e2e).toContain("__e2e/mark-outputs-stale");
-    expect(e2e).toContain("실제 CapCut Desktop에서 열기와 가져오기는 별도로 확인해야 해요.");
+    expect(e2e).toContain("CapCut 앱에서 실제로 열리는지는 직접 확인해 주세요.");
   });
 
   it("keeps every Task 22 parity row mapped to a canonical route, component test, and E2E owner", () => {

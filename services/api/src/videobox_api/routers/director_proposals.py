@@ -116,8 +116,23 @@ def _project_context(
         for text in (str(item.get("caption_text") or item.get("text") or "").strip(),)
         if text
     )
+    kept = [
+        item
+        for item in session.get("segments", [])
+        if isinstance(item, dict) and item.get("cut_action") != "remove"
+    ]
+    kept_seconds = 0.0
+    for item in kept:
+        try:
+            kept_seconds += max(0.0, float(item["end_sec"]) - float(item["start_sec"]))
+        except (KeyError, TypeError, ValueError):
+            pass
     return YujinProjectContext(
-        title=title, script_excerpt=script_excerpt, scene_captions=captions
+        title=title,
+        script_excerpt=script_excerpt,
+        scene_captions=captions,
+        scene_count=len(kept),
+        kept_seconds=kept_seconds,
     )
 
 

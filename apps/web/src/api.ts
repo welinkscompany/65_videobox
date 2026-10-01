@@ -2335,6 +2335,11 @@ export const api = {
       { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ media_type: mediaType }) },
     ),
   /** 누가 만들었고 써도 되는가를 적는다(AK W1215-4). 남의 것은 허락 내용이 있어야 한다. */
+  setLibraryAssetFavorite: (libraryAssetId: string, favorite: boolean) =>
+    request<{ asset: LibraryAsset }>(
+      `/api/library/assets/${encodeURIComponent(libraryAssetId)}/favorite`,
+      { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ favorite }) },
+    ),
   updateLibraryAssetRights: (libraryAssetId: string, rightsSource: LibraryAssetRights, licenseNote: string | null) =>
     request<{ asset: LibraryAsset }>(
       `/api/library/assets/${encodeURIComponent(libraryAssetId)}/rights`,

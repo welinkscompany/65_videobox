@@ -371,6 +371,35 @@ class LibraryUserAssetStore:
         finally:
             connection.close()
 
+    def set_favorite(self, library_asset_id: str, *, favorite: bool) -> LibraryUserAsset:
+        """자료실 `즐겨찾기` 분류가 읽는 `user_metadata.favorite`를 쓴다 (2026-10-01).
+
+        끄면 키를 지운다 -- `false`를 남겨 두면 "한 번도 안 눌렀다"와 구분이 안 된다.
+        """
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+            if row is None:
+                raise KeyError(library_asset_id)
+            user_metadata = dict(LibraryUserAsset.from_row(dict(row)).user_metadata)
+            if favorite:
+                user_metadata["favorite"] = True
+            else:
+                user_metadata.pop("favorite", None)
+            connection.execute(
+                "UPDATE library_user_assets SET user_json = ?, updated_at = ? WHERE library_asset_id = ?",
+                (_json(user_metadata), _now(), library_asset_id),
+            )
+            updated = connection.execute("SELECT * FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+            connection.commit()
+            assert updated is not None
+            return LibraryUserAsset.from_row(dict(updated))
+        except Exception:
+            connection.rollback(); raise
+        finally:
+            connection.close()
+
     def update_media_type(self, library_asset_id: str, media_type: LibraryMediaType | str) -> LibraryUserAsset:
         """종류를 고친다 (owner 결정 2026-09-07).
 

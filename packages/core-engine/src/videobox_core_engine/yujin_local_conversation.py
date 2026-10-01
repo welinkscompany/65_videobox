@@ -186,6 +186,9 @@ class YujinProjectContext:
     title: str = ""
     script_excerpt: str = ""
     scene_captions: tuple[str, ...] = ()
+    # 편집판에 남아 있는 장면 수와 길이(뺀 장면 제외). 0이면 싣지 않는다.
+    scene_count: int = 0
+    kept_seconds: float = 0.0
 
 
 def _truncate_utf8(value: str, max_bytes: int) -> str:
@@ -207,7 +210,8 @@ def _project_context_section(context: YujinProjectContext | None) -> str:
         for caption in context.scene_captions
         if caption.strip()
     )[:MAX_PROJECT_CONTEXT_CAPTIONS]
-    if not (title or script or captions):
+    has_timeline = context.scene_count > 0
+    if not (title or script or captions or has_timeline):
         return ""
     lines = [
         "\n\n지금 열려 있는 프로젝트 정보다. 추천과 답변은 이 내용을 근거로 쓴다. "
@@ -215,6 +219,9 @@ def _project_context_section(context: YujinProjectContext | None) -> str:
     ]
     if title:
         lines.append(f"- 제목: {title}")
+    if has_timeline:
+        lines.append(f"- 장면 수: {context.scene_count}개")
+        lines.append(f"- 길이: 약 {context.kept_seconds:.1f}초")
     if script:
         lines.append(f"- 대본 일부: {script}")
     if captions:

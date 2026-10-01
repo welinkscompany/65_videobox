@@ -126,6 +126,15 @@ export function LibraryPage({ initialFilter }: { initialFilter?: LibraryFilter }
   useEffect(() => { if (initialFilter) setActiveFilter(initialFilter); }, [initialFilter]);
 
   const visible = useMemo(() => assets.filter((asset) => matchesFilter(asset, activeFilter)), [assets, activeFilter]);
+  async function toggleFavorite(asset: LibraryAsset) {
+    try {
+      const { asset: updated } = await api.setLibraryAssetFavorite(asset.library_asset_id, !asset.user_metadata?.favorite);
+      setAssets((current) => current.map((item) => (item.library_asset_id === updated.library_asset_id ? { ...item, ...updated } : item)));
+      setSelected((current) => (current?.library_asset_id === updated.library_asset_id ? { ...current, ...updated } : current));
+    } catch {
+      setError("즐겨찾기를 바꾸지 못했어요. 다시 눌러 주세요.");
+    }
+  }
   const counts = useMemo(() => ({
     all: assets.filter((item) => item.lifecycle !== "trashed").length,
     broll: assets.filter((item) => item.media_type === "broll" && item.lifecycle !== "trashed").length,
@@ -172,5 +181,5 @@ export function LibraryPage({ initialFilter }: { initialFilter?: LibraryFilter }
   return <main className="vb-library-page" data-testid="library-workspace" data-layout="three-pane">{/* 2026-08-19: 자체 메뉴 줄을 뺐다. 이 화면이 대시보드 껍데기 안으로 들어가면서
     좌측 메뉴가 늘 함께 있고, 여기 것과 **같은 링크 네 개가 두 벌**이 됐다.
     owner가 "좌측 메뉴는 그대로 두라"고 한 뒤의 정리다. */}
-<span data-testid="global-library-page" className="sr-only">자료실</span><LibrarySidebar activeFilter={activeFilter} onFilter={selectFilter} counts={counts} status={assets.some((item) => item.lifecycle === "needs_attention") ? "needs_attention" : "all"} /><section className="vb-library-main"><AssetIngestDropzone onFiles={(files) => void ingest(files)} /><IngestJobTable items={ingestItems} onRetry={(filename) => void retry(filename)} /><LibraryResults assets={visible} activeFilter={activeFilter} search={search} onSearch={setSearch} selectedId={selected?.library_asset_id} onSelect={setSelected} loading={loading} error={error} searchMode={searchMode} /></section><LibraryPreviewPane asset={selected} onChanged={() => void load()} /></main>;
+<span data-testid="global-library-page" className="sr-only">자료실</span><LibrarySidebar activeFilter={activeFilter} onFilter={selectFilter} counts={loading && assets.length === 0 ? undefined : counts} status={assets.some((item) => item.lifecycle === "needs_attention") ? "needs_attention" : "all"} /><section className="vb-library-main"><AssetIngestDropzone onFiles={(files) => void ingest(files)} /><IngestJobTable items={ingestItems} onRetry={(filename) => void retry(filename)} /><LibraryResults assets={visible} activeFilter={activeFilter} search={search} onSearch={setSearch} selectedId={selected?.library_asset_id} onSelect={setSelected} loading={loading} error={error} searchMode={searchMode} onToggleFavorite={(asset) => void toggleFavorite(asset)} /></section><LibraryPreviewPane asset={selected} onChanged={() => void load()} onToggleFavorite={(asset) => void toggleFavorite(asset)} /></main>;
 }

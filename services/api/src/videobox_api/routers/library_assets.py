@@ -25,6 +25,7 @@ from starlette.background import BackgroundTask
 from videobox_api.errors import _http_error
 from videobox_api.models import (
     CorrectLibraryAssetMediaTypeRequest,
+    UpdateLibraryAssetFavoriteRequest,
     UpdateLibraryAssetRightsRequest,
     LibraryIngestPathRequest,
     MaterializeLibraryAssetRequest,
@@ -675,6 +676,17 @@ def build_library_assets_router(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {"asset": public_user(updated)}
+
+    @router.patch("/api/library/assets/{asset_id}/favorite")
+    def update_library_asset_favorite(asset_id: str, payload: UpdateLibraryAssetFavoriteRequest) -> dict[str, Any]:
+        """자료실 `즐겨찾기` 분류에 넣거나 뺀다 (2026-10-01 점검: ☆ 단추가 아무 일도 안 했다).
+
+        기본 소재팩은 이 저장소에 없어 고칠 수 없다 -- 화면은 대표님 자산에만 ☆를 낸다.
+        """
+        asset, builtin = find_asset(asset_id)
+        if builtin is not None:
+            raise HTTPException(status_code=409, detail={"code": "builtin_asset_immutable"})
+        return {"asset": public_user(user_asset_store.set_favorite(asset_id, favorite=payload.favorite))}
 
     @router.post("/api/library/assets/{asset_id}/restore")
     def restore_library_asset(asset_id: str) -> dict[str, Any]:

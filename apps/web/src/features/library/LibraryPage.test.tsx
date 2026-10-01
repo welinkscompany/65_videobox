@@ -32,6 +32,7 @@ beforeEach(() => {
   vi.spyOn(api, "listLibraryAssets").mockResolvedValue({ assets: [asset()], total: 1 });
   vi.spyOn(api, "getLibraryAssetUsage").mockResolvedValue({ library_asset_id: "user_asset_1", locations: [] });
   vi.spyOn(api, "ingestLibraryAssets").mockResolvedValue({ ingest_batch_id: "batch_1", partial: false, items: [] });
+  vi.spyOn(api, "listProjects").mockResolvedValue([]);
 });
 
 /** 분류를 고르는 자리는 왼쪽 목록 하나다(2026-08-23). 목록 단추는 이름 옆에
@@ -209,7 +210,7 @@ describe("LibraryPage", () => {
       fireEvent.drop(dropzone, { dataTransfer: { files } });
     });
     expect(await screen.findByText("song.mp3")).toBeInTheDocument();
-    expect(screen.getByText(/주의가 필요한 항목/)).toBeInTheDocument();
+    expect(screen.getByText(/확인이 필요한 항목/)).toBeInTheDocument();
     expect(api.ingestLibraryAssets).toHaveBeenCalledTimes(2);
     expect(screen.getByText("clip.mp4")).toBeInTheDocument();
   });
@@ -277,6 +278,39 @@ describe("LibraryPage", () => {
     expect(screen.queryByRole("link", { name: "묶음 편집기에서 열기" })).toBeNull();
   });
 
+  // 실측(2026-10-01): 서버는 위치에 `label` 없이 `project_id`만 준다. 그래서 화면이
+  // "프로젝트"를 열한 번 되풀이했고, 어느 프로젝트인지 알 수 없었다.
+  // 실측(2026-10-01): 235개를 받는 데 5초쯤 걸리는 동안 분류마다 "0"이 떠서
+  // 자료실이 빈 것처럼 보였다. 받기 전에는 개수를 비워 둔다.
+  it("leaves category counts blank until the library has loaded", async () => {
+    vi.mocked(api.listLibraryAssets).mockReturnValue(new Promise(() => undefined));
+    render(<LibraryPage />);
+    const all = await screen.findByRole("button", { name: /^전체/ });
+    expect(all.textContent).toBe("전체");
+  });
+
+  it("names each using project once, by its project name", async () => {
+    vi.mocked(api.listProjects).mockResolvedValue([
+      { project_id: "p1", name: "셀러 교육 첫 영상" } as never,
+    ]);
+    vi.mocked(api.getLibraryAssetUsage).mockResolvedValue({
+      library_asset_id: "user_asset_1",
+      locations: [
+        { project_id: "p1", location: { project_id: "p1" } },
+        { project_id: "p1", location: { project_id: "p1" } },
+        { project_id: "gone", location: { project_id: "gone" } },
+      ],
+    });
+    render(<LibraryPage />);
+    await screen.findAllByText("walk.mp4");
+    fireEvent.click(screen.getByTestId("library-asset-card"));
+
+    const links = await screen.findAllByRole("link", { name: "셀러 교육 첫 영상 편집기에서 열기" });
+    expect(links).toHaveLength(1);
+    expect(screen.getByText("지운 프로젝트")).toBeInTheDocument();
+    expect(screen.queryByText(/^프로젝트$/)).toBeNull();
+  });
+
   it("previews an asset and blocks trash when the usage endpoint reports a location", async () => {
     vi.mocked(api.getLibraryAssetUsage).mockResolvedValue({
       library_asset_id: "user_asset_1",
@@ -315,7 +349,7 @@ describe("LibraryPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "walk.mp4 영구 삭제" }));
 
     expect(permanentDelete).not.toHaveBeenCalled();
-    const confirmButton = await screen.findByRole("button", { name: /영구 삭제 · 한 번 더 확인할게요/ });
+    const confirmButton = await screen.findByRole("button", { name: /영구 삭제 확정/ });
     fireEvent.click(confirmButton);
     await waitFor(() => expect(permanentDelete).toHaveBeenCalledWith("user_asset_1"));
   });

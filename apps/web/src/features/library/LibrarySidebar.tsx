@@ -39,13 +39,13 @@ export function LibrarySidebar({ activeFilter, onFilter, counts, status }: {
   status?: LibraryAssetLifecycle | "all";
 }) {
   return <aside className="vb-library-sidebar" data-testid="library-sidebar" aria-label="자료실 필터">
-    <div className="vb-library-sidebar__heading"><h1>자료실</h1><p className="vb-eyebrow">여러 프로젝트가 함께 쓰는 자료실</p></div>
+    <div className="vb-library-sidebar__heading"><h1>자료실</h1><p className="vb-eyebrow">모든 프로젝트 공용</p></div>
     <nav aria-label="미디어 분류"><ul className="vb-library-filter-list">{filters.map((item) => (
       <li key={item.key}><button data-native-control="library-filter" type="button" className={activeFilter === item.key ? "is-active" : ""} aria-pressed={activeFilter === item.key} onClick={() => onFilter(item.key)}>{item.label}<span>{counts?.[item.key] ?? ""}</span></button></li>
     ))}</ul></nav>
     <div className="vb-library-sidebar__status" aria-label="분석 상태">
       <p>분석 상태</p>
-      <span className={status === "needs_attention" ? "is-warning" : ""}>{status === "needs_attention" ? "확인 필요" : "전체 상태"}</span>
+      <span className={status === "needs_attention" ? "is-warning" : ""}>{status === "needs_attention" ? "확인 필요" : "이상 없음"}</span>
     </div>
   </aside>;
 }

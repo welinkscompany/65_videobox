@@ -313,3 +313,21 @@ def test_project_context_is_bounded_before_it_reaches_the_prompt():
     assert "가" * 2_000 not in prompt
     assert "장면 0 끝" in prompt
     assert "장면 99 끝" not in prompt
+
+
+def test_project_context_carries_scene_count_and_length():
+    """실측(2026-10-01): 편집 화면에서 "지금 영상 길이랑 장면 수 알려줘"라고 물으니
+    유진이 "확인되지 않아요, 알려주시면"이라고 되물었다. 자기가 열어 놓은 편집판의
+    장면 수와 길이는 대화에 실려 있어야 한다."""
+    runtime = _RecordingRuntime()
+    service = YujinLocalConversationService(runtime=runtime)
+
+    service.reply(
+        project_id="proj-1",
+        user_text="지금 영상 길이랑 장면 수 알려줘",
+        project_context=YujinProjectContext(scene_count=2, kept_seconds=5.0),
+    )
+
+    prompt = runtime.calls[0]["prompt"]
+    assert "장면 수: 2개" in prompt
+    assert "길이: 약 5.0초" in prompt
