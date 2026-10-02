@@ -49,3 +49,13 @@
 7. 기본 소재팩 자산은 ☆가 없다(저장소가 달라 바꿀 수 없다).
 8. 테스트로만 쓰이는 라우트 약 20개, 화면에서 안 부르는 api.ts 메서드 3개(`listDirectorMessages`,
    `prepareDirectorMessage`, `getDirectorProposal`), 남은 worktree `.claude/worktrees/hopeful-pasteur-64b08e`.
+
+## 후속 (2026-10-02)
+
+- owner 인터뷰 결과는 `docs/decisions/2026-10-02-audit-follow-up-decisions.ko.md`.
+  유진 기능 전부 열기, 다리 공유 토큰, vite·vitest 패치, 이름 바꾸기 + 24개 복구, 화면 개선 다섯 묶음.
+- 진행 방식은 **계획서부터**: `docs/superpowers/2026-10-02-audit-follow-up-plan.ko.md`(묶음 A~G).
+  **owner 확인 전 착수 금지.** 위 "남은 것" 1~4는 이 계획이 받는다.
+- 푸시: CLAUDE.md §1.1에 owner 상시 승인을 적었다. 단, 이 세션의 푸시는 Claude Code 권한 검사에서
+  막혀 커밋 5개(`da2b66ff2`~)가 로컬에만 있다 — owner가 직접 `git push origin main` 하거나
+  권한 규칙 `Bash(git push origin main)`을 허용해야 한다.
