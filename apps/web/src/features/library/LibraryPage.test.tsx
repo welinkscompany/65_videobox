@@ -696,6 +696,32 @@ describe("자료실의 `음악·효과음` 갈래", () => {
     expect(screen.getByRole("heading", { level: 2, name: "walk.mp4" })).toBeInTheDocument();
   });
 
+  it.each([
+    [".."],
+    ["."],
+    ["a\tb.mp4"],
+    ["가".repeat(256)],
+  ])("refuses a name the server would also refuse: %j", async (bad) => {
+    const rename = vi.spyOn(api, "renameLibraryAsset");
+    render(<LibraryPage />);
+    await screen.findAllByText("walk.mp4");
+
+    fireEvent.click(screen.getByRole("button", { name: "walk.mp4 이름 바꾸기" }));
+    fireEvent.change(screen.getByLabelText("새 이름"), { target: { value: bad } });
+    expect(screen.getByRole("button", { name: "이름 저장" })).toBeDisabled();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByLabelText("새 이름"), { key: "Enter" });
+    expect(rename).not.toHaveBeenCalled();
+  });
+
+  it("accepts a 255-character name", async () => {
+    render(<LibraryPage />);
+    await screen.findAllByText("walk.mp4");
+    fireEvent.click(screen.getByRole("button", { name: "walk.mp4 이름 바꾸기" }));
+    fireEvent.change(screen.getByLabelText("새 이름"), { target: { value: "가".repeat(255) } });
+    expect(screen.getByRole("button", { name: "이름 저장" })).toBeEnabled();
+  });
+
   it("offers no rename for a built-in starter asset", async () => {
     vi.mocked(api.listLibraryAssets).mockResolvedValue({ assets: [asset({ origin: "builtin" })], total: 1 });
     render(<LibraryPage />);
