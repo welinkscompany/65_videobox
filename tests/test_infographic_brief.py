@@ -125,11 +125,53 @@ def test_the_arithmetic_left_in_a_comment_is_not_a_made_up_number() -> None:
 
 
 def test_numbers_inside_a_script_are_not_made_up_numbers() -> None:
-    """`<script>` 안의 숫자는 사람이 읽는 자리가 아니다. 세면 애니메이션 하나에
-    그림 전체가 거절된다."""
+    """`<script>` 안의 숫자는 사람이 읽는 자리가 아니다. 그래서 숫자로 걸리지는 않는다.
+    다만 2026-10-02부터 스크립트 자체가 거절된다(아래 시험). 둘은 다른 문제로 보고된다."""
 
     html = _page("<p>94.6%</p><script>var frames=[0,17,42,60];</script>")
-    assert check_infographic_html(html, FACTS) == ()
+    problems = check_infographic_html(html, FACTS)
+    assert not any("준 적 없는 숫자" in problem for problem in problems)
+    assert any("실행 코드" in problem for problem in problems)
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        "<script>alert(1)</script>",
+        "<SCRIPT src='x.js'></SCRIPT>",
+        "< script>fetch('/x')</script>",
+        "<img src='a.png' onerror='alert(1)'>",
+        "<div ONLOAD = \"x()\">94.6%</div>",
+        "<body onload=go()>",
+        "<a href=\"JavaScript:alert(1)\">94.6%</a>",
+        "<svg><a href='javascript :x'>3.4</a></svg>",
+    ],
+)
+def test_code_that_would_run_in_the_browser_is_refused(fragment: str) -> None:
+    """그림은 이 컴퓨터의 크롬이 그린다(2026-10-01 보안 점검 M3 부속). 움직이지 않는
+    한 장이라 실행 코드는 쓸 데가 없다. 측정용 스크립트는 우리가 검사 **뒤에** 붙인다."""
+
+    problems = check_infographic_html(_page(f"<p>94.6%</p>{fragment}"), FACTS)
+    assert any("실행 코드" in problem for problem in problems), problems
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        "<!-- 계산: onload=없음, <script> 안 씀, 360*0.946=340.56 -->",
+        "<p style='font-family:sans-serif'>온라인 수수료 3.4%</p>",
+        "<p>one = 1이 아니다, 94.6%</p>",
+        "<div class='donut' data-on='true'>94.6%</div>",
+    ],
+)
+def test_ordinary_html_is_not_mistaken_for_code(fragment: str) -> None:
+    problems = check_infographic_html(_page(fragment), FACTS)
+    assert not any("실행 코드" in problem for problem in problems), problems
+
+
+def test_the_brief_tells_the_writer_not_to_use_code() -> None:
+    prompt = build_infographic_prompt(topic="수수료 구조", facts=FACTS, style="editorial")
+    assert "<script>" in prompt and "onload" in prompt
 
 
 def test_a_web_font_is_refused() -> None:

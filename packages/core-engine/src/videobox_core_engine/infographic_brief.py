@@ -203,6 +203,8 @@ def build_infographic_prompt(
 10. 큰 숫자는 **자기 자리를 다 차지하게** 둔다. 원형 그래프 한가운데에 얹을 거면
    그 안에 들어갈 크기로 줄여라. 삐져나오면 그래프가 숫자를 덮는다.
 11. 한국어로 쓴다.
+12. **실행 코드를 넣지 마라.** `<script>`, `onload=` 같은 `on...=` 속성, `javascript:` 주소가
+   하나라도 있으면 거절한다. 움직이지 않는 그림 한 장이다.
 
 # 내는 것
 `<!DOCTYPE html>`로 시작해 `</html>`로 끝나는 파일 하나. 설명하지 마라. 코드만 낸다."""
@@ -213,6 +215,15 @@ def build_infographic_prompt(
 _DOCUMENT = re.compile(r"<!DOCTYPE html.*?</html>", re.IGNORECASE | re.DOTALL)
 _EXTERNAL = re.compile(r"""(?:src|href)\s*=\s*["']?\s*(?:https?:)?//""", re.IGNORECASE)
 _CSS_IMPORT = re.compile(r"@import\b", re.IGNORECASE)
+#: 그림은 **움직이지 않는 한 장**이고, 이 컴퓨터의 크롬이 그린다. 실행 코드는 쓸 데가
+#: 없다(2026-10-01 보안 점검 M3 부속, 2026-10-02 고침). 측정용 스크립트
+#: (`infographic_layout_audit`)는 이 검사를 통과한 **뒤에** 우리가 붙인다. 그래서 CSP로
+#: 막지 않고 여기서 거절한다. CSP는 그 측정까지 막는다.
+_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+_SCRIPT_TAG = re.compile(r"<\s*script\b", re.IGNORECASE)
+#: `<svg/onload=...>`처럼 공백 대신 `/`로 속성을 붙이는 우회도 잡는다.
+_EVENT_HANDLER = re.compile(r"<[^>]*[\s/]on[a-z]+\s*=", re.IGNORECASE | re.DOTALL)
+_JAVASCRIPT_URL = re.compile(r"javascript\s*:", re.IGNORECASE)
 _FONT_SIZE = re.compile(r"font-size\s*:\s*([0-9]*\.?[0-9]+)\s*px", re.IGNORECASE)
 #: 사람이 안 읽는 자리. `<style>`·`<script>`는 물론 **주석**도 뺀다 -- 브리핑이
 #: 계산 과정을 주석으로 남기라고 시키므로, 안 빼면 그 계산이 전부 "지어낸 숫자"로 걸린다.
@@ -281,6 +292,10 @@ def check_infographic_html(html: str, facts: Sequence[InfographicFact]) -> tuple
         problems.append("문서가 <!DOCTYPE html> ... </html> 모양이 아니다")
     if _EXTERNAL.search(html) or _CSS_IMPORT.search(html):
         problems.append("바깥 주소를 부른다 — 인터넷 없이 그려야 한다")
+    # 주석은 실행되지 않는다. 브리핑이 계산을 주석에 남기라고 시키므로 주석 안은 보지 않는다.
+    code_view = _COMMENT.sub(" ", html)
+    if _SCRIPT_TAG.search(code_view) or _EVENT_HANDLER.search(code_view) or _JAVASCRIPT_URL.search(code_view):
+        problems.append("실행 코드가 들어 있다 — <script>·on...= 속성·javascript: 주소는 쓰지 않는다")
     for raw in _FONT_SIZE.findall(html):
         if float(raw) < MINIMUM_FONT_PX:
             problems.append(f"글씨가 너무 작다: {raw}px (가장 작은 값 {MINIMUM_FONT_PX}px)")
