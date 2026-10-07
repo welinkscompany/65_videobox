@@ -23,6 +23,9 @@ worktree의 `.venv`가 아니다(거기엔 torch가 없다).
 127.0.0.1에만 묶는다. 컨테이너는 `host.docker.internal`로 이 컴퓨터에 닿고,
 그건 도커가 놓아 주는 같은 경로다. 바깥에서는 못 부른다.
 
+요청은 `scripts/host_bridge_guard.py`가 먼저 본다(2026-10-02): Host 검사, 공유 토큰
+(`X-VideoBox-Bridge-Token`), JSON만. `/health`만 토큰 없이 열려 있다.
+
 ## 엔진은 갈아 끼울 수 있다
 
 `VIDEOBOX_HOST_TTS_ENGINE`으로 고른다. **라이선스가 다르므로**(XTTS는 비상업용,
@@ -75,6 +78,10 @@ for src_path in (
     REPO_ROOT / "packages" / "core-engine" / "src",
 ):
     sys.path.insert(0, str(src_path))
+
+# 다리 셋이 같이 쓰는 문지기. 표준 라이브러리만 쓰므로 목소리 전용 파이썬에서도 뜬다.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from host_bridge_guard import BridgeTokenMissing, check_request, load_bridge_token  # noqa: E402
 
 HOST = "127.0.0.1"
 PORT = 8199
@@ -138,6 +145,8 @@ def _build_provider(choice: EngineChoice):
 class _Handler(BaseHTTPRequestHandler):
     provider = None
     engine_choice: EngineChoice | None = None
+    #: `main()`이 `.env.container`에서 읽어 채운다. 비어 있으면 문지기가 503으로 막는다.
+    bridge_token: str = ""
     #: 목소리 모델은 **여러 갈래로 동시에 못 쓴다.** 요청은 각자 다른 실에서
     #: 오는데 모델은 하나뿐이라, 두 요청이 겹치면 소리가 섞이거나 죽는다
     #: (코드리뷰 2026-09-02). 읽는 일(`/health`)은 이 자물쇠를 안 지난다.
@@ -153,7 +162,25 @@ class _Handler(BaseHTTPRequestHandler):
     def _fail(self, code: int, message: str) -> None:
         self._send(code, json.dumps({"detail": message}).encode("utf-8"), "application/json")
 
+    def _refused(self, *, require_token: bool) -> bool:
+        """문지기(`host_bridge_guard`)가 막으면 답을 보내고 `True`를 돌려준다."""
+        refusal = check_request(
+            method=self.command,
+            headers=self.headers,
+            port=self.server.server_address[1],
+            expected_token=self.bridge_token,
+            require_token=require_token,
+        )
+        if refusal is None:
+            return False
+        code, payload = refusal
+        self._fail(code, str(payload["error"]))
+        return True
+
     def do_GET(self) -> None:  # noqa: N802
+        # `/health`만 연다. `Start-VideoBox.ps1`이 토큰 없이 켜졌는지 묻는다(Host는 본다).
+        if self._refused(require_token=False):
+            return
         if self.path != "/health":
             self._fail(404, "not found")
             return
@@ -164,6 +191,9 @@ class _Handler(BaseHTTPRequestHandler):
         )
 
     def do_POST(self) -> None:  # noqa: N802
+        # 본문을 읽기 **전에** 막는다. 목소리 샘플이 실린 요청이다.
+        if self._refused(require_token=True):
+            return
         if self.path != "/synthesize":
             self._fail(404, "not found")
             return
@@ -222,6 +252,12 @@ class _Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     choice = resolve_engine(os.environ)
+    try:
+        _Handler.bridge_token = load_bridge_token(os.environ, REPO_ROOT / ".env.container")
+    except BridgeTokenMissing as exc:
+        # 모델(2GB)을 올리기 전에 멈춘다. 토큰 없이 뜬 다리는 아무나 받는다.
+        print(f"[voice-bridge] {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
     _Handler.provider = _build_provider(choice)
     _Handler.engine_choice = choice
     print(f"[voice-bridge] 엔진: {choice.engine} · 라이선스: {choice.licence}")

@@ -50,6 +50,10 @@ from videobox_core_engine.capcut_handoff import (  # noqa: E402
     CapCutHandoffService,
 )
 
+# 다리 셋이 같이 쓰는 문지기(`scripts/host_bridge_guard.py`).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from host_bridge_guard import BridgeTokenMissing, check_request, load_bridge_token  # noqa: E402
+
 DEFAULT_PORT = 8200
 #: 이 컴퓨터 밖으로는 열지 않는다.
 BIND_HOST = "127.0.0.1"
@@ -142,6 +146,7 @@ def cleanup_payload(body: dict[str, object]) -> tuple[int, dict[str, object]]:
 class _Handler(BaseHTTPRequestHandler):
     server_version = "VideoBoxCapCutBridge/1.0"
     allowed_roots: tuple[Path, ...] = ()
+    bridge_token: str = ""
 
     def log_message(self, format: str, *args: object) -> None:  # noqa: A002
         sys.stderr.write("[capcut-bridge] " + (format % args) + "\n")
@@ -161,13 +166,31 @@ class _Handler(BaseHTTPRequestHandler):
         decoded = json.loads(self.rfile.read(length).decode("utf-8"))
         return decoded if isinstance(decoded, dict) else {}
 
+    def _refused(self) -> bool:
+        """문지기가 막으면 답을 보내고 `True`를 돌려준다. 캡컷 다리는 읽기(`/diagnostics`)도
+        토큰을 요구한다. 이 컴퓨터의 경로를 돌려주고, 부르는 쪽은 컨테이너뿐이다."""
+        refusal = check_request(
+            method=self.command,
+            headers=self.headers,
+            port=self.server.server_address[1],
+            expected_token=self.bridge_token,
+        )
+        if refusal is None:
+            return False
+        self._reply(*refusal)
+        return True
+
     def do_GET(self) -> None:  # noqa: N802
+        if self._refused():
+            return
         if self.path != "/diagnostics":
             self._reply(404, {"error": "unknown_path"})
             return
         self._reply(*diagnostics_payload())
 
     def do_POST(self) -> None:  # noqa: N802
+        if self._refused():
+            return
         try:
             payload = self._payload()
         except (ValueError, OSError):
@@ -181,8 +204,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._reply(404, {"error": "unknown_path"})
 
 
-def build_server(*, port: int, allowed_roots: tuple[Path, ...]) -> ThreadingHTTPServer:
-    handler = type("_BoundHandler", (_Handler,), {"allowed_roots": allowed_roots})
+def build_server(*, port: int, allowed_roots: tuple[Path, ...], bridge_token: str) -> ThreadingHTTPServer:
+    handler = type("_BoundHandler", (_Handler,), {"allowed_roots": allowed_roots, "bridge_token": bridge_token})
     return ThreadingHTTPServer((BIND_HOST, port), handler)
 
 
@@ -197,7 +220,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     arguments = parser.parse_args(argv)
     roots = tuple(Path(value) for value in arguments.allow_root if str(value).strip())
-    server = build_server(port=arguments.port, allowed_roots=roots)
+    try:
+        token = load_bridge_token(os.environ, _REPOSITORY_ROOT / ".env.container")
+    except BridgeTokenMissing as exc:
+        print(f"[capcut-bridge] {exc}", file=sys.stderr, flush=True)
+        return 2
+    server = build_server(port=arguments.port, allowed_roots=roots, bridge_token=token)
     diagnostics = _service().diagnose()
     print(f"[capcut-bridge] listening on http://{BIND_HOST}:{arguments.port}", flush=True)
     print(f"[capcut-bridge] capcut status: {diagnostics.status}", flush=True)

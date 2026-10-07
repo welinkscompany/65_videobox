@@ -30,6 +30,11 @@ PNG 한 장은 크지 않아서 base64로 실어 보내면 그만이다. 그래�
 **이 컴퓨터에 아무것도 남기지 않는다.** 임시 폴더에 그리고, 읽고, 지운다.
 받아 줄 폴더도 경로 대응표도 필요 없다. 목소리 다리(8199)와 같은 방식이다.
 
+## 아무나 못 부른다 (2026-10-02)
+
+요청은 `scripts/host_bridge_guard.py`가 먼저 본다. Host 검사, 공유 토큰
+(`X-VideoBox-Bridge-Token`), JSON만 받는다. 읽기(`/diagnostics`)도 토큰이 필요하다.
+
 ## HTML은 인터넷에 못 나간다
 
 크롬에 `--disable-network`는 없다. 대신 프로필을 빈 임시 폴더로 격리하고 이름
@@ -50,6 +55,12 @@ import sys
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+# 다리 셋이 같이 쓰는 문지기(`scripts/host_bridge_guard.py`).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from host_bridge_guard import BridgeTokenMissing, check_request, load_bridge_token  # noqa: E402
+
+_REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 
 DEFAULT_PORT = 8201
 #: 이 컴퓨터 밖으로는 열지 않는다.
@@ -271,6 +282,7 @@ def measure_request_payload(
 class _Handler(BaseHTTPRequestHandler):
     server_version = "VideoBoxInfographicBridge/1.0"
     browser: Path | None = None
+    bridge_token: str = ""
 
     def log_message(self, format: str, *args: object) -> None:  # noqa: A002
         sys.stderr.write("[infographic-bridge] " + (format % args) + "\n")
@@ -290,13 +302,31 @@ class _Handler(BaseHTTPRequestHandler):
         decoded = json.loads(self.rfile.read(length).decode("utf-8"))
         return decoded if isinstance(decoded, dict) else {}
 
+    def _refused(self) -> bool:
+        """문지기가 막으면 답을 보내고 `True`를 돌려준다. 읽기(`/diagnostics`)도 토큰을 요구한다.
+        부르는 쪽은 컨테이너뿐이다(`infographic_host_bridge.py`)."""
+        refusal = check_request(
+            method=self.command,
+            headers=self.headers,
+            port=self.server.server_address[1],
+            expected_token=self.bridge_token,
+        )
+        if refusal is None:
+            return False
+        self._reply(*refusal)
+        return True
+
     def do_GET(self) -> None:  # noqa: N802
+        if self._refused():
+            return
         if self.path != "/diagnostics":
             self._reply(404, {"error": "unknown_path"})
             return
         self._reply(*diagnostics_payload(browser=self.browser))
 
     def do_POST(self) -> None:  # noqa: N802
+        if self._refused():
+            return
         if self.path not in ("/render", "/measure"):
             self._reply(404, {"error": "unknown_path"})
             return
@@ -311,8 +341,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._reply(*measure_request_payload(payload, browser=self.browser))
 
 
-def build_server(*, port: int, browser: Path | None) -> ThreadingHTTPServer:
-    handler = type("_BoundHandler", (_Handler,), {"browser": browser})
+def build_server(*, port: int, browser: Path | None, bridge_token: str) -> ThreadingHTTPServer:
+    handler = type("_BoundHandler", (_Handler,), {"browser": browser, "bridge_token": bridge_token})
     return ThreadingHTTPServer((BIND_HOST, port), handler)
 
 
@@ -326,7 +356,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--browser", default=None, help="크롬/엣지 실행 파일 경로.")
     arguments = parser.parse_args(argv)
     browser = find_browser(arguments.browser)
-    server = build_server(port=arguments.port, browser=browser)
+    try:
+        token = load_bridge_token(os.environ, _REPOSITORY_ROOT / ".env.container")
+    except BridgeTokenMissing as exc:
+        print(f"[infographic-bridge] {exc}", file=sys.stderr, flush=True)
+        return 2
+    server = build_server(port=arguments.port, browser=browser, bridge_token=token)
     print(f"[infographic-bridge] listening on http://{BIND_HOST}:{arguments.port}", flush=True)
     print(f"[infographic-bridge] browser: {browser or '(못 찾음)'}", flush=True)
     try:
