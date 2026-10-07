@@ -145,6 +145,18 @@ def test_numbers_inside_a_script_are_not_made_up_numbers() -> None:
         "<body onload=go()>",
         "<a href=\"JavaScript:alert(1)\">94.6%</a>",
         "<svg><a href='javascript :x'>3.4</a></svg>",
+        "<svg/onload=alert(1)>",
+        "<img alt=\">\" onerror=alert(1) src=x>",
+        "<div title=\"a>b\" onclick=alert(1)>94.6%</div>",
+        "<!--><script>alert(1)</script><!-- -->",
+        "<!--!><script>alert(1)</script><!-- -->",
+        "<!---><script>alert(1)</script><!-- -->",
+        "<!-- 닫히지 않은 주석 <script>alert(1)</script>",
+        "<a href=\"java&#9;script:alert(1)\">94.6%</a>",
+        "<a href=\"java	script:alert(1)\">94.6%</a>",
+        "<a href=\"&#106;avascript:alert(1)\">94.6%</a>",
+        "<a xlink:href=\" javascript:alert(1)\">94.6%</a>",
+        "<form action=\"javascript:alert(1)\"><button>x</button></form>",
     ],
 )
 def test_code_that_would_run_in_the_browser_is_refused(fragment: str) -> None:
@@ -162,6 +174,8 @@ def test_code_that_would_run_in_the_browser_is_refused(fragment: str) -> None:
         "<p style='font-family:sans-serif'>온라인 수수료 3.4%</p>",
         "<p>one = 1이 아니다, 94.6%</p>",
         "<div class='donut' data-on='true'>94.6%</div>",
+        "<!-- 몫 94.6 > 수수료 5.4, onload=없음 --><p>94.6%</p>",
+        "<p title='a>b'>94.6%</p>",
     ],
 )
 def test_ordinary_html_is_not_mistaken_for_code(fragment: str) -> None:

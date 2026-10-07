@@ -30,8 +30,10 @@
 
 from __future__ import annotations
 
+import html as html_lib
 import re
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from typing import Sequence
 
 #: 영상 한 장면에 그대로 얹히는 크기. 세로 영상은 아직 안 다룬다 --
@@ -221,9 +223,51 @@ _CSS_IMPORT = re.compile(r"@import\b", re.IGNORECASE)
 #: 막지 않고 여기서 거절한다. CSP는 그 측정까지 막는다.
 _COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _SCRIPT_TAG = re.compile(r"<\s*script\b", re.IGNORECASE)
-#: `<svg/onload=...>`처럼 공백 대신 `/`로 속성을 붙이는 우회도 잡는다.
-_EVENT_HANDLER = re.compile(r"<[^>]*[\s/]on[a-z]+\s*=", re.IGNORECASE | re.DOTALL)
-_JAVASCRIPT_URL = re.compile(r"javascript\s*:", re.IGNORECASE)
+#: 브라우저는 `<!-->`·`<!--!>`·`<!--->`를 비어 있는 주석으로 **즉시 닫는다**. 정규식 주석
+#: 지우개는 이걸 모르고 뒤의 `-->`까지 통째로 주석으로 본다(그 사이의 `<script>`가 숨는다).
+_EARLY_CLOSED_COMMENT = re.compile(r"<!--!?-?>")
+_URL_NOISE = re.compile(r"[\x00-\x20\x7f-\x9f]+")
+
+
+class _ExecutableCodeFinder(HTMLParser):
+    """태그를 **파서로** 읽는다. 정규식 `<[^>]*`는 `alt=">"`처럼 따옴표 안의 `>`에서
+    태그가 끝났다고 오해해 뒤의 `onerror=`를 놓친다."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.found = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "script":
+            self.found = True
+        for name, value in attrs:
+            if re.fullmatch(r"on[a-z]+", name) or name == "srcdoc":
+                self.found = True
+            # 브라우저는 주소에서 탭·줄바꿈을 지우고, 글자 참조(`&#106;`)를 푼다.
+            if value and _URL_NOISE.sub("", html_lib.unescape(value)).lower().startswith(
+                ("javascript:", "vbscript:")
+            ):
+                self.found = True
+
+    handle_startendtag = handle_starttag
+
+
+def _contains_executable_code(html: str) -> bool:
+    if _EARLY_CLOSED_COMMENT.search(html):
+        return True
+    # 주석은 실행되지 않는다. 브리핑이 계산을 주석에 남기라고 시키므로 주석 안은 보지 않는다.
+    code_view = _COMMENT.sub(" ", html)
+    if "<!--" in code_view:  # 닫히지 않은 주석: 뒤가 전부 주석인지 브라우저와 판단이 갈린다.
+        return True
+    if _SCRIPT_TAG.search(code_view):
+        return True
+    finder = _ExecutableCodeFinder()
+    try:
+        finder.feed(code_view)
+        finder.close()
+    except Exception:  # 읽지 못하면 안전하다고 말할 수 없다.
+        return True
+    return finder.found
 _FONT_SIZE = re.compile(r"font-size\s*:\s*([0-9]*\.?[0-9]+)\s*px", re.IGNORECASE)
 #: 사람이 안 읽는 자리. `<style>`·`<script>`는 물론 **주석**도 뺀다 -- 브리핑이
 #: 계산 과정을 주석으로 남기라고 시키므로, 안 빼면 그 계산이 전부 "지어낸 숫자"로 걸린다.
@@ -292,9 +336,7 @@ def check_infographic_html(html: str, facts: Sequence[InfographicFact]) -> tuple
         problems.append("문서가 <!DOCTYPE html> ... </html> 모양이 아니다")
     if _EXTERNAL.search(html) or _CSS_IMPORT.search(html):
         problems.append("바깥 주소를 부른다 — 인터넷 없이 그려야 한다")
-    # 주석은 실행되지 않는다. 브리핑이 계산을 주석에 남기라고 시키므로 주석 안은 보지 않는다.
-    code_view = _COMMENT.sub(" ", html)
-    if _SCRIPT_TAG.search(code_view) or _EVENT_HANDLER.search(code_view) or _JAVASCRIPT_URL.search(code_view):
+    if _contains_executable_code(html):
         problems.append("실행 코드가 들어 있다 — <script>·on...= 속성·javascript: 주소는 쓰지 않는다")
     for raw in _FONT_SIZE.findall(html):
         if float(raw) < MINIMUM_FONT_PX:
