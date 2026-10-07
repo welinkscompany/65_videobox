@@ -1094,17 +1094,26 @@ if ($Mode -ceq "Start") {
         $bridgeEnvBytes = [IO.File]::ReadAllBytes($bridgeEnvPath)
         $bridgeEnvHasBom = $bridgeEnvBytes.Length -ge 3 -and $bridgeEnvBytes[0] -eq 0xEF -and $bridgeEnvBytes[1] -eq 0xBB -and $bridgeEnvBytes[2] -eq 0xBF
         $bridgeEnvOffset = if ($bridgeEnvHasBom) { 3 } else { 0 }
-        $bridgeEnvText = (New-Object System.Text.UTF8Encoding($false)).GetString($bridgeEnvBytes, $bridgeEnvOffset, $bridgeEnvBytes.Length - $bridgeEnvOffset)
+        $bridgeEnvText = (New-Object System.Text.UTF8Encoding($false, $true)).GetString($bridgeEnvBytes, $bridgeEnvOffset, $bridgeEnvBytes.Length - $bridgeEnvOffset)
         if ($bridgeEnvText -notmatch '(?m)^[ \t]*VIDEOBOX_BRIDGE_TOKEN[ \t]*=[ \t]*[A-Za-z0-9_\-]{32,}[ \t]*\r?$') {
             $bridgeTokenBytes = New-Object byte[] 32
             $bridgeRandom = [System.Security.Cryptography.RandomNumberGenerator]::Create()
             try { $bridgeRandom.GetBytes($bridgeTokenBytes) } finally { $bridgeRandom.Dispose() }
             $bridgeTokenValue = [Convert]::ToBase64String($bridgeTokenBytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
             $bridgeNewline = if ($bridgeEnvText.Contains("`r`n")) { "`r`n" } else { "`n" }
-            $bridgeWithout = [regex]::Replace($bridgeEnvText, '(?m)^[ \t]*VIDEOBOX_BRIDGE_TOKEN[ \t]*=[^\n]*(\n|$)', '')
+            $bridgeWithout = [regex]::Replace($bridgeEnvText, '(?mi)^[ \t]*VIDEOBOX_BRIDGE_TOKEN[ \t]*=[^\n]*(\n|$)', '')
             if ($bridgeWithout.Length -gt 0 -and -not $bridgeWithout.EndsWith("`n")) { $bridgeWithout += $bridgeNewline }
             $bridgeUpdated = $bridgeWithout + "VIDEOBOX_BRIDGE_TOKEN=" + $bridgeTokenValue + $bridgeNewline
-            [IO.File]::WriteAllText($bridgeEnvPath, $bridgeUpdated, (New-Object System.Text.UTF8Encoding($bridgeEnvHasBom)))
+            # 임시 파일에 다 쓴 뒤 바꿔치기한다. 쓰다 죽어도 .env.container는 온전하다.
+            $bridgeTempPath = $bridgeEnvPath + ".tmp-" + [Guid]::NewGuid().ToString("N")
+            $bridgeBackupPath = $bridgeTempPath + ".bak"
+            try {
+                [IO.File]::WriteAllText($bridgeTempPath, $bridgeUpdated, (New-Object System.Text.UTF8Encoding($bridgeEnvHasBom)))
+                [IO.File]::Replace($bridgeTempPath, $bridgeEnvPath, $bridgeBackupPath)
+                Remove-Item -LiteralPath $bridgeBackupPath -Force -ErrorAction SilentlyContinue
+            } finally {
+                if (Test-Path -LiteralPath $bridgeTempPath) { Remove-Item -LiteralPath $bridgeTempPath -Force -ErrorAction SilentlyContinue }
+            }
             Remove-Variable -Name bridgeTokenValue, bridgeUpdated -ErrorAction SilentlyContinue
         }
     }

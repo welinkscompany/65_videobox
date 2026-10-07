@@ -2166,3 +2166,29 @@ def test_start_whatif_leaves_the_env_file_alone(tmp_path: Path) -> None:
     result = _run(fixture, mode="Start", extra=["-WhatIf"])
     assert result.returncode == 0, _why_it_failed(result)
     assert fixture["env_file"].read_bytes() == before
+
+
+def test_start_refuses_a_non_utf8_env_file_and_leaves_it_byte_identical(tmp_path: Path) -> None:
+    fixture = _fixture_repository(tmp_path)
+    bad = fixture["env_file"].read_bytes() + b"\r\nKOREAN_NOTE=" + "한글".encode("cp949") + b"\r\n"
+    fixture["env_file"].write_bytes(bad)
+    with _health_server() as video_uri:
+        result = _run(fixture, mode="Start", video_uri=video_uri)
+    assert result.returncode != 0
+    assert fixture["env_file"].read_bytes() == bad
+    assert b"VIDEOBOX_BRIDGE_TOKEN" not in fixture["env_file"].read_bytes()
+    assert not list(fixture["env_file"].parent.glob(fixture["env_file"].name + ".tmp-*"))
+
+
+def test_start_handles_lf_only_no_trailing_newline_and_lowercase_empty_line(tmp_path: Path) -> None:
+    fixture = _fixture_repository(tmp_path)
+    original = fixture["env_file"].read_text(encoding="utf-8").replace("\r\n", "\n").rstrip("\n")
+    fixture["env_file"].write_bytes((original + "\nvideobox_bridge_token=").encode("utf-8"))
+    with _health_server() as video_uri:
+        result = _run(fixture, mode="Start", video_uri=video_uri)
+    assert result.returncode == 0, _why_it_failed(result)
+    raw = fixture["env_file"].read_bytes()
+    assert not raw.startswith(codecs.BOM_UTF8) and b"\r" not in raw
+    text = raw.decode("utf-8")
+    assert len(re.findall(r"(?mi)^VIDEOBOX_BRIDGE_TOKEN=", text)) == 1
+    assert len(_BRIDGE_TOKEN_LINE.findall(text)) == 1
