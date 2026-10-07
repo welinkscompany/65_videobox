@@ -99,6 +99,8 @@ class KeywordBrollRecommender(RecommendationProvider):
                     " ".join(
                         [str(metadata.get("title", ""))]
                         + [str(tag) for tag in metadata.get("tags", [])]
+                        # 분석 문장은 태그에서 빠져 여기로 온다(2026-10-02). 낱말은 그대로 쓴다.
+                        + [str(phrase) for phrase in metadata.get("analysis_phrases", [])]
                     )
                 )
                 overlap = _matching_words(segment_tokens, asset_tokens)

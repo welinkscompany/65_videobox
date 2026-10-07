@@ -17,14 +17,57 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import shutil
 import sqlite3
 import uuid
+from collections.abc import Iterable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from videobox_domain_models.media_analysis import MediaAnalysisStatus
+
+
+#: 분위기 단추(`EditorAssetBrowser.tsx`의 `isChipTag`)와 같은 규칙이다. 둘을 같이 고친다.
+_TAG_MAX_LENGTH = 20
+_SENTENCE_MARKS = re.compile(r"[.:;!?。,，\n]")
+
+
+def _split_analysis_tag_values(values: Iterable[object]) -> tuple[list[str], list[str]]:
+    """분석 갈래 값을 (짧은 태그, 긴 문구)로 나눈다 (2026-10-02, 점검 후속).
+
+    모델이 갈래 값에 설명 문장을 40자씩 끊어 넣는 일이 있다(`vision.py`의 `maxLength: 40`).
+    그 조각이 태그로 합쳐져 `분위기 흐림. 빼기` 같은 단추가 됐다(실화면 2026-10-01).
+    문구는 버리지 않는다 -- 검색과 추천이 그 낱말을 쓴다. 글자가 하나도 없는 값(`+`)만 버린다.
+    """
+    tags: list[str] = []
+    phrases: list[str] = []
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        text = value.strip()
+        if not any(character.isalpha() for character in text):
+            continue
+        if len(text) <= _TAG_MAX_LENGTH and not _SENTENCE_MARKS.search(text) and not text.startswith("+"):
+            tags.append(text)
+        else:
+            phrases.append(text)
+    return tags, phrases
+
+
+def _merged_tag_patch(metadata: dict[str, Any], tags: list[str], phrases: list[str]) -> dict[str, Any]:
+    """이미 있는 `tags`·`analysis_phrases`에 새 값을 순서대로, 겹치지 않게 더한다.
+
+    **이미 저장된 값은 고치지 않는다**(되채우기 없음). 옛 문장 조각은 화면 `isChipTag`가 가린다.
+    """
+    existing_tags = metadata.get("tags") if isinstance(metadata.get("tags"), list) else []
+    patch: dict[str, Any] = {"tags": list(dict.fromkeys([*existing_tags, *tags]))}
+    existing_phrases = metadata.get("analysis_phrases") if isinstance(metadata.get("analysis_phrases"), list) else []
+    # 문구가 없던 자산에 빈 칸을 새로 만들지 않는다(메타데이터 모양을 쓸데없이 바꾸지 않는다).
+    if phrases or existing_phrases:
+        patch["analysis_phrases"] = list(dict.fromkeys([*existing_phrases, *phrases]))
+    return patch
 
 
 def sha256_file(path: Path) -> str:
@@ -240,10 +283,13 @@ class MediaAnalysisMixin:
             (MediaAnalysisStatus.SUCCEEDED.value, json.dumps(result, ensure_ascii=True), self._now_iso(), analysis_id, project_id),
         )
         reviewed = self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
-        searchable_tags = [tag for values in merged_layers.values() for tag in values]
+        searchable_tags, phrases = _split_analysis_tag_values(tag for values in merged_layers.values() for tag in values)
         asset = self.get_asset(project_id=project_id, asset_id=str(current["asset_id"]))
-        existing_tags = asset["metadata"].get("tags") if isinstance(asset["metadata"].get("tags"), list) else []
-        self.update_asset_metadata(project_id=project_id, asset_id=str(current["asset_id"]), metadata_patch={"tags": list(dict.fromkeys([*existing_tags, *searchable_tags]))})
+        self.update_asset_metadata(
+            project_id=project_id,
+            asset_id=str(current["asset_id"]),
+            metadata_patch=_merged_tag_patch(asset["metadata"], searchable_tags, phrases),
+        )
         return reviewed
 
     def retry_media_analysis(self, *, project_id: str, analysis_id: str) -> dict[str, Any]:
@@ -330,15 +376,20 @@ class MediaAnalysisMixin:
 
     def _merge_analysis_tags_onto_asset(self, *, project_id: str, asset_id: str, result: dict[str, Any]) -> None:
         layers = dict(((result.get("tags") or {}).get("layers")) or {})
-        searchable_tags = [tag for values in layers.values() if isinstance(values, list) for tag in values if isinstance(tag, str)]
-        if not searchable_tags:
+        searchable_tags, phrases = _split_analysis_tag_values(
+            tag for values in layers.values() if isinstance(values, list) for tag in values
+        )
+        if not searchable_tags and not phrases:
             return
         try:
             asset = self.get_asset(project_id=project_id, asset_id=asset_id)
         except KeyError:
             return
-        existing_tags = asset["metadata"].get("tags") if isinstance(asset["metadata"].get("tags"), list) else []
-        self.update_asset_metadata(project_id=project_id, asset_id=asset_id, metadata_patch={"tags": list(dict.fromkeys([*existing_tags, *searchable_tags]))})
+        self.update_asset_metadata(
+            project_id=project_id,
+            asset_id=asset_id,
+            metadata_patch=_merged_tag_patch(asset["metadata"], searchable_tags, phrases),
+        )
 
     def mark_media_analysis_blocked(
         self, *, project_id: str, analysis_id: str, expected_attempt: int, error_code: str, error_message: str

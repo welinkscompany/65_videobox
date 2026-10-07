@@ -80,3 +80,21 @@ def test_a_photo_with_nothing_in_common_is_not_claimed_as_a_match() -> None:
     )[0]
 
     assert result.score <= 0.2, result
+
+
+def test_words_moved_out_of_tags_still_reach_the_recommender() -> None:
+    """분석 문장은 태그에서 빠져 `analysis_phrases`로 간다(2026-10-02). 추천기가 그 칸을
+    안 읽으면 `돌바닥`·`보행로`로 맞던 자산이 추천에서 사라진다.
+
+    자산 순서를 바다 → 산책으로 둔다. 낱말이 하나도 안 맞으면 돌려쓰기가 첫 자산(바다)을
+    고르므로, 이 시험은 고치기 전에 빨갛다."""
+    segments = [{"segment_id": "s1", "text": "돌바닥 보행로를 천천히 걸었다."}]
+    assets = [
+        {"asset_id": "clip_sea", "metadata": {"tags": ["바다"]}},
+        {"asset_id": "clip_walk", "metadata": {"tags": ["산책"], "analysis_phrases": ["직사각형 돌바닥 보행로"]}},
+    ]
+
+    pick = _recommend(segments, assets)[0]
+
+    assert pick.selected_asset_id == "clip_walk", pick
+    assert pick.reason.startswith("Matched keywords"), pick.reason

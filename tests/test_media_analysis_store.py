@@ -573,3 +573,66 @@ def test_cancel_removes_query_visible_derived_analysis_records(tmp_path: Path) -
     assert store.request_media_analysis_cancel(project_id=project_id, analysis_id=job["analysis_id"], expected_attempt=claim["attempt"])
     assert store.list_media_scene_windows(project_id=project_id, analysis_id=job["analysis_id"]) == []
     assert store.list_media_embeddings(project_id=project_id, analysis_id=job["analysis_id"]) == []
+
+
+# 2026-10-01 실화면에 분위기 단추로 나온 조각들 그대로다.
+_SENTENCE_FRAGMENT = "장면 1 : 화면 중앙에 직사각형 돌바닥 보행로가 가까운 곳에서 멀리까지"
+_JUNK = (_SENTENCE_FRAGMENT, "흐림.", "+")
+
+
+def _analysed_asset(tmp_path: Path, store, project_id: str, *, status: MediaAnalysisStatus, layers: dict[str, list[str]]):
+    source = tmp_path / "walk.mp4"
+    source.write_bytes(b"walk-footage")
+    asset = store.register_asset(project_id=project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source)
+    digest = sha256(source.read_bytes()).hexdigest()
+    job = store.create_media_analysis(project_id=project_id, asset_id=asset.asset_id, idempotency_key=f"{digest}:v1", cache_key="cache-v1")
+    claim = store.claim_media_analysis(project_id=project_id, analysis_id=job["analysis_id"])
+    assert claim is not None
+    completed = store.complete_media_analysis(
+        project_id=project_id,
+        analysis_id=job["analysis_id"],
+        expected_attempt=claim["attempt"],
+        result={"tags": {"layers": layers}},
+        status=status,
+    )
+    assert completed is not None
+    return asset, job
+
+
+def test_sentence_fragments_from_analysis_never_become_tags(tmp_path: Path) -> None:
+    """분석 갈래 값 중 문장 조각은 태그가 아니다(2026-10-01 실화면: `분위기 흐림. 빼기`).
+
+    버리지는 않는다. 검색·추천이 그 낱말을 쓰므로 `analysis_phrases`로 옮긴다.
+    글자가 하나도 없는 `+`만 버린다.
+    """
+    store, project_id = _store(tmp_path)
+    asset, _ = _analysed_asset(
+        tmp_path, store, project_id,
+        status=MediaAnalysisStatus.SUCCEEDED,
+        layers={"scene": [_SENTENCE_FRAGMENT], "weather": ["흐림."], "action": ["+", "산책"]},
+    )
+
+    metadata = store.get_asset(project_id=project_id, asset_id=asset.asset_id)["metadata"]
+    assert "산책" in metadata["tags"]
+    assert [tag for tag in metadata["tags"] if tag in _JUNK] == []
+    assert metadata["analysis_phrases"] == [_SENTENCE_FRAGMENT, "흐림."]
+
+
+def test_the_owner_review_path_filters_the_same_way(tmp_path: Path) -> None:
+    store, project_id = _store(tmp_path)
+    asset, job = _analysed_asset(
+        tmp_path, store, project_id,
+        status=MediaAnalysisStatus.NEEDS_REVIEW,
+        layers={"scene": [], "weather": []},
+    )
+
+    store.review_media_analysis(
+        project_id=project_id,
+        analysis_id=job["analysis_id"],
+        tags={"scene": [_SENTENCE_FRAGMENT, "산책"], "weather": ["흐림.", "+"]},
+    )
+
+    metadata = store.get_asset(project_id=project_id, asset_id=asset.asset_id)["metadata"]
+    assert "산책" in metadata["tags"]
+    assert [tag for tag in metadata["tags"] if tag in _JUNK] == []
+    assert metadata["analysis_phrases"] == [_SENTENCE_FRAGMENT, "흐림."]
