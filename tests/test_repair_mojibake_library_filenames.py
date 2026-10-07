@@ -146,3 +146,13 @@ def test_undo_puts_the_old_names_back(tmp_path: Path) -> None:
     api = _FakeApi({})
     assert repair.main(["--undo", str(revert)], send=api) == 0
     assert api.calls == [("PATCH", "/api/library/assets/user_1/filename", {"filename": BROKEN})]
+
+
+@pytest.mark.parametrize("content", ["not json", '{"other": 1}', '{"renamed": [1]}'])
+def test_undo_with_a_bad_file_exits_cleanly(tmp_path: Path, content: str, capsys) -> None:
+    bad = tmp_path / "bad.json"
+    bad.write_text(content, encoding="utf-8")
+    api = _FakeApi({})
+    assert repair.main(["--undo", str(bad)], send=api) == 2
+    assert repair.main(["--undo", str(tmp_path / "missing.json")], send=api) == 2
+    assert api.calls == []

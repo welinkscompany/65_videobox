@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
@@ -61,6 +62,18 @@ def repaired_name(name: str) -> str | None:
         return None
     if not any("가" <= ch <= "힣" for ch in fixed):
         return None
+    # cp949(UHC)는 선행 바이트 0xC0~0xC6 뒤에 ASCII 글자가 오면 확장 한글로 읽는다
+    # (`Àla`→`픩a`). 진짜 깨진 이름은 모든 한글이 KS X 1001 두 바이트(선행 0xB0~0xC8,
+    # 후행 0xA1~0xFE)다. 하나라도 아니면 진짜 라틴 이름으로 보고 건드리지 않는다.
+    for ch in fixed:
+        if ch.isascii():
+            continue
+        try:
+            pair = ch.encode("cp949")
+        except UnicodeEncodeError:
+            return None
+        if len(pair) != 2 or not (0xB0 <= pair[0] <= 0xC8 and 0xA1 <= pair[1] <= 0xFE):
+            return None
     return fixed
 
 
@@ -122,7 +135,15 @@ def main(argv: Sequence[str] | None = None, *, send: Transport | None = None, no
     transport = send or http_transport(arguments.base_url)
 
     if arguments.undo:
-        renamed = json.loads(Path(arguments.undo).read_text(encoding="utf-8"))["renamed"]
+        try:
+            renamed = json.loads(Path(arguments.undo).read_text(encoding="utf-8"))["renamed"]
+            if not isinstance(renamed, list) or not all(
+                isinstance(item, dict) and "library_asset_id" in item and "before" in item for item in renamed
+            ):
+                raise ValueError("renamed 목록 모양이 다릅니다")
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            print(f"되돌릴 목록을 읽지 못했습니다: {arguments.undo} ({type(exc).__name__}). 아무것도 바꾸지 않았습니다.")
+            return 2
         failures = apply_renames(transport, renamed, key_to="before")
         print(f"되돌림 {len(renamed) - len(failures)}/{len(renamed)}")
         for failure in failures:
@@ -147,6 +168,8 @@ def main(argv: Sequence[str] | None = None, *, send: Transport | None = None, no
     try:
         with revert_path.open("x", encoding="utf-8") as handle:
             handle.write(json.dumps({"base_url": arguments.base_url, "created_at": stamp, "renamed": plans}, ensure_ascii=False, indent=2))
+            handle.flush()
+            os.fsync(handle.fileno())
     except FileExistsError:
         print(f"되돌릴 목록이 이미 있습니다: {revert_path}. 덮어쓰지 않고 멈춥니다. 다른 --revert-file을 주세요.")
         return 2
