@@ -22,6 +22,11 @@ export function voiceFailureMessage(error: unknown): string | null {
   if (detail.includes("Voice bridge is not answering")) {
     return "목소리를 만드는 프로그램이 꺼져 있어요. 이 컴퓨터에서 목소리 프로그램을 켠 뒤 다시 시도해 주세요.";
   }
+  // 다리는 살아 있는데 공유 토큰이 안 맞는다(2026-10-02). VideoBox를 다시 켜면
+  // owner-ready가 토큰을 맞추고 다리를 다시 띄운다.
+  if (detail.includes("bridge_token_required") || detail.includes("bridge_token_not_configured")) {
+    return "목소리 프로그램이 VideoBox 요청을 받지 않았어요. 바탕화면의 VideoBox 시작 아이콘을 다시 실행해 주세요.";
+  }
   if (detail.includes("Voice sample not found") || detail.includes("Voice cloning needs")) {
     return "읽어 줄 목소리가 아직 없어요. 자료실의 내 목소리에서 유튜브 영상 주소로 목소리를 먼저 가져와 주세요.";
   }

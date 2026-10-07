@@ -245,3 +245,11 @@ def test_a_passing_post_reaches_the_bridges_own_checks() -> None:
         headers={"Host": "127.0.0.1:8201", "Content-Type": "application/json", guard.TOKEN_HEADER: TOKEN}, body=b"{}",
     )
     assert (status, payload) == (503, {"error": "browser_not_found"})
+
+
+def test_the_sender_and_the_receiver_use_the_same_names() -> None:
+    """받는 쪽(스크립트)과 보내는 쪽(패키지)이 이름을 따로 들고 있다. 어긋나면 전부 401이다."""
+    from videobox_provider_interfaces import host_bridge_auth
+
+    assert host_bridge_auth.TOKEN_HEADER == guard.TOKEN_HEADER
+    assert host_bridge_auth.TOKEN_ENV == guard.TOKEN_ENV

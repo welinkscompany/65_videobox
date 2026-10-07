@@ -33,6 +33,7 @@ from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from videobox_provider_interfaces.gtts_provider import TTSSynthesisError
+from videobox_provider_interfaces.host_bridge_auth import bridge_request_headers
 from videobox_provider_interfaces.tts import TTSRequest, TTSResult
 
 
@@ -107,7 +108,8 @@ class HostTTSBridgeProvider:
         http_request = Request(
             self._endpoint(path),
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            # 다리는 공유 토큰이 없으면 401로 거절한다(`scripts/host_bridge_guard.py`).
+            headers=bridge_request_headers(),
             method="POST",
         )
         try:

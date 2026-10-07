@@ -60,4 +60,10 @@ describe("더빙 실패 안내", () => {
     expect(voiceFailureMessage(new ApiRequestError("something else", 500, "/x"))).toBeNull();
     expect(voiceFailureMessage(new Error("boom"))).toBeNull();
   });
+
+  it("목소리 프로그램이 요청을 거절하면 VideoBox를 다시 켜라고 한다", () => {
+    expect(
+      voiceFailureMessage('Voice bridge failed (401): {"detail": "bridge_token_required"}'),
+    ).toBe("목소리 프로그램이 VideoBox 요청을 받지 않았어요. 바탕화면의 VideoBox 시작 아이콘을 다시 실행해 주세요.");
+  });
 });

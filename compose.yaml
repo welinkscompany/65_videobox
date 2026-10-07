@@ -181,6 +181,11 @@ services:
       # 이미 있는 크롬을 부른다 -- 캡컷(8200) 옆자리인 8201이다.
       # 켜는 법: `scripts/start-infographic.ps1` (VideoBox를 켜면 함께 켜진다).
       VIDEOBOX_INFOGRAPHIC_BRIDGE_URL: ${VIDEOBOX_INFOGRAPHIC_BRIDGE_URL:-http://host.docker.internal:8201}
+      # **다리 셋(8199·8200·8201)의 공유 토큰**(owner 결정 2026-10-02). 다리는 이 값이
+      # 실린 요청만 받는다. `.env.container`의 같은 줄을 다리도 직접 읽는다.
+      # 값은 `owner-ready.ps1 -Mode Start`가 없을 때 한 번 만든다. 필수(`:?`)로 두지
+      # 않는 것은 예시 env로 하는 설정 검사까지 깨지 않기 위해서다.
+      VIDEOBOX_BRIDGE_TOKEN: ${VIDEOBOX_BRIDGE_TOKEN:-}
       # 인포그래픽 HTML 한 판을 기다려 줄 시간. 공용 런타임(30초)과 따로 둔다 --
       # 실측 63~115초라 공용 상한으로는 매번 실패한다.
       VIDEOBOX_INFOGRAPHIC_TIMEOUT_SECONDS: ${VIDEOBOX_INFOGRAPHIC_TIMEOUT_SECONDS:-140}

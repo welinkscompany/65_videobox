@@ -29,6 +29,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from videobox_provider_interfaces.host_bridge_auth import bridge_request_headers
+
 #: 이 컴퓨터 안에서만 부른다. 컨테이너에서는 `host.docker.internal`이 호스트다.
 _ALLOWED_HOSTS = frozenset({"127.0.0.1", "host.docker.internal"})
 #: 캡컷(8200) 옆자리. 바꾸려면 여기와 compose와 `scripts/start-infographic.ps1`을 같이 바꾼다.
@@ -133,7 +135,8 @@ class InfographicHostBridge:
         http_request = Request(
             self._endpoint(path),
             data=json.dumps(payload).encode("utf-8") if payload is not None else None,
-            headers={"Content-Type": "application/json"},
+            # 다리는 공유 토큰이 없으면 401로 거절한다(`scripts/host_bridge_guard.py`).
+            headers=bridge_request_headers(),
             method=method,
         )
         try:

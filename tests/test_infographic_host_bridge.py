@@ -203,3 +203,17 @@ def test_a_reply_we_cannot_read_is_a_refusal() -> None:
 
     with pytest.raises(InfographicHostBridgeRefused):
         bridge.diagnose()
+
+
+def test_the_bridge_token_rides_along_on_measure(monkeypatch) -> None:
+    from videobox_provider_interfaces.host_bridge_auth import TOKEN_ENV, TOKEN_HEADER
+
+    monkeypatch.setenv(TOKEN_ENV, "g" * 43)
+    tokens: list[str | None] = []
+
+    def client(request, timeout):  # noqa: ANN001, ARG001
+        tokens.append(request.get_header(TOKEN_HEADER.capitalize()))
+        return json.dumps({"title": "<title>ok</title>"}).encode("utf-8")
+
+    assert InfographicHostBridge(http_client=client).measure(html="<p>x</p>") == "<title>ok</title>"
+    assert tokens == ["g" * 43]

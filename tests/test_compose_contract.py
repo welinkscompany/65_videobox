@@ -560,3 +560,14 @@ def test_the_build_context_never_carries_real_env_files_or_host_only_venvs() -> 
     assert "**/.venv-*" in patterns
     assert "!.env.container.example" in patterns
     assert patterns.index("!.env.container.example") > patterns.index("**/.env.*")
+
+
+def test_the_container_carries_the_bridge_token_without_requiring_it_to_parse() -> None:
+    """다리 셋은 토큰 없는 요청을 거절한다(2026-10-02). 컨테이너가 같은 값을 받아야 부를 수 있다.
+
+    `:?`(필수)로 두지 않는다. 필수 값은 예시 env로 하는 설정 검사(`owner-ready.ps1`의
+    `config --quiet`)까지 깨뜨린다. 값은 `owner-ready.ps1 -Mode Start`가 채운다.
+    """
+    compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    environment = compose["services"]["videobox-workspace"]["environment"]
+    assert environment["VIDEOBOX_BRIDGE_TOKEN"] == "${VIDEOBOX_BRIDGE_TOKEN:-}"

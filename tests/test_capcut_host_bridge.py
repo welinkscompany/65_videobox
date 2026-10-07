@@ -436,3 +436,19 @@ def test_the_supported_list_can_be_widened_by_configuration(tmp_path: Path, monk
     service = CapCutHandoffService(local_app_data=_installed(tmp_path, "9.0.0.1"))
 
     assert service.diagnose().is_supported is True
+
+
+def test_the_bridge_token_rides_along_on_every_capcut_call(monkeypatch) -> None:
+    from videobox_provider_interfaces.host_bridge_auth import TOKEN_ENV, TOKEN_HEADER
+
+    monkeypatch.setenv(TOKEN_ENV, "c" * 43)
+    tokens: list[str | None] = []
+
+    def client(request, timeout):  # noqa: ANN001, ARG001
+        tokens.append(request.get_header(TOKEN_HEADER.capitalize()))
+        return json.dumps({"status": "ready", "removed": True}).encode("utf-8")
+
+    bridge = CapCutHostBridge(http_client=client)
+    bridge.diagnose()
+    bridge.cleanup(export_id="e1", registered_host_path="C:/x", ownership_token="o1")
+    assert tokens == ["c" * 43, "c" * 43]

@@ -148,3 +148,33 @@ def test_a_sleeping_bridge_says_how_to_wake_it(tmp_path: Path) -> None:
     provider = HostTTSBridgeProvider(http_client=client)
     with pytest.raises(TTSSynthesisError, match="host_tts_service"):
         provider.synthesize(_request(tmp_path))
+
+
+def test_the_bridge_token_rides_along_when_it_is_set(tmp_path: Path, monkeypatch) -> None:
+    """다리는 토큰 없는 요청을 401로 거절한다(`scripts/host_bridge_guard.py`)."""
+    from videobox_provider_interfaces.host_bridge_auth import TOKEN_ENV, TOKEN_HEADER
+
+    monkeypatch.setenv(TOKEN_ENV, "k" * 43)
+    seen: dict[str, Any] = {}
+
+    def client(request: Any, timeout: int) -> bytes:
+        seen["token"] = request.get_header(TOKEN_HEADER.capitalize())
+        seen["type"] = request.get_header("Content-type")
+        return b"RIFF-spoken-audio"
+
+    HostTTSBridgeProvider(http_client=client).synthesize(_request(tmp_path))
+    assert seen == {"token": "k" * 43, "type": "application/json"}
+
+
+def test_no_token_header_is_invented_when_none_is_set(tmp_path: Path, monkeypatch) -> None:
+    from videobox_provider_interfaces.host_bridge_auth import TOKEN_ENV, TOKEN_HEADER
+
+    monkeypatch.delenv(TOKEN_ENV, raising=False)
+    seen: dict[str, Any] = {}
+
+    def client(request: Any, timeout: int) -> bytes:
+        seen["has"] = request.has_header(TOKEN_HEADER.capitalize())
+        return b"RIFF-spoken-audio"
+
+    HostTTSBridgeProvider(http_client=client).synthesize(_request(tmp_path))
+    assert seen == {"has": False}
