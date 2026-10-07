@@ -227,6 +227,17 @@ _SCRIPT_TAG = re.compile(r"<\s*script\b", re.IGNORECASE)
 #: 지우개는 이걸 모르고 뒤의 `-->`까지 통째로 주석으로 본다(그 사이의 `<script>`가 숨는다).
 _EARLY_CLOSED_COMMENT = re.compile(r"<!--!?-?>")
 _URL_NOISE = re.compile(r"[\x00-\x20\x7f-\x9f]+")
+#: 파이썬 파서와 크롬이 **읽는 방식이 다른** 자리들이다(주석을 `--!>`로 닫기, `<noscript>`는
+#: 글자 덩어리, `<![CDATA[`는 첫 `>`에서 끝나는 가짜 주석). 하나씩 맞추지 않고, 한 장짜리
+#: 그림이 쓸 일 없는 것은 통째로 거절한다.
+_NEVER_NEEDED_TEXT = re.compile(r"<noscript\b|<!\[|--!>|<\s*math\b", re.IGNORECASE)
+_NEVER_NEEDED_TAGS = frozenset(
+    {"iframe", "object", "embed", "base", "link", "frame", "frameset", "applet", "noscript", "math"}
+)
+_URL_ATTRIBUTES = frozenset(
+    {"href", "src", "xlink:href", "action", "formaction", "data", "poster", "background", "srcset"}
+)
+_SAFE_DATA_URL = re.compile(r"data:image/(?:png|jpe?g|gif|webp)[;,]")
 
 
 class _ExecutableCodeFinder(HTMLParser):
@@ -236,24 +247,43 @@ class _ExecutableCodeFinder(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.found = False
+        self._svg_depth = 0
 
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag == "script":
+    def _inspect(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "script" or tag in _NEVER_NEEDED_TAGS:
             self.found = True
+        names = {name for name, _ in attrs}
+        if tag == "meta" and ("http-equiv" in names or "content" in names):
+            self.found = True  # `<meta charset>`만 허용. 새로고침·정책 메타는 쓸 데가 없다.
+        if tag == "style" and self._svg_depth:
+            self.found = True  # SVG 안의 `<style>`은 글자 덩어리가 아니라 태그로 읽힌다.
         for name, value in attrs:
             if re.fullmatch(r"on[a-z]+", name) or name == "srcdoc":
                 self.found = True
             # 브라우저는 주소에서 탭·줄바꿈을 지우고, 글자 참조(`&#106;`)를 푼다.
-            if value and _URL_NOISE.sub("", html_lib.unescape(value)).lower().startswith(
-                ("javascript:", "vbscript:")
-            ):
+            if not value:
+                continue
+            url = _URL_NOISE.sub("", html_lib.unescape(value)).lower()
+            if url.startswith(("javascript:", "vbscript:")):
                 self.found = True
+            if name in _URL_ATTRIBUTES and url.startswith("data:") and not _SAFE_DATA_URL.match(url):
+                self.found = True  # 그림이 아닌 data: 문서(`text/html`, `svg+xml`)는 코드를 싣는다.
 
-    handle_startendtag = handle_starttag
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._inspect(tag, attrs)
+        if tag == "svg":
+            self._svg_depth += 1
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._inspect(tag, attrs)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "svg" and self._svg_depth:
+            self._svg_depth -= 1
 
 
 def _contains_executable_code(html: str) -> bool:
-    if _EARLY_CLOSED_COMMENT.search(html):
+    if _EARLY_CLOSED_COMMENT.search(html) or _NEVER_NEEDED_TEXT.search(html):
         return True
     # 주석은 실행되지 않는다. 브리핑이 계산을 주석에 남기라고 시키므로 주석 안은 보지 않는다.
     code_view = _COMMENT.sub(" ", html)

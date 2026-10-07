@@ -157,6 +157,18 @@ def test_numbers_inside_a_script_are_not_made_up_numbers() -> None:
         "<a href=\"&#106;avascript:alert(1)\">94.6%</a>",
         "<a xlink:href=\" javascript:alert(1)\">94.6%</a>",
         "<form action=\"javascript:alert(1)\"><button>x</button></form>",
+        "<!-- a --!><script>1</script> -->",
+        "<!-- a --!><img src=x onerror=1> -->",
+        "<!----!><img src=x onerror=1>-->",
+        "<noscript><p title='</noscript><img src=x onerror=alert(1)>'></noscript>",
+        "<svg><style><img src=x onerror=alert(1)></style></svg>",
+        "<math><style><img src=x onerror=1></style></math>",
+        "<p><![CDATA[><img src=x onerror=alert(1)>]]></p>",
+        "<iframe src='data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg=='>",
+        "<object data='data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg=='></object>",
+        "<embed src='data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg=='>",
+        "<img src='data:image/svg+xml;base64,PHN2Zz4='>",
+        "<meta http-equiv='refresh' content='0;url=x'>",
     ],
 )
 def test_code_that_would_run_in_the_browser_is_refused(fragment: str) -> None:
@@ -176,6 +188,10 @@ def test_code_that_would_run_in_the_browser_is_refused(fragment: str) -> None:
         "<div class='donut' data-on='true'>94.6%</div>",
         "<!-- 몫 94.6 > 수수료 5.4, onload=없음 --><p>94.6%</p>",
         "<p title='a>b'>94.6%</p>",
+        "<p>a < b and c > d, 94.6%</p>",
+        "<style>.a{color:red}</style><p class='a'>94.6%</p>",
+        "<svg width='10' height='10'><rect width='5' height='5'/></svg><p>94.6%</p>",
+        "<img src=\"data:image/png;base64,iVBORw0KGgo=\">",
     ],
 )
 def test_ordinary_html_is_not_mistaken_for_code(fragment: str) -> None:
