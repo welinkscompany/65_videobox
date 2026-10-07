@@ -1683,6 +1683,30 @@ class UpdateLibraryAssetRightsRequest(BaseModel):
     license_note: str | None = Field(default=None, max_length=2_000)
 
 
+class RenameLibraryAssetRequest(BaseModel):
+    """자료실에 보이는 이름을 바꾼다 (2026-10-02, 점검 후속 A4).
+
+    이름은 표시용이라 파일 경로가 되지 않는다. 그래도 경로처럼 보이는 값(`/`·`\\`)과
+    제어 문자는 받지 않는다. 화면·검색·캡컷 초안 어디에 찍혀도 모양이 깨지지 않게 하려는 것이다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    filename: str = Field(min_length=1, max_length=255)
+
+    @field_validator("filename")
+    @classmethod
+    def _plain_name(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("filename_empty")
+        if cleaned in {".", ".."} or any(ch in cleaned for ch in "/\\"):
+            raise ValueError("filename_invalid")
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in cleaned):
+            raise ValueError("filename_invalid")
+        return cleaned
+
+
 class CorrectLibraryAssetMediaTypeRequest(BaseModel):
     """자료실에서 종류를 고친다 (owner 결정 2026-09-07).
 

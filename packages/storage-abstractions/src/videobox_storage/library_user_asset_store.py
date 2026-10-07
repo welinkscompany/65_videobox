@@ -400,6 +400,38 @@ class LibraryUserAssetStore:
         finally:
             connection.close()
 
+    def rename_asset(self, library_asset_id: str, *, filename: str) -> LibraryUserAsset:
+        """자료실에 보이는 이름(`user_metadata.filename`)을 바꾼다 (2026-10-02, 점검 후속 A4).
+
+        파일 바이트와 `managed_relative_path`는 건드리지 않는다. 파일은 해시로 찾는다.
+        같은 `user_metadata` 안의 즐겨찾기·태그는 그대로 둔다. 기본 소재팩 줄은 고치지 않는다.
+        """
+        cleaned = str(filename).strip()
+        if not cleaned:
+            raise ValueError("filename_empty")
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+            if row is None:
+                raise KeyError(library_asset_id)
+            if str(row["origin"]) == LibraryAssetOrigin.BUILTIN.value:
+                raise ValueError("builtin_asset_immutable")
+            user_metadata = dict(LibraryUserAsset.from_row(dict(row)).user_metadata)
+            user_metadata["filename"] = cleaned
+            connection.execute(
+                "UPDATE library_user_assets SET user_json = ?, updated_at = ? WHERE library_asset_id = ?",
+                (_json(user_metadata), _now(), library_asset_id),
+            )
+            updated = connection.execute("SELECT * FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+            connection.commit()
+            assert updated is not None
+            return LibraryUserAsset.from_row(dict(updated))
+        except Exception:
+            connection.rollback(); raise
+        finally:
+            connection.close()
+
     def update_media_type(self, library_asset_id: str, media_type: LibraryMediaType | str) -> LibraryUserAsset:
         """종류를 고친다 (owner 결정 2026-09-07).
 

@@ -25,6 +25,7 @@ from starlette.background import BackgroundTask
 from videobox_api.errors import _http_error
 from videobox_api.models import (
     CorrectLibraryAssetMediaTypeRequest,
+    RenameLibraryAssetRequest,
     UpdateLibraryAssetFavoriteRequest,
     UpdateLibraryAssetRightsRequest,
     LibraryIngestPathRequest,
@@ -687,6 +688,23 @@ def build_library_assets_router(
         if builtin is not None:
             raise HTTPException(status_code=409, detail={"code": "builtin_asset_immutable"})
         return {"asset": public_user(user_asset_store.set_favorite(asset_id, favorite=payload.favorite))}
+
+    @router.patch("/api/library/assets/{asset_id}/filename")
+    def rename_library_asset(asset_id: str, payload: RenameLibraryAssetRequest) -> dict[str, Any]:
+        """자료실에 보이는 이름을 바꾼다 (2026-10-02, 점검 후속 A4).
+
+        2026-10-01 점검에서 이름 24개가 깨져 있었는데 고칠 길이 없었다. 파일과 관리 경로는
+        그대로 두고 `user_metadata.filename`만 바꾼다. 의미 색인은 이 이름을 읽지 않으므로
+        다시 색인할 필요가 없다(`library_audio_indexer`의 `asset_name`은 자산 id다).
+        """
+        asset, builtin = find_asset(asset_id)
+        if builtin is not None:
+            raise HTTPException(status_code=409, detail={"code": "builtin_asset_immutable"})
+        try:
+            updated = user_asset_store.rename_asset(asset_id, filename=payload.filename)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail={"code": str(exc)}) from exc
+        return {"asset": public_user(updated)}
 
     @router.post("/api/library/assets/{asset_id}/restore")
     def restore_library_asset(asset_id: str) -> dict[str, Any]:
