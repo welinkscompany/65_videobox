@@ -230,9 +230,19 @@ _URL_NOISE = re.compile(r"[\x00-\x20\x7f-\x9f]+")
 #: 파이썬 파서와 크롬이 **읽는 방식이 다른** 자리들이다(주석을 `--!>`로 닫기, `<noscript>`는
 #: 글자 덩어리, `<![CDATA[`는 첫 `>`에서 끝나는 가짜 주석). 하나씩 맞추지 않고, 한 장짜리
 #: 그림이 쓸 일 없는 것은 통째로 거절한다.
-_NEVER_NEEDED_TEXT = re.compile(r"<noscript\b|<!\[|--!>|<\s*math\b", re.IGNORECASE)
+#: `<textarea>`·`<xmp>`·`<noembed>`·`<noframes>`·`<plaintext>`도 크롬은 글자 덩어리로 읽지만
+#: 파이썬 파서는 태그로 읽는다. 쓸 일이 없으니 태그 글자만 보여도 거절한다.
+_NEVER_NEEDED_TEXT = re.compile(
+    r"<\s*(?:noscript|math|textarea|xmp|noembed|noframes|plaintext)\b|<!\[|--!>", re.IGNORECASE
+)
+#: `<title>`은 문서 머리에 정당하게 있다. 다만 그 안은 글자뿐이어야 한다 -- `<`가 있으면
+#: 크롬은 글자로 읽고 파이썬 파서는 태그로 읽는 틈이 생긴다. 닫히지 않았으면 끝까지가 안이다.
+_TITLE_CONTENT = re.compile(r"<\s*title\b[^>]*>(.*?)(?:<\s*/\s*title\s*>|\Z)", re.IGNORECASE | re.DOTALL)
+#: `<style>` 안의 `<!--`: 주석 지우개가 `</style>` 너머까지 주석으로 오해해 그 뒤 `<script>`를 가린다.
+_STYLE_CONTENT = re.compile(r"<\s*style\b[^>]*>(.*?)(?:<\s*/\s*style\s*>|\Z)", re.IGNORECASE | re.DOTALL)
 _NEVER_NEEDED_TAGS = frozenset(
-    {"iframe", "object", "embed", "base", "link", "frame", "frameset", "applet", "noscript", "math"}
+    {"iframe", "object", "embed", "base", "link", "frame", "frameset", "applet", "noscript", "math",
+        "textarea", "xmp", "noembed", "noframes", "plaintext",}
 )
 _URL_ATTRIBUTES = frozenset(
     {"href", "src", "xlink:href", "action", "formaction", "data", "poster", "background", "srcset"}
@@ -284,6 +294,10 @@ class _ExecutableCodeFinder(HTMLParser):
 
 def _contains_executable_code(html: str) -> bool:
     if _EARLY_CLOSED_COMMENT.search(html) or _NEVER_NEEDED_TEXT.search(html):
+        return True
+    if any("<" in body for body in _TITLE_CONTENT.findall(html)):
+        return True
+    if any("<!--" in body for body in _STYLE_CONTENT.findall(html)):
         return True
     # 주석은 실행되지 않는다. 브리핑이 계산을 주석에 남기라고 시키므로 주석 안은 보지 않는다.
     code_view = _COMMENT.sub(" ", html)
