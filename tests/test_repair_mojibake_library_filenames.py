@@ -156,3 +156,28 @@ def test_undo_with_a_bad_file_exits_cleanly(tmp_path: Path, content: str, capsys
     assert repair.main(["--undo", str(bad)], send=api) == 2
     assert repair.main(["--undo", str(tmp_path / "missing.json")], send=api) == 2
     assert api.calls == []
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Àla carte.mp3",  # cp949가 À+a를 확장 한글로 읽는다
+        "Âge d'or.mp3",
+        "Äpfel.mp3",
+        "Åre.mp4",
+        "Ãa.mp4",
+        "Ünïcode.mp3",
+        "Ça va.mp3",
+        "Éclair 2.wav",
+    ],
+)
+def test_genuine_latin_names_are_never_rewritten_as_extended_hangul(name: str) -> None:
+    assert repair.repaired_name(name) is None
+
+
+@pytest.mark.parametrize(
+    "korean",
+    ["녹음 파일 01.mp4", "배경음악_final v2.mp3", "효과음 (웃음).wav", "가나다라마바사.mp3"],
+)
+def test_real_mojibake_round_trips_back_to_the_korean_name(korean: str) -> None:
+    assert repair.repaired_name(korean.encode("cp949").decode("latin1")) == korean
