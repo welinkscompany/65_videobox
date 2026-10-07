@@ -145,8 +145,8 @@ const nativeControlAllowlist = {
     reason: "The outputs surface owns the explicit variant selection controls before a render request is submitted, and the read-only share-link field it shows after creating one (select-to-copy, not a form input).",
   },
   "features/library/LibraryPreviewPane.tsx": {
-    controls: ["button:library-correct-media-type", "button:library-favorite", "button:library-permanent-delete", "button:library-permanent-delete-confirm", "button:library-restore", "button:library-rights-save", "button:library-trash", "input:library-rights-license-note", "select:library-rights-source"],
-    reason: "The library preview pane owns the explicit restore, trash, and two-stage permanent-delete lifecycle actions for a trashed asset, plus the kind correction the owner needs because VideoBox now sorts one drop folder by content (owner decision 2026-09-07), and the rights source (own footage / AI / licensed third party) that unlocks monetized upload approval (AK W1215-4, 2026-09-28).",
+    controls: ["button:library-correct-media-type", "button:library-favorite", "button:library-permanent-delete", "button:library-permanent-delete-confirm", "button:library-rename", "button:library-rename-cancel", "button:library-rename-save", "button:library-restore", "button:library-rights-save", "button:library-trash", "input:library-rename-input", "input:library-rights-license-note", "select:library-rights-source"],
+    reason: "The library preview pane owns the explicit restore, trash, and two-stage permanent-delete lifecycle actions for a trashed asset, plus the kind correction the owner needs because VideoBox now sorts one drop folder by content (owner decision 2026-09-07), the rights source (own footage / AI / licensed third party) that unlocks monetized upload approval (AK W1215-4, 2026-09-28), and the inline rename that repairs broken file names (audit follow-up A4, 2026-10-02).",
   },
   "features/media/SceneImageStudio.tsx": {
     controls: ["input:scene-video-make-gif"],

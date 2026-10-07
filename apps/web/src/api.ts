@@ -2340,6 +2340,12 @@ export const api = {
       `/api/library/assets/${encodeURIComponent(libraryAssetId)}/favorite`,
       { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ favorite }) },
     ),
+  /** 자료실에 보이는 이름을 바꾼다(2026-10-02, 점검 후속 A4). 파일과 경로는 그대로다. */
+  renameLibraryAsset: (libraryAssetId: string, filename: string) =>
+    request<{ asset: LibraryAsset }>(
+      `/api/library/assets/${encodeURIComponent(libraryAssetId)}/filename`,
+      { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filename }) },
+    ),
   updateLibraryAssetRights: (libraryAssetId: string, rightsSource: LibraryAssetRights, licenseNote: string | null) =>
     request<{ asset: LibraryAsset }>(
       `/api/library/assets/${encodeURIComponent(libraryAssetId)}/rights`,

@@ -657,4 +657,49 @@ describe("자료실의 `음악·효과음` 갈래", () => {
 
     await waitFor(() => expect(update).toHaveBeenCalledWith("r2", "third_party_licensed", "Pexels 라이선스"));
   });
+
+  it("renames an own asset from the preview pane and reloads the list", async () => {
+    // 2026-10-01 점검: 깨진 이름 24개를 고칠 길이 없었다(점검 후속 A4).
+    const rename = vi.spyOn(api, "renameLibraryAsset").mockResolvedValue({
+      asset: asset({ user_metadata: { filename: "도시 걷기.mp4", tags: ["도시"] } }),
+    });
+    render(<LibraryPage />);
+    await screen.findAllByText("walk.mp4");
+    const listCallsBefore = vi.mocked(api.listLibraryAssets).mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: "walk.mp4 이름 바꾸기" }));
+    const input = screen.getByLabelText("새 이름") as HTMLInputElement;
+    expect(input.value).toBe("walk.mp4");
+    fireEvent.change(input, { target: { value: "  도시 걷기.mp4 " } });
+    fireEvent.click(screen.getByRole("button", { name: "이름 저장" }));
+
+    await waitFor(() => expect(rename).toHaveBeenCalledWith("user_asset_1", "도시 걷기.mp4"));
+    await waitFor(() => expect(vi.mocked(api.listLibraryAssets).mock.calls.length).toBeGreaterThan(listCallsBefore));
+    await waitFor(() => expect(screen.queryByLabelText("새 이름")).toBeNull());
+  });
+
+  it("refuses a slash and keeps the old name when renaming is cancelled", async () => {
+    const rename = vi.spyOn(api, "renameLibraryAsset");
+    render(<LibraryPage />);
+    await screen.findAllByText("walk.mp4");
+
+    fireEvent.click(screen.getByRole("button", { name: "walk.mp4 이름 바꾸기" }));
+    const input = screen.getByLabelText("새 이름");
+    fireEvent.change(input, { target: { value: "a/b.mp4" } });
+    expect(screen.getByRole("button", { name: "이름 저장" })).toBeDisabled();
+    expect(screen.getByText("이름에 / 나 \\ 는 쓸 수 없어요.")).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(screen.queryByLabelText("새 이름")).toBeNull();
+    expect(rename).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { level: 2, name: "walk.mp4" })).toBeInTheDocument();
+  });
+
+  it("offers no rename for a built-in starter asset", async () => {
+    vi.mocked(api.listLibraryAssets).mockResolvedValue({ assets: [asset({ origin: "builtin" })], total: 1 });
+    render(<LibraryPage />);
+    await screen.findAllByText("walk.mp4");
+    expect(screen.queryByRole("button", { name: /이름 바꾸기/ })).toBeNull();
+  });
 });
