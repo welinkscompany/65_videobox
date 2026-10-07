@@ -51,9 +51,13 @@ class _FakeApi:
         self.total_bonus = total_bonus
         self.fail_ids = fail_ids or set()
         self.calls: list[tuple[str, str, dict | None]] = []
+        self.current_names: dict[str, str] = {}
 
     def __call__(self, method: str, path: str, body: dict | None) -> dict:
         self.calls.append((method, path, body))
+        if method == "GET" and "?" not in path:
+            asset_id = path.split("/api/library/assets/")[1]
+            return {"asset": {"library_asset_id": asset_id, "user_metadata": {"filename": self.current_names.get(asset_id, "")}}}
         if method == "GET":
             media_type = path.split("media_type=")[1].split("&")[0]
             assets = self.assets_by_type.get(media_type, [])
@@ -144,8 +148,24 @@ def test_undo_puts_the_old_names_back(tmp_path: Path) -> None:
     revert = tmp_path / "revert.json"
     revert.write_text(json.dumps({"renamed": [{"library_asset_id": "user_1", "media_type": "broll", "before": BROKEN, "after": "녹음.mp4"}]}, ensure_ascii=False), encoding="utf-8")
     api = _FakeApi({})
+    api.current_names["user_1"] = "녹음.mp4"
     assert repair.main(["--undo", str(revert)], send=api) == 0
-    assert api.calls == [("PATCH", "/api/library/assets/user_1/filename", {"filename": BROKEN})]
+    assert api.calls == [
+        ("GET", "/api/library/assets/user_1", None),
+        ("PATCH", "/api/library/assets/user_1/filename", {"filename": BROKEN}),
+    ]
+
+
+def test_undo_skips_a_name_that_was_changed_by_hand_since(tmp_path: Path, capsys) -> None:
+    revert = tmp_path / "revert.json"
+    revert.write_text(json.dumps({"renamed": [{"library_asset_id": "user_1", "media_type": "broll", "before": BROKEN, "after": "녹음.mp4"}]}, ensure_ascii=False), encoding="utf-8")
+    api = _FakeApi({})
+    api.current_names["user_1"] = "내가 바꾼 이름.mp4"
+    assert repair.main(["--undo", str(revert)], send=api) == 1
+    assert [call[0] for call in api.calls] == ["GET"]  # PATCH 없음
+    assert "--force-undo" in capsys.readouterr().out
+    assert repair.main(["--undo", str(revert), "--force-undo"], send=api) == 0
+    assert api.calls[-1] == ("PATCH", "/api/library/assets/user_1/filename", {"filename": BROKEN})
 
 
 @pytest.mark.parametrize("content", ["not json", '{"other": 1}', '{"renamed": [1]}'])

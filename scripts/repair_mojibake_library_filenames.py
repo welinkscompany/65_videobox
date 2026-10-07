@@ -131,6 +131,7 @@ def main(argv: Sequence[str] | None = None, *, send: Transport | None = None, no
     parser.add_argument("--apply", action="store_true", help="실제로 바꾼다. 없으면 미리보기만 한다.")
     parser.add_argument("--revert-file", default=None, help="되돌릴 목록을 쓸 자리. 기본은 artifacts/library-filename-repair/.")
     parser.add_argument("--undo", default=None, help="되돌릴 목록 파일을 주면 원래 이름으로 돌린다.")
+    parser.add_argument("--force-undo", action="store_true", help="지금 이름이 목록의 바뀐 이름과 달라도(나중에 손으로 바꿨어도) 되돌린다.")
     arguments = parser.parse_args(argv)
     transport = send or http_transport(arguments.base_url)
 
@@ -144,11 +145,31 @@ def main(argv: Sequence[str] | None = None, *, send: Transport | None = None, no
         except (OSError, ValueError, KeyError, TypeError) as exc:
             print(f"되돌릴 목록을 읽지 못했습니다: {arguments.undo} ({type(exc).__name__}). 아무것도 바꾸지 않았습니다.")
             return 2
-        failures = apply_renames(transport, renamed, key_to="before")
-        print(f"되돌림 {len(renamed) - len(failures)}/{len(renamed)}")
-        for failure in failures:
+        # 나중에 손으로 바꾼 이름을 덮어쓰지 않는다: 지금 이름이 우리가 바꾼 이름(after)일 때만 되돌린다.
+        todo: list[Mapping[str, str]] = []
+        skipped: list[dict[str, str]] = []
+        for item in renamed:
+            if arguments.force_undo or "after" not in item:
+                todo.append(item)
+                continue
+            asset_path = f"/api/library/assets/{quote(str(item['library_asset_id']), safe='')}"
+            try:
+                reply = transport("GET", asset_path, None)
+                current = str(((reply.get("asset") or {}).get("user_metadata") or {}).get("filename") or "")
+            except Exception as exc:  # noqa: BLE001 - 읽지 못하면 안전하다고 말할 수 없다. 건너뛰고 보고한다
+                skipped.append({**item, "error": f"현재 이름을 읽지 못함 ({type(exc).__name__})"})
+                continue
+            if current != str(item["after"]):
+                skipped.append({**item, "error": f"지금 이름이 달라 건너뜀: {current!r}"})
+                continue
+            todo.append(item)
+        failures = apply_renames(transport, todo, key_to="before")
+        print(f"되돌림 {len(todo) - len(failures)}/{len(renamed)}")
+        for failure in skipped + failures:
             print(f"실패: {failure['library_asset_id']} {failure['error']}")
-        return 1 if failures else 0
+        if skipped:
+            print(f"건너뜀 {len(skipped)}개. 그래도 되돌리려면 --force-undo 를 붙이세요.")
+        return 1 if failures or skipped else 0
 
     plans = plan_repairs(transport)
     for item in plans:
