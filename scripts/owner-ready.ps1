@@ -1084,6 +1084,30 @@ if ($Mode -ceq "Start") {
     if ($preflightStatus -cne "pass") {
         Write-OwnerReadyPayload -Checks $checks
     }
+    # **다리 셋(8199·8200·8201)의 공유 토큰** (owner 결정 2026-10-02).
+    # 컨테이너(compose `VIDEOBOX_BRIDGE_TOKEN`)와 다리(`scripts/host_bridge_guard.py`)가
+    # 이 파일의 같은 줄을 읽는다. **없을 때만** 한 번 만들고 그 뒤로는 바꾸지 않는다.
+    # 바꾸면 이미 떠 있는 다리와 어긋난다. 값은 화면에도 결과에도 찍지 않는다.
+    # BOM과 줄바꿈 모양은 원래대로 지킨다.
+    if (-not $PSBoundParameters.ContainsKey("WhatIf")) {
+        $bridgeEnvPath = (Resolve-Path -LiteralPath $EnvFile).Path
+        $bridgeEnvBytes = [IO.File]::ReadAllBytes($bridgeEnvPath)
+        $bridgeEnvHasBom = $bridgeEnvBytes.Length -ge 3 -and $bridgeEnvBytes[0] -eq 0xEF -and $bridgeEnvBytes[1] -eq 0xBB -and $bridgeEnvBytes[2] -eq 0xBF
+        $bridgeEnvOffset = if ($bridgeEnvHasBom) { 3 } else { 0 }
+        $bridgeEnvText = (New-Object System.Text.UTF8Encoding($false)).GetString($bridgeEnvBytes, $bridgeEnvOffset, $bridgeEnvBytes.Length - $bridgeEnvOffset)
+        if ($bridgeEnvText -notmatch '(?m)^[ \t]*VIDEOBOX_BRIDGE_TOKEN[ \t]*=[ \t]*[A-Za-z0-9_\-]{32,}[ \t]*\r?$') {
+            $bridgeTokenBytes = New-Object byte[] 32
+            $bridgeRandom = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+            try { $bridgeRandom.GetBytes($bridgeTokenBytes) } finally { $bridgeRandom.Dispose() }
+            $bridgeTokenValue = [Convert]::ToBase64String($bridgeTokenBytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+            $bridgeNewline = if ($bridgeEnvText.Contains("`r`n")) { "`r`n" } else { "`n" }
+            $bridgeWithout = [regex]::Replace($bridgeEnvText, '(?m)^[ \t]*VIDEOBOX_BRIDGE_TOKEN[ \t]*=[^\n]*(\n|$)', '')
+            if ($bridgeWithout.Length -gt 0 -and -not $bridgeWithout.EndsWith("`n")) { $bridgeWithout += $bridgeNewline }
+            $bridgeUpdated = $bridgeWithout + "VIDEOBOX_BRIDGE_TOKEN=" + $bridgeTokenValue + $bridgeNewline
+            [IO.File]::WriteAllText($bridgeEnvPath, $bridgeUpdated, (New-Object System.Text.UTF8Encoding($bridgeEnvHasBom)))
+            Remove-Variable -Name bridgeTokenValue, bridgeUpdated -ErrorAction SilentlyContinue
+        }
+    }
     $actualComposeResult = Invoke-CapturedProcess -FilePath $DockerExecutable -Arguments @(
         @("compose") + $composeFileArguments + @("--env-file", $EnvFile) + $composeProfileArguments + @("config", "--quiet")
     )

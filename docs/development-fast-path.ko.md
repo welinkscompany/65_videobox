@@ -388,6 +388,13 @@ Codex 시절 세션 단절을 메우던 장치이며, 현재 개발 환경에서
      scheme·port·path를 바꾼 값, 자격 증명이 붙은 값은 거부한다.
    - 이 승인은 **호스트의 ComfyUI를 부르는 경로에만** 적용된다. 다른 host bridge의
      근거가 아니다(조항 4 유지).
+   - **다리 셋(목소리 8199·캡컷 8200·그림 8201)은 공유 토큰을 요구한다(2026-10-02, owner 결정).**
+     세 가지를 본다: `X-VideoBox-Bridge-Token` 헤더, JSON만, Host 검사(`scripts/host_bridge_guard.py`).
+     토큰은 `.env.container`의 `VIDEOBOX_BRIDGE_TOKEN` 한 줄이다. `owner-ready.ps1 -Mode Start`가
+     없을 때만 만든다. 컨테이너는 compose로 받고, 다리는 같은 파일을 직접 읽는다.
+     목소리 `/health`만 토큰 없이 열려 있다(`Start-VideoBox.ps1`이 켜졌는지 묻는 자리).
+     다리 코드나 토큰을 바꾸면 **이미 떠 있는 다리를 끄고** 다시 켜야 한다.
+     `owner-ready`는 포트가 열려 있으면 다시 띄우지 않는다.
 
    **함께 못박는 것 — 라이선스.** 2026-08-20 실측에서 이 경로를 막고 있던 것은
    하드웨어가 아니라 라이선스였다. 디스크의 유일한 이미지 모델이 **FLUX.1-dev

@@ -2121,3 +2121,48 @@ def test_check_blocks_when_another_embedding_model_would_shadow_the_expected_one
     assert row["status"] == "blocked"
     assert row["evidence"]["selected_embedding_model"] == "text-embedding-nomic-embed-text-v1.5"
     assert "text-embedding-nomic-embed-text-v1.5" in row["action"]
+
+
+_BRIDGE_TOKEN_LINE = re.compile(r"(?m)^VIDEOBOX_BRIDGE_TOKEN=([A-Za-z0-9_-]+)\s*$")
+
+
+def test_start_writes_one_bridge_token_once_and_never_prints_it(tmp_path: Path) -> None:
+    """다리 셋의 공유 토큰(2026-10-02). 켤 때 없으면 한 번 만들고, 다시 켜도 바꾸지 않는다.
+    바꾸면 이미 떠 있는 다리와 어긋나 더빙·캡컷·그림이 전부 401이 된다."""
+    fixture = _fixture_repository(tmp_path)
+    with _health_server() as video_uri:
+        first = _run(fixture, mode="Start", video_uri=video_uri)
+    assert first.returncode == 0, _why_it_failed(first)
+    tokens = _BRIDGE_TOKEN_LINE.findall(fixture["env_file"].read_text(encoding="utf-8-sig"))
+    assert len(tokens) == 1 and len(tokens[0]) >= 43
+    assert tokens[0] not in first.stdout and tokens[0] not in first.stderr
+
+    with _health_server() as video_uri:
+        second = _run(fixture, mode="Start", video_uri=video_uri)
+    assert second.returncode == 0, _why_it_failed(second)
+    assert _BRIDGE_TOKEN_LINE.findall(fixture["env_file"].read_text(encoding="utf-8-sig")) == tokens
+
+
+def test_start_replaces_an_empty_bridge_token_line_and_keeps_bom_and_crlf(tmp_path: Path) -> None:
+    fixture = _fixture_repository(tmp_path)
+    original = fixture["env_file"].read_text(encoding="utf-8").replace("\r\n", "\n").rstrip("\n")
+    fixture["env_file"].write_bytes(
+        codecs.BOM_UTF8 + (original + "\nVIDEOBOX_BRIDGE_TOKEN=\n").replace("\n", "\r\n").encode("utf-8")
+    )
+    with _health_server() as video_uri:
+        result = _run(fixture, mode="Start", video_uri=video_uri)
+    assert result.returncode == 0, _why_it_failed(result)
+    raw = fixture["env_file"].read_bytes()
+    assert raw.startswith(codecs.BOM_UTF8)
+    text = raw.decode("utf-8-sig")
+    assert "\n" not in text.replace("\r\n", "")
+    assert len(re.findall(r"(?m)^VIDEOBOX_BRIDGE_TOKEN=", text)) == 1
+    assert len(_BRIDGE_TOKEN_LINE.findall(text)) == 1
+
+
+def test_start_whatif_leaves_the_env_file_alone(tmp_path: Path) -> None:
+    fixture = _fixture_repository(tmp_path)
+    before = fixture["env_file"].read_bytes()
+    result = _run(fixture, mode="Start", extra=["-WhatIf"])
+    assert result.returncode == 0, _why_it_failed(result)
+    assert fixture["env_file"].read_bytes() == before
