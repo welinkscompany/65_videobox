@@ -538,3 +538,25 @@ def test_the_page_shell_is_never_served_from_a_stale_cache() -> None:
     assert shell is not None and "expires -1;" in shell.group(1)
     assets = re.search(r"location /assets/ \{([^}]*)\}", config)
     assert assets is not None and "expires 1y;" in assets.group(1)
+
+
+def test_the_build_context_never_carries_real_env_files_or_host_only_venvs() -> None:
+    """2026-10-02 실측: `COPY . .`가 `.env.container`를 이미지 안 `/app/.env.container`에
+    넣고 있었다(DB 암호·게이트웨이 토큰). 컨테이너는 값을 compose `environment:`로만 받는다.
+
+    같은 자리에 윈도우용 목소리 파이썬 `.venv-chatterbox`(1.9GB)도 실려 있었다.
+    `**/.venv`는 이름이 정확히 `.venv`인 폴더만 거른다.
+
+    예시 파일(`.env.container.example`)은 비밀값이 없어 예외로 다시 넣는다. dockerignore는
+    **뒤에 오는 줄이 이긴다**. 그래서 예외 줄은 거르는 줄보다 뒤에 있어야 한다.
+    """
+    patterns = [
+        line.strip()
+        for line in (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    assert "**/.env" in patterns
+    assert "**/.env.*" in patterns
+    assert "**/.venv-*" in patterns
+    assert "!.env.container.example" in patterns
+    assert patterns.index("!.env.container.example") > patterns.index("**/.env.*")

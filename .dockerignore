@@ -50,3 +50,14 @@ artifacts
 **/*.mp4
 **/*.wav
 **/*.mp3
+# 실제 비밀값 파일. 2026-10-02 실측: `COPY . .`가 `.env.container`를 이미지 안
+# `/app/.env.container`에 넣고 있었다(DB 암호·게이트웨이 토큰). 컨테이너는
+# compose `environment:`로만 값을 받는다. 예시 파일은 비밀값이 없어 다시 넣는다.
+# 예외(`!`) 줄은 거르는 줄보다 뒤에 있어야 이긴다.
+**/.env
+**/.env.*
+!.env.container.example
+
+# 호스트에서만 도는 파이썬 환경. `.venv-chatterbox`(윈도우용 목소리 엔진, 1.9GB)가
+# `**/.venv`에 안 걸려 이미지에 실려 있었다(2026-10-02 실측). 컨테이너는 안 읽는다.
+**/.venv-*
