@@ -203,6 +203,8 @@ def test_code_that_would_run_in_the_browser_is_refused(fragment: str) -> None:
         "<style>.a{color:red}</style><p class='a'>94.6%</p>",
         "<svg width='10' height='10'><rect width='5' height='5'/></svg><p>94.6%</p>",
         "<img src=\"data:image/png;base64,iVBORw0KGgo=\">",
+        "<meta name='viewport' content='width=device-width, initial-scale=1'><p>94.6%</p>",
+        "<meta name='description' content='수수료 구조'><p>94.6%</p>",
     ],
 )
 def test_ordinary_html_is_not_mistaken_for_code(fragment: str) -> None:
@@ -259,3 +261,26 @@ def test_the_document_is_pulled_out_of_whatever_the_model_said(reply: str) -> No
 
 def test_a_reply_with_no_document_is_not_pretended_to_be_one() -> None:
     assert extract_document("HTML을 못 만들겠습니다") is None
+
+
+def test_the_retry_message_names_the_construct_that_was_refused() -> None:
+    """모델이 무엇을 고쳐야 하는지 알아야 다시 시도가 의미가 있다."""
+
+    svg_style = check_infographic_html(
+        _page("<p>94.6%</p><svg><style>.a{fill:red}</style></svg>"), FACTS
+    )
+    assert any("<svg> 안의 <style>" in problem and "맨 위" in problem for problem in svg_style), svg_style
+    refresh = check_infographic_html(
+        _page("<p>94.6%</p><meta http-equiv='refresh' content='0;url=x'>"), FACTS
+    )
+    assert any("http-equiv" in problem for problem in refresh), refresh
+    data_url = check_infographic_html(
+        _page("<p>94.6%</p><img src='data:image/svg+xml;base64,PHN2Zz4='>"), FACTS
+    )
+    assert any("data:" in problem for problem in data_url), data_url
+
+
+def test_the_prompt_names_the_denied_constructs() -> None:
+    prompt = build_infographic_prompt(topic="수수료 구조", facts=FACTS, style="editorial")
+    for token in ("<iframe>", "<noscript>", "<svg>", "data:", "http-equiv"):
+        assert token in prompt

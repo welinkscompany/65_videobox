@@ -205,8 +205,11 @@ def build_infographic_prompt(
 10. 큰 숫자는 **자기 자리를 다 차지하게** 둔다. 원형 그래프 한가운데에 얹을 거면
    그 안에 들어갈 크기로 줄여라. 삐져나오면 그래프가 숫자를 덮는다.
 11. 한국어로 쓴다.
-12. **실행 코드를 넣지 마라.** `<script>`, `onload=` 같은 `on...=` 속성, `javascript:` 주소가
-   하나라도 있으면 거절한다. 움직이지 않는 그림 한 장이다.
+12. **실행 코드를 넣지 마라.** `<script>`, `onload=` 같은 `on...=` 속성, `javascript:` 주소,
+   `<iframe>`·`<object>`·`<embed>`, `<noscript>`·`<math>`·`<textarea>`, 그림이 아닌 `data:` 주소,
+   `<meta http-equiv>`가 하나라도 있으면 거절한다. `<svg>` 안에 `<style>`도 넣지 마라 --
+   CSS는 맨 위의 `<style>` 하나에만 쓴다. `<style>` 안에 `<!--`도 쓰지 마라.
+   움직이지 않는 그림 한 장이다.
 
 # 내는 것
 `<!DOCTYPE html>`로 시작해 `</html>`로 끝나는 파일 하나. 설명하지 마라. 코드만 낸다."""
@@ -257,27 +260,34 @@ class _ExecutableCodeFinder(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.found = False
+        self.reason = ""
         self._svg_depth = 0
 
+    def _flag(self, reason: str) -> None:
+        self.found = True
+        self.reason = self.reason or reason
+
     def _inspect(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag == "script" or tag in _NEVER_NEEDED_TAGS:
-            self.found = True
+        if tag == "script":
+            self._flag("<script>")
+        elif tag in _NEVER_NEEDED_TAGS:
+            self._flag(f"<{tag}>")
         names = {name for name, _ in attrs}
-        if tag == "meta" and ("http-equiv" in names or "content" in names):
-            self.found = True  # `<meta charset>`만 허용. 새로고침·정책 메타는 쓸 데가 없다.
+        if tag == "meta" and "http-equiv" in names:
+            self._flag("<meta http-equiv>")  # 새로고침·정책 메타는 쓸 데가 없다. charset·viewport는 통과.
         if tag == "style" and self._svg_depth:
-            self.found = True  # SVG 안의 `<style>`은 글자 덩어리가 아니라 태그로 읽힌다.
+            self._flag("<svg> 안의 <style> — CSS는 맨 위의 <style> 하나에만 둔다")  # 태그로 읽힌다.
         for name, value in attrs:
             if re.fullmatch(r"on[a-z]+", name) or name == "srcdoc":
-                self.found = True
+                self._flag(f"{name}= 속성")
             # 브라우저는 주소에서 탭·줄바꿈을 지우고, 글자 참조(`&#106;`)를 푼다.
             if not value:
                 continue
             url = _URL_NOISE.sub("", html_lib.unescape(value)).lower()
             if url.startswith(("javascript:", "vbscript:")):
-                self.found = True
+                self._flag("javascript: 주소")
             if name in _URL_ATTRIBUTES and url.startswith("data:") and not _SAFE_DATA_URL.match(url):
-                self.found = True  # 그림이 아닌 data: 문서(`text/html`, `svg+xml`)는 코드를 싣는다.
+                self._flag("그림이 아닌 data: 주소 (png·jpg·gif·webp만 된다)")  # data: 문서(`text/html`, `svg+xml`)는 코드를 싣는다.
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self._inspect(tag, attrs)
@@ -292,26 +302,36 @@ class _ExecutableCodeFinder(HTMLParser):
             self._svg_depth -= 1
 
 
-def _contains_executable_code(html: str) -> bool:
-    if _EARLY_CLOSED_COMMENT.search(html) or _NEVER_NEEDED_TEXT.search(html):
-        return True
+def _executable_code_reason(html: str) -> str:
+    """실행 코드로 보이는 **첫 구성요소의 이름**. 없으면 빈 문자열."""
+
+    if _EARLY_CLOSED_COMMENT.search(html):
+        return "<!-->처럼 바로 닫히는 주석"
+    if _NEVER_NEEDED_TEXT.search(html):
+        return "<noscript>·<math>·<textarea> 같은 태그 또는 <![ / --!>"
     if any("<" in body for body in _TITLE_CONTENT.findall(html)):
-        return True
+        return "<title> 안의 태그"
     if any("<!--" in body for body in _STYLE_CONTENT.findall(html)):
-        return True
+        return "<style> 안의 <!--"
     # 주석은 실행되지 않는다. 브리핑이 계산을 주석에 남기라고 시키므로 주석 안은 보지 않는다.
     code_view = _COMMENT.sub(" ", html)
     if "<!--" in code_view:  # 닫히지 않은 주석: 뒤가 전부 주석인지 브라우저와 판단이 갈린다.
-        return True
+        return "닫히지 않은 <!-- 주석"
     if _SCRIPT_TAG.search(code_view):
-        return True
+        return "<script>"
     finder = _ExecutableCodeFinder()
     try:
         finder.feed(code_view)
         finder.close()
     except Exception:  # 읽지 못하면 안전하다고 말할 수 없다.
-        return True
-    return finder.found
+        return "읽을 수 없는 마크업"
+    return finder.reason if finder.found else ""
+
+
+def _contains_executable_code(html: str) -> bool:
+    return bool(_executable_code_reason(html))
+
+
 _FONT_SIZE = re.compile(r"font-size\s*:\s*([0-9]*\.?[0-9]+)\s*px", re.IGNORECASE)
 #: 사람이 안 읽는 자리. `<style>`·`<script>`는 물론 **주석**도 뺀다 -- 브리핑이
 #: 계산 과정을 주석으로 남기라고 시키므로, 안 빼면 그 계산이 전부 "지어낸 숫자"로 걸린다.
@@ -380,8 +400,13 @@ def check_infographic_html(html: str, facts: Sequence[InfographicFact]) -> tuple
         problems.append("문서가 <!DOCTYPE html> ... </html> 모양이 아니다")
     if _EXTERNAL.search(html) or _CSS_IMPORT.search(html):
         problems.append("바깥 주소를 부른다 — 인터넷 없이 그려야 한다")
-    if _contains_executable_code(html):
-        problems.append("실행 코드가 들어 있다 — <script>·on...= 속성·javascript: 주소는 쓰지 않는다")
+    reason = _executable_code_reason(html)
+    if reason:
+        problems.append(
+            f"실행 코드가 들어 있다 — 걸린 것: {reason}. "
+            "<script>·on...= 속성·javascript: 주소·<iframe>/<object>/<embed>·<noscript>·<math>·"
+            "<textarea>·그림이 아닌 data: 주소·<svg> 안의 <style>은 쓰지 않는다"
+        )
     for raw in _FONT_SIZE.findall(html):
         if float(raw) < MINIMUM_FONT_PX:
             problems.append(f"글씨가 너무 작다: {raw}px (가장 작은 값 {MINIMUM_FONT_PX}px)")
