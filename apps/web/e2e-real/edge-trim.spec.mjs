@@ -185,3 +185,43 @@ test("좁은 클립은 손잡이만 그리고 넓은 클립은 가장자리·몸
     await page.screenshot({ path: path.join(SHOT_DIR, `full-${viewport.width}.png`) });
   }
 });
+
+test("고른 클립 몸통의 클릭은 옛 고르기 단추처럼 고르고 시작으로 옮기며 Shift는 토글이다", async ({ page }) => {
+  const { clean } = readFixture();
+  await openEditor(page, clean);
+  const playheadSeconds = () => page.getByTestId("timeline-playhead").getAttribute("data-seconds");
+  const multi = page.getByText("고른 항목 2개");
+
+  await page.getByRole("button", { name: clipName(2) }).click();
+  await expect(handle(page, "이동")).toBeVisible();
+  // 영상 3번째를 Shift로 더 고른다 -> 둘이 골라진다.
+  await page.getByRole("button", { name: clipName(3) }).click({ modifiers: ["Shift"] });
+  await expect(multi).toBeVisible();
+  const body3 = page.getByRole("button", { name: clipName(3, " 이동") });
+  const box = await body3.boundingBox();
+  const at = (f) => ({ x: box.x + box.width * f, y: box.y + box.height / 2 });
+
+  // Shift+클릭(끌기 아님) -> 토글로 빠진다. 끌지 않았으니 서버 값은 그대로(편집 저장 없음).
+  const p = at(0.7);
+  await page.keyboard.down("Shift");
+  await page.mouse.move(p.x, p.y);
+  await page.mouse.down();
+  await page.mouse.move(p.x + 30, p.y, { steps: 3 });
+  await page.mouse.up();
+  await page.keyboard.up("Shift");
+  await expect(multi).toBeHidden();
+
+  // 다시 둘을 고르고, 그냥 클릭하면 그 클립 하나만 남고 재생 머리는 그 클립 시작으로 간다(옛 고르기 단추와 같다).
+  await page.getByRole("button", { name: clipName(2) }).click({ modifiers: ["Shift"] }).catch(() => {});
+  await page.getByRole("button", { name: clipName(3) }).click({ modifiers: ["Shift"] });
+  await page.waitForTimeout(300);
+  const q = at(0.5);
+  await page.mouse.move(q.x, q.y);
+  await page.mouse.down();
+  await page.mouse.move(q.x + 2, q.y); // 2px 흔들림은 클릭이다
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+  await expect(multi).toBeHidden();
+  await expect(page.getByRole("button", { name: clipName(3) })).toHaveAttribute("aria-pressed", "true");
+  expect(Number(await playheadSeconds())).toBeCloseTo(1.8990646, 1);
+});

@@ -727,7 +727,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     if (!draft || draft.kind !== "trim" || draft.pointerId !== event.pointerId) return;
     event.preventDefault();
     releasePointerCapture(event.currentTarget, event.pointerId);
-    clearDraft(dragMoved(draft, event));
+    clearDraft(true);
     if (!dragMoved(draft, event)) return;
     const bounds = deriveNarrationTrim({
       clip: draft.clip,
@@ -740,10 +740,18 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     const result = { segmentId: draft.clip.segmentId, ...bounds };
     if (result.startSec !== draft.clip.startSec || result.endSec !== draft.clip.endSec) onTrimNarration?.(result);
   };
+  // 몸통을 눌렀다 떼기만 하면(3px 안쪽) 옛 고르기 단추를 누른 것과 똑같이 처리한다: 고르고, 시작으로 옮기고, Shift면 토글.
+  const isModifiedPress = (event: PointerEvent<HTMLElement>) => event.shiftKey || event.ctrlKey || event.metaKey;
+  const selectClipById = (clipId: string | undefined, additive: boolean) => {
+    const rect = clipId ? rects.find((item) => item.clipId === clipId) : undefined;
+    if (rect) selectClip(rect, additive);
+  };
+  const narrationClipIdOf = (segmentId: string) => [...narrationByClipId.entries()].find(([, value]) => value.segmentId === segmentId)?.[0];
   const startReorder = (event: PointerEvent<HTMLButtonElement>, clip: NarrationSegment) => {
     if (isSaving || lockedLanes.has("narration")) return;
     event.preventDefault();
     event.stopPropagation();
+    if (isModifiedPress(event)) { selectClipById(narrationClipIdOf(clip.segmentId), event.shiftKey); return; }
     const originalIndex = narration.findIndex((segment) => segment.segmentId === clip.segmentId);
     if (originalIndex === -1) return;
     const timelineTrack = event.currentTarget.closest<HTMLElement>("[data-timeline-track]");
@@ -786,8 +794,8 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     if (!draft || draft.kind !== "reorder" || draft.pointerId !== event.pointerId) return;
     event.preventDefault();
     releasePointerCapture(event.currentTarget, event.pointerId);
-    clearDraft(dragMoved(draft, event));
-    if (!dragMoved(draft, event)) return;
+    clearDraft(true);
+    if (!dragMoved(draft, event)) { selectClipById(narrationClipIdOf(draft.movingId), false); return; }
     const result = reorderAtPointer(draft, event);
     if (result.targetIndex !== result.originalIndex) onReorderNarration?.(result.layout);
   };
@@ -800,6 +808,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   const startPlacement = (event: PointerEvent<HTMLButtonElement>, placement: TimelinePlacement, operation: "move" | "trim", edge?: "start" | "end") => {
     if (isSaving || lockedLanes.has(placement.kind)) return;
     event.preventDefault(); event.stopPropagation();
+    if (operation === "move" && isModifiedPress(event)) { selectClipById(placement.placementId, event.shiftKey); return; }
     const timelineTrack = event.currentTarget.closest<HTMLElement>("[data-timeline-track]");
     if (timelineTrack) capturePointer(timelineTrack, event.pointerId);
     const movePlacements = selectedPlacementIds.length > 1
@@ -819,8 +828,9 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   const endPlacement = (event: PointerEvent<HTMLElement>) => {
     const draft = pointerDraft;
     if (!draft || (draft.kind !== "placement-move" && draft.kind !== "placement-trim") || draft.pointerId !== event.pointerId) return;
-    event.preventDefault(); releasePointerCapture(event.currentTarget, event.pointerId); clearDraft(dragMoved(draft, event));
-    if (dragMoved(draft, event)) {
+    event.preventDefault(); releasePointerCapture(event.currentTarget, event.pointerId); clearDraft(true);
+    if (!dragMoved(draft, event)) { if (draft.kind === "placement-move") selectClipById(draft.placement.placementId, false); return; }
+    {
       const bounds = placementBoundsAtPointer(draft, event);
       if (draft.kind === "placement-move" && draft.placements.length > 1) {
         const deltaSec = bounds.startSec - draft.placement.startSec;

@@ -227,8 +227,8 @@ function mockTimelineTrackRect(left = 0) {
   });
 }
 
-function pointer(target: Element, type: string, clientX = 0) {
-  fireEvent(target, new MouseEvent(type, { bubbles: true, cancelable: true, clientX }));
+function pointer(target: Element, type: string, clientX = 0, modifiers: { shiftKey?: boolean } = {}) {
+  fireEvent(target, new MouseEvent(type, { bubbles: true, cancelable: true, clientX, ...modifiers }));
 }
 
 describe("TimelineDock", () => {
@@ -1465,6 +1465,12 @@ describe("가장자리 손잡이와 몸통 끌기", () => {
       ? { ...track, clips: track.clips.map((clip) => ({ ...clip, placementId: "broll:b-1" })) }
       : track),
   };
+  const bothPlacedView: EditorViewModel = {
+    ...placedView,
+    tracks: placedView.tracks.map((track) => track.role === "overlay"
+      ? { ...track, clips: track.clips.map((clip) => ({ ...clip, placementId: "overlay:o-late" })) }
+      : track),
+  };
   const brollHandles = () => ({
     start: screen.getByRole("button", { name: /영상 1.* 시작 자르기$/ }),
     end: screen.getByRole("button", { name: /영상 1.* 끝 자르기$/ }),
@@ -1623,5 +1629,45 @@ describe("가장자리 손잡이와 몸통 끌기", () => {
     expect(css).toMatch(/\.vb-trim-handle\s*\{[^}]*width:\s*var\(--vb-trim-hit-w\)/);
     expect(css).toMatch(/\.vb-trim-handle::before\s*\{[^}]*width:\s*var\(--vb-trim-handle-w\)/);
     expect(css).toMatch(/\.vb-clip-body-drag\s*\{[^}]*left:\s*var\(--vb-trim-hit-w\)/);
+  });
+  it("몸통을 흔들림(2px)만 하고 놓으면 클릭이라 그 클립을 고르고 시작으로 이동한다", () => {
+    const onUpdatePlacements = vi.fn();
+    const onPlaybackSeek = vi.fn();
+    const onSelectSegment = vi.fn();
+    render(<TimelineDock view={bothPlacedView} viewportWidthPx={400} onPlaybackSeek={onPlaybackSeek} onSelectSegment={onSelectSegment} onUpdatePlacements={onUpdatePlacements} />);
+    selectTimelineClip("broll:b-1");
+    onPlaybackSeek.mockClear(); onSelectSegment.mockClear();
+    const move = screen.getByRole("button", { name: /영상 1.* 이동$/ });
+    pointer(move, "pointerdown", 100);
+    pointer(move, "pointermove", 102);
+    pointer(move, "pointerup", 102);
+    expect(onUpdatePlacements).not.toHaveBeenCalled();
+    expect(onPlaybackSeek).toHaveBeenCalledWith(5);
+    expect(onSelectSegment).toHaveBeenCalledWith("segment-2");
+  });
+
+  it("고른 클립 몸통의 Shift+클릭은 끌기가 아니라 고르기 토글이다", () => {
+    const onUpdatePlacements = vi.fn();
+    render(<TimelineDock view={bothPlacedView} viewportWidthPx={400} onUpdatePlacements={onUpdatePlacements} />);
+    selectTimelineClip("broll:b-1");
+    fireEvent.click(timelineClipSelection("overlay:o-late"), { shiftKey: true });
+    expect(screen.getByText("고른 항목 2개")).toBeInTheDocument();
+    const move = screen.getByRole("button", { name: /오버레이.* 이동$/ });
+    pointer(move, "pointerdown", 100, { shiftKey: true });
+    pointer(move, "pointermove", 200, { shiftKey: true });
+    pointer(move, "pointerup", 200, { shiftKey: true });
+    expect(onUpdatePlacements).not.toHaveBeenCalled();
+    expect(screen.queryByText("고른 항목 2개")).toBeNull();
+  });
+
+  it("여럿 고른 상태에서 한 클립 몸통을 그냥 누르면 그 클립 하나만 남는다", () => {
+    render(<TimelineDock view={bothPlacedView} viewportWidthPx={400} onUpdatePlacements={vi.fn()} />);
+    selectTimelineClip("broll:b-1");
+    fireEvent.click(timelineClipSelection("overlay:o-late"), { shiftKey: true });
+    expect(screen.getByText("고른 항목 2개")).toBeInTheDocument();
+    const move = screen.getByRole("button", { name: /오버레이.* 이동$/ });
+    pointer(move, "pointerdown", 100);
+    pointer(move, "pointerup", 100);
+    expect(screen.queryByText("고른 항목 2개")).toBeNull();
   });
 });

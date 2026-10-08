@@ -647,3 +647,5 @@
 .vb-trim-handle:focus-visible, .vb-clip-body-drag:focus-visible { outline: 2px solid var(--vb-accent); outline-offset: -2px; }
 /* 손잡이 띠가 있는 클립은 이름을 띠 안쪽에서 시작한다 -- 띠가 이름 첫 글자를 덮지 않게(스크린샷으로 확인). */
 .vb-timeline-clip:has(.vb-trim-handle) .vb-timeline-clip__name { left: calc(var(--vb-trim-handle-w) + 1px); max-width: calc(100% - 2 * var(--vb-trim-handle-w) - 2px); }
+/* 좁은 클립의 이동 단추는 sr-only라 자기 초점 고리가 잘린다 -- 클립 테두리로 대신 보인다. */
+.vb-timeline-clip:has(.sr-only:focus-visible) { outline: 2px solid var(--vb-accent); outline-offset: -2px; }
