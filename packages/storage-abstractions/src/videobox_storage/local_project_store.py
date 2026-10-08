@@ -463,6 +463,21 @@ def _normalize_review_flag_payloads(value: object) -> list[dict[str, str]]:
     return normalized
 
 
+def _session_projection_clip_ids(tracks: object) -> list[str]:
+    from videobox_core_engine.composition_plan import is_session_projection_clip
+    return [str(clip.get("clip_id")) for track in (tracks if isinstance(tracks, list) else []) if isinstance(track, dict)
+            for clip in track.get("clips", []) if isinstance(clip, dict) and is_session_projection_clip(clip)]
+
+
+def _refuse_new_session_projection_clips(*, previous_tracks: object, next_tracks: object) -> None:
+    """세션 투영 클립을 편집판 원본에 **새로** 쓰지 못하게 한다(2026-10-08 점검 §3-3).
+    이미 있던 옛 데이터(0907)는 그대로 지나가야 매 편집의 판 번호 옮기기가 산다."""
+    previous = sorted(_session_projection_clip_ids(previous_tracks))
+    following = sorted(_session_projection_clip_ids(next_tracks))
+    if len(following) > len(previous) or not set(following) <= set(previous):
+        raise ValueError("timeline_contains_session_projection")
+
+
 def _timeline_summary_json(payload: dict[str, Any]) -> str:
     tracks = payload.get("tracks", [])
     gap_slots = payload.get("gap_slots", [])
@@ -2761,6 +2776,7 @@ class LocalProjectStore(OutputVariantMixin, PreviewShareMixin, YujinMemoryMixin,
             payload["source_session_id"] = str(source_session_id)
         if source_session_revision is not None:
             payload["source_session_revision"] = int(source_session_revision)
+        _refuse_new_session_projection_clips(previous_tracks=[], next_tracks=payload.get("tracks"))
         timeline_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
         summary_json = _timeline_summary_json(payload)
         self._execute(
@@ -3600,6 +3616,7 @@ class LocalProjectStore(OutputVariantMixin, PreviewShareMixin, YujinMemoryMixin,
         payload["file_uri"] = str(existing.get("file_uri"))
         payload["created_at"] = str(existing.get("created_at"))
 
+        _refuse_new_session_projection_clips(previous_tracks=existing.get("tracks"), next_tracks=payload.get("tracks"))
         file_path = self._timeline_file_path(project_id=project_id, timeline_id=timeline_id)
         file_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
 

@@ -11,6 +11,7 @@ from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 
+from videobox_core_engine.composition_plan import without_session_projection_clips
 from videobox_core_engine.shorts_layout import ShortsTitle, shorts_geometry, shorts_title_from_override
 from videobox_domain_models.output_variants import (
     OutputVariant,
@@ -696,7 +697,7 @@ def build_variant_timeline_payload(
             "source_session_revision": derived.source_session_revision,
             "segments": list(derived.segments),
             "tracks": _fill_frame_for_vertical_variant(
-                master_timeline.get("tracks", []), variant_kind=variant_kind,
+                without_session_projection_clips(master_timeline.get("tracks", [])), variant_kind=variant_kind,
                 box_aspect=box_aspect,
             ),
         }

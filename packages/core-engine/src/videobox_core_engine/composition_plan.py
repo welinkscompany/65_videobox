@@ -9,7 +9,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from math import isfinite
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from videobox_core_engine.caption_translation import caption_text_for_language
 from videobox_core_engine.editing_session import MAX_RIPPLE_PLAYBACK_RATE, MIN_RIPPLE_PLAYBACK_RATE
@@ -22,6 +22,25 @@ COMPOSITION_VERSION = "videobox_composition_v1"
 DEFAULT_OUTPUT_WIDTH = 1080
 DEFAULT_OUTPUT_HEIGHT = 1920
 _SUPPORTED_TRACKS = frozenset({"narration", "broll", "bgm", "sfx", "overlay"})
+
+#: materialize가 **세션에서 만들어 낸** 클립의 이름 머리(`session-{종류}-…`).
+#: 이런 클립은 저장된 편집판의 원본이 아니다 -- 세션이 있으면 언제든 다시 만들어진다.
+#: 2026-09-20 되돌린 커밋이 이 클립들을 0907의 `timeline_002.json`에 박아 넣었고,
+#: 생성기가 그것을 원본으로 다시 투영해 오버레이가 18~22개로 불었다(2026-10-08 점검 §3-3).
+SESSION_PROJECTION_CLIP_PREFIX = "session-"
+
+
+def is_session_projection_clip(clip: Mapping[str, Any]) -> bool:
+    return str(clip.get("clip_id") or "").startswith(SESSION_PROJECTION_CLIP_PREFIX)
+
+
+def without_session_projection_clips(tracks: object) -> list[dict[str, Any]]:
+    """트랙은 그대로 두고 투영 클립만 뺀 깊은 사본. 트랙 수(`summary.track_count`)는 안 바뀐다."""
+    return [
+        {**deepcopy(track), "clips": [deepcopy(clip) for clip in track.get("clips", []) if isinstance(clip, dict) and not is_session_projection_clip(clip)]}
+        for track in (tracks if isinstance(tracks, list) else []) if isinstance(track, dict)
+    ]
+
 # 값을 여기 또 적지 않는다 -- 예전에는 이 파일과 `editing_session.py`가 각자
 # `frozenset`을 갖고 있어서, 한쪽만 고치면 **저장은 되는데 렌더가 거부하는**
 # 상태가 된다(2026-09-04에 범위를 넓히며 하나로 모았다).
@@ -422,6 +441,9 @@ def materialize_editing_session_timeline(
         for raw in track.get("clips", []) if isinstance(track.get("clips"), list) else []:
             if not isinstance(raw, dict):
                 continue
+            # 세션이 만든 클립은 원본이 아니다 -- 아래 세션 고리가 다시 만든다.
+            if track_type != "narration" and is_session_projection_clip(raw):
+                continue
             if track_type == "narration" and raw is global_narration_clip:
                 identity_projection = all(caption_has_identity_projection(caption) for caption in caption_clips)
                 if identity_projection:
@@ -774,6 +796,15 @@ def materialize_editing_session_timeline(
                     for key in ("expected_content_sha256", "media_revision"):
                         if payload.get(key):
                             clip[key] = payload[key]
+                    # 이름이 겹치면 렌더러가 하나를 가리고 화면 고르기가 죽는다. 일반 트랙
+                    # 고리와 **같은 규칙**(`@트랙`·`-2`)으로 겹치지 않게 한다.
+                    overlay_ids = {str(item.get("clip_id")) for (kind, _), bucket in tracks.items() if kind == "overlay" for item in bucket}
+                    if clip["clip_id"] in overlay_ids:
+                        base_id, suffix = f"{clip['clip_id']}@session", 2
+                        candidate = base_id
+                        while candidate in overlay_ids:
+                            candidate, suffix = f"{base_id}-{suffix}", suffix + 1
+                        clip["clip_id"] = candidate
                     tracks.setdefault(("overlay", materialized_track_id("overlay")), []).append(clip)
                 else:
                     candidate = {

@@ -16,6 +16,7 @@ from videobox_core_engine.composition_plan import (
     DEFAULT_OUTPUT_WIDTH,
     materialize_editing_session_timeline,
     materialized_timeline_duration_sec,
+    without_session_projection_clips,
 )
 from videobox_core_engine.timeline_placements import placement_id
 from videobox_core_engine.track_states import normalize_track_states
@@ -60,9 +61,10 @@ def build_editor_playback_manifest(
     # Validate persisted source roles before materialization.  The materializer
     # intentionally only emits renderer-supported tracks, so validating after
     # it would otherwise turn an invalid stored role into a silent omission.
-    for item in timeline.get("tracks", []):
-        if isinstance(item, dict):
-            _track_contract(item)
+    # 세션 투영 클립은 원본이 아니라 materialize가 건너뛴다 -- 옛 오염 데이터(0907)의
+    # 그 클립 때문에 편집기가 통째로 안 열리면 안 된다(2026-10-08 계획 H Task 4).
+    for item in without_session_projection_clips(timeline.get("tracks", [])):
+        _track_contract(item)
     fps_num = _positive_int(timeline.get("fps_num"), DEFAULT_FPS_NUM)
     fps_den = _positive_int(timeline.get("fps_den"), DEFAULT_FPS_DEN)
     materialized = materialize_editing_session_timeline(timeline=timeline, editing_session=session, project_id=project_id)
