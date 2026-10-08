@@ -106,6 +106,7 @@ def test_task14_timeline_math_is_reference_only():
             "apps/web/src/features/editor/timeline/timeline-geometry.ts",
             "apps/web/src/features/editor/timeline/snapping.ts",
             "apps/web/src/features/editor/timeline/hit-testing.ts",
+            "apps/web/src/features/editor/timeline/rulerScale.ts",
         ],
         "inspected_upstream_paths": [
             {"path": "apps/web/src/fps/utils.ts", "sha256": "b3d091725124abe21b348d34cb15643200fb8e650cbb2fab3ce16fb68c6dac28"},
@@ -114,6 +115,7 @@ def test_task14_timeline_math_is_reference_only():
             {"path": "apps/web/src/timeline/snapping/resolve.ts", "sha256": "73f7865940cd914b09070ca3daa03325b03a31bd33ebb6766dc0975736c6fc0d"},
             {"path": "apps/web/src/timeline/snapping/threshold.ts", "sha256": "951ed0604bcd5960384a520a14cf66f554c2580f4e0098e0307939db73ced686"},
             {"path": "apps/web/src/timeline/zoom-utils.ts", "sha256": "00d105f58146956d915b4614ee1796a73513ff786bed90dd07d1245ee2fb84b6"},
+            {"path": "apps/web/src/timeline/ruler-utils.ts", "sha256": "8acde0c6a49be27d9517fcabfc9239bcaeb8ae24586aeb05e08338b8b140ce57"},
         ],
         "forbidden_import_terms": [
             "EditorCore", "next/", "database", "renderer", "IndexedDB", "OPFS",

@@ -9,6 +9,7 @@ import { findTimelineSnap, type SnapCandidate, type SnapCandidateKind, type Time
 import { snapDragProposal } from "./dragSnap";
 import { frameToSeconds, pixelsToTime, secondsToFrameHalfUp, timeToPixels } from "./time-scale";
 import { readCssPixels } from "./timelineCssMetrics";
+import { formatRulerLabel, rulerIntervals, rulerMarks as rulerMarkTimes } from "./rulerScale";
 import { TIMELINE_LANES, type ClipRect, type TimelineLane } from "./timeline-geometry";
 import { deriveNarrationTrim, reorderNarrationLayout, type NarrationSegment, type NarrationReorderLayout } from "./narrationMutation";
 import { derivePlacementMove, derivePlacementTrim, type TimelinePlacement, type TimelinePlacementKind } from "./placementMutation";
@@ -31,6 +32,8 @@ const DEFAULT_LANE_HEIGHT_PX = 32;
 const HIDEABLE_LANES = new Set<TimelineLane>(["broll", "overlay", "caption"]);
 const MUTABLE_LANES = new Set<TimelineLane>(["narration", "broll", "bgm", "sfx"]);
 const SNAP_THRESHOLD_PX = 8;
+/** 눈금 글자 사이의 최소 간격(px). 실제 값은 CSS 변수 `--vb-ruler-label-min-gap`에서 마운트 뒤 읽는다. */
+const DEFAULT_RULER_LABEL_GAP_PX = 120;
 /** 한 번에 얼마나 늘리고 줄이는가. `navigationKeyAction`의 기본값과 같은 값이고,
  *  단추·키·전체 보기가 전부 이 한 값을 본다. */
 const ZOOM_STEP = 1.25;
@@ -264,6 +267,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   const trackWidthPx = measuredTrackWidthPx > 0 ? measuredTrackWidthPx : viewportWidthPx;
   // 트랙 높이는 CSS 변수(`--vb-timeline-lane-h`)가 정한다. 첫 렌더는 기본값, 마운트 뒤 한 번 읽는다.
   const [laneHeightPx, setLaneHeightPx] = useState(DEFAULT_LANE_HEIGHT_PX);
+  const [rulerLabelGapPx, setRulerLabelGapPx] = useState(DEFAULT_RULER_LABEL_GAP_PX);
   const zoomBounds = pixelsPerSecondBounds({ durationSec: view.output.durationSec, viewportWidthPx: trackWidthPx });
   const options = {
     durationSec: view.output.durationSec,
@@ -353,7 +357,10 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   // 마운트 뒤 CSS 변수에서 트랙 높이를 한 번 읽고, 클립 칸 폭을 잰다. 둘 다 jsdom에서는
   // 기본값/받은 폭으로 남는다(관찰 콜백이 없다).
   useEffect(() => {
-    const readLaneHeight = () => setLaneHeightPx(readCssPixels(surfaceRef.current, "--vb-timeline-lane-h", DEFAULT_LANE_HEIGHT_PX));
+    const readLaneHeight = () => {
+      setLaneHeightPx(readCssPixels(surfaceRef.current, "--vb-timeline-lane-h", DEFAULT_LANE_HEIGHT_PX));
+      setRulerLabelGapPx(readCssPixels(surfaceRef.current, "--vb-ruler-label-min-gap", DEFAULT_RULER_LABEL_GAP_PX));
+    };
     readLaneHeight();
     const viewport = lanesViewportRef.current;
     if (!viewport || typeof ResizeObserver === "undefined") return undefined;
@@ -428,11 +435,16 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     pixelsPerSecond: state.pixelsPerSecond,
     originSec: state.viewportStartSec,
   });
-  const rulerMarks = useMemo(() => {
-    const first = Math.ceil(state.viewportStartSec);
-    const last = Math.floor(viewportEndSec);
-    return Array.from({ length: Math.max(0, last - first + 1) }, (_, index) => first + index);
-  }, [state.viewportStartSec, viewportEndSec]);
+  // 확대 정도에 따라 간격을 고른다(스파이크 H-e). 1초마다 고정이면 전체 보기에서 글자가 11px 간격으로 붙는다.
+  const rulerTicks = useMemo(() => {
+    const { majorSec, minorSec } = rulerIntervals(state.pixelsPerSecond, view.fps, rulerLabelGapPx);
+    const range = { startSec: state.viewportStartSec, endSec: viewportEndSec };
+    const majors = rulerMarkTimes({ ...range, majorSec });
+    const majorSet = new Set(majors);
+    const minors = minorSec < majorSec ? rulerMarkTimes({ ...range, majorSec: minorSec }).filter((seconds) => !majorSet.has(seconds)) : [];
+    return { majorSec, majors, minors };
+  }, [rulerLabelGapPx, state.pixelsPerSecond, state.viewportStartSec, view.fps, viewportEndSec]);
+  const rulerLeft = (seconds: number) => `${timeToPixels(seconds, { pixelsPerSecond: state.pixelsPerSecond, originSec: state.viewportStartSec })}px`;
 
   const handleClick = (event: MouseEvent<HTMLElement>) => {
     if (Date.now() - dragEndedAtRef.current < 50) return;
@@ -1109,8 +1121,9 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
       </div>
       <div className="vb-timeline-lanes-viewport" ref={lanesViewportRef}>
       <div className="vb-timeline-scale">
-        <div aria-label="시간 눈금" role="list" style={{ display: "flex", minHeight: "var(--vb-timeline-ruler-h, 1.5rem)", overflow: "hidden" }}>
-          {rulerMarks.map((seconds) => <span key={seconds} aria-label={`눈금 ${seconds}초`} role="listitem" style={{ minWidth: `${state.pixelsPerSecond}px` }}>{seconds}s</span>)}
+        <div aria-label="시간 눈금" role="list" style={{ position: "relative", minHeight: "var(--vb-timeline-ruler-h, 1.5rem)", overflow: "hidden" }}>
+          {rulerTicks.minors.map((seconds) => <span key={`minor-${seconds}`} aria-hidden="true" className="vb-ruler-minor" style={{ left: rulerLeft(seconds) }} />)}
+          {rulerTicks.majors.map((seconds) => <span key={seconds} aria-label={`눈금 ${formatSeconds(seconds)}초`} role="listitem" className="vb-ruler-major" style={{ left: rulerLeft(seconds) }}>{formatRulerLabel(seconds, rulerTicks.majorSec)}</span>)}
         </div>
       </div>
       <div data-timeline-track data-testid="timeline-track" onLostPointerCapture={lostPointerCapture} onPointerCancel={cancelPointerDraft} onPointerMove={movePointerDraft} onPointerUp={endPointerDraft} style={{ position: "relative", height: `${TIMELINE_LANES.length * laneHeightPx}px` }}>

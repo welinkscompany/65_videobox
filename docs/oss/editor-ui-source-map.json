@@ -302,7 +302,8 @@
         "apps/web/src/features/editor/timeline/time-scale.ts",
         "apps/web/src/features/editor/timeline/timeline-geometry.ts",
         "apps/web/src/features/editor/timeline/snapping.ts",
-        "apps/web/src/features/editor/timeline/hit-testing.ts"
+        "apps/web/src/features/editor/timeline/hit-testing.ts",
+        "apps/web/src/features/editor/timeline/rulerScale.ts"
       ],
       "inspected_upstream_paths": [
         {
@@ -328,6 +329,10 @@
         {
           "path": "apps/web/src/timeline/zoom-utils.ts",
           "sha256": "00d105f58146956d915b4614ee1796a73513ff786bed90dd07d1245ee2fb84b6"
+        },
+        {
+          "path": "apps/web/src/timeline/ruler-utils.ts",
+          "sha256": "8acde0c6a49be27d9517fcabfc9239bcaeb8ae24586aeb05e08338b8b140ce57"
         }
       ],
       "forbidden_import_terms": [

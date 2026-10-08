@@ -635,6 +635,9 @@
 .vb-timeline-lane-headers [role="listitem"] > button { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: var(--vb-timeline-header-btn); min-width: var(--vb-timeline-header-btn); height: var(--vb-timeline-header-btn); min-height: var(--vb-timeline-header-btn); padding: 0; }
 .vb-timeline-lanes-viewport { position: relative; min-width: 0; overflow: hidden; }
 .vb-timeline-scale > [role="list"] { height: var(--vb-timeline-ruler-h); }
+/* 눈금: 큰 눈금은 글자와 왼쪽 선, 잔눈금은 아래쪽 짧은 선. 위치는 클립과 같은 좌표계로 인라인 left가 정한다. */
+.vb-ruler-major { position: absolute; top: 0; bottom: 0; padding-inline-start: var(--vb-space-1); border-inline-start: 1px solid var(--border); white-space: nowrap; }
+.vb-ruler-minor { position: absolute; bottom: 0; height: 30%; border-inline-start: 1px solid var(--border); }
 
 /* 가장자리 손잡이(2026-10-08 점검 §3-8, 스파이크 H-c). 잡는 폭은 넓게, 보이는 띠는 얇게. 크기는 위 변수 둘뿐이다.
    z-index 4: 클립을 고르면 재생 머리가 그 시작 모서리로 오는데(z-index 3, 잡는 폭 0.9rem) 손잡이가 그 밑에 깔리면 못 잡는다. */

@@ -104,7 +104,7 @@ VideoBox의 기본 반입 방식은 이 방식이다.
 | `shadcn-ui/ui` | `4396d5b2a5ee4e2ad5705e9b2522f92112f811a0`, CLI 4.13.0 | `apps/web/src/components/ui/` | `adopt locked source` | Radix base registry path와 normalized file SHA를 lock하고 VideoBox가 소유한다. live registry 결과만으로 pin을 주장하지 않는다 |
 | `satnaing/shadcn-admin` | `e16c87f213a5ba5e45964e9b67c792105ec74d26` | `apps/web/src/components/layout/` | `partial port` | shell/sidebar/header/project switcher/settings layout만 이식한다 |
 | `OpenCut-app/OpenCut` | `bab8af831b354a0b5a98a4a6e818ab7d633b94df` | 반입 없음 | `exclude as editor runtime` | current rewrite에는 아직 실제 editor가 없다 |
-| `OpenCut-app/opencut-classic` | `cf5e79e919144200294fb9fed22a222592a0aeea` | `apps/web/src/features/editor/` | `partial port / adapt` | panel composition과 pure geometry만; EditorCore/storage/renderer/export는 제외한다 |
+| `OpenCut-app/opencut-classic` | `cf5e79e919144200294fb9fed22a222592a0aeea` | `apps/web/src/features/editor/` | `partial port / adapt` | panel composition과 pure geometry만; EditorCore/storage/renderer/export는 제외한다. 2026-10-08: 눈금 간격 계산도 보고 다시 씀(`rulerScale.ts`) |
 | `opencast/editor` | `1208afb64d9de0ab50b321f84f9dd2695780db87` | `apps/web/src/features/editor/transcript/` | `attributed behavioral adaptation` | Apache-2.0 고지와 변경 내역을 남기고 cue/time/cut UX만 재구현한다. Redux/MUI/player/browser waveform은 제외한다 |
 | `supabase/supabase` | `1c827c5cbb29cacc6e9052adff2e1659e3cb05fb` | 로컬 source 반입 없음 | `reference only` | project/settings/mobile IA만 참고한다 |
 | `orioncactus/pretendard` | `v1.3.9`, `5c41199ea0024a9e0b2cb31735265056e5472d76` | `apps/web/src/assets/fonts/` | `adopt pinned binary` | Variable WOFF2 SHA256 `9599f12fd42fc0bce1cd50b47a0c022e108d7aa64dd0d1bb0ed44f3282d900b4`, SIL OFL 1.1 notice, runtime CDN 0 |
@@ -128,12 +128,15 @@ VideoBox의 기본 반입 방식은 이 방식이다.
 | `mlfoundations/open_clip` | repo 전체를 dependency로만 검토 | 추후 `packages/core-engine/src/videobox_core_engine/multimodal_retrieval.py` | `reference only` | 장기적으로 B-roll 추천 품질 개선 가능성이 있으나 Phase 8 첫 반입 대상은 아니다 | repo는 오픈소스지만 pretrained model 라이선스가 checkpoint마다 다르다 | 모델 선택 실수 시 비상업/혼합 라이선스 리스크 발생 |
 | `remotion-dev/remotion` | 반입 없음 | 반입 없음 | `exclude` | 설명형 시각화 가능성은 높지만 현재 범위에 비해 무겁고 license 검토가 필요하다 | 공식 저장소 설명 기준, 특정 규모 이상의 회사는 별도 라이선스 검토 필요 | 범위 증가 + 라이선스 검토 비용 발생 |
 | `tauri-apps/tauri` | 반입 없음 | `apps/desktop/` 장기 후보 | `reference only` | 데스크톱 패키징 방향은 유효하지만 지금은 web dashboard + local API 검증이 우선이다 | 공식 생태계는 MIT/Apache-2.0 계열이나 배포 번들 dependency는 별도 확인 필요 | 패키징 문제에 시간 소모 가능 |
-| `Augani/openreel-video` | 타임라인/플레이어/UI shell만 선별 검토 | `apps/web/src/` + 필요 시 helper 분리 | `partial port` | 브라우저 기반 편집기 UI와 재생 구조는 경량 후편집기 셸 참고 가치가 높다 | 라이선스와 사용 중인 브라우저 API, 번들 크기 검토 필요 | 통째 반입 시 구조 오염과 과한 편집기 범위 유입 위험 |
+| `Augani/openreel-video` | 반입 없음(2026-10-08 `partial port`에서 내림) | 반입 없음 | `reference only` | 클립이 프로젝트 저장소에 직접 쓰고 브라우저가 렌더를 가진다. 배운 것은 양 끝 띠 손잡이·클립 끝 붙기 동작뿐 — 2026-10-08 스파이크(`docs/superpowers/2026-10-08-timeline-adoption-spike.ko.md`) | 라이선스와 사용 중인 브라우저 API, 번들 크기 검토 필요 | 통째 반입 시 구조 오염과 과한 편집기 범위 유입 위험 |
 | `aqm857886159/Nomi` | 구조 참고만 | 반입 없음 | `reference only` | 로컬 우선 AI 영상 생성/편집 흐름은 참고 가치가 있으나 앱 구조 전체는 VideoBox 경계와 다르다 | 라이선스, 데스크톱 앱 구조, 빌드 체인 재검토 필요 | 생성 파이프라인 전제를 그대로 가져오면 범위가 커짐 |
 | `chatman-media/timeline-studio` | 구조 참고만 | 반입 없음 | `reference only` | AI 통합 영상 편집기 방향성은 참고 가치가 있으나 현재 범위보다 넓다 | 라이선스와 런타임/패키징 의존성 점검 필요 | 멀티트랙 편집기 범위가 그대로 유입될 위험 |
 | `palmier-io/palmier-pro` | MCP/에이전트 UX 참고만 | 반입 없음 | `reference only` | AI 편집기와 에이전트 결합 방향은 참고 가치가 있으나 생성 처리 일부가 닫혀 있고 앱 구조가 다르다 | 오픈소스 범위와 비공개 처리 영역 구분 필요 | 그대로 맞추면 제품 경계가 Palmier 쪽으로 끌려갈 수 있음 |
 | `OpenCut-app/OpenCut` | 반입 없음 | 반입 없음 | `exclude` (재조사 예정) | "캡컷 대체"를 표방하는 화제성 큰 프로젝트지만(GitHub API 기준 88,088 star, MIT, TypeScript+Rust core, 2026-08-10 최근 push), 2026-08-31 확인 시점에 README가 **"처음부터 재작성 중, 외부 기여 안 받음"**을 명시하고 있어 실제로 가져올 코드가 없다. 예전에 동작하던 버전(`opencut-app/opencut-classic`)은 2026-05-17에 **archived**됐다(238 star, 더 이상 관리 안 함) | MIT (재작성판 기준) | 재작성이 완료되면 UI/구조가 완전히 달라질 수 있어, 지금 판단을 그대로 미래에 적용하면 안 된다 — 재조사 필요 |
 | `MartinDelophy/ai-video-editor` | 구조 참고만 | 반입 없음 | `reference only` | "창작자와 AI 에이전트가 같은 실제 타임라인을 함께 편집"이라는 컨셉이 VideoBox의 자율 창작 루프 방향과 겹친다. 2026-08-31 확인 시점 663 star, MIT, JavaScript, 당일 커밋 있음(활발) | MIT | 아직 작고 검증 안 된 프로젝트라 코드 품질·유지보수 지속성 리스크 큼 |
+| `xzdarcy/react-timeline-editor` | 반입 없음 | 반입 없음 | `exclude` | 2026-10-08 스파이크 판정: 시험 0개·aria 0개·키보드 없음이라 지금 있는 키보드 자르기·옮기기를 잃는다. 그리기를 통째로 가져가면 다크 팔레트·한국어 이름표를 다시 덮어써야 한다 | MIT (797 star, 2026-01-25 확인) | 얻는 것은 끌기 동작 하나뿐인데 의존 둘과 약 550줄을 붙여야 한다 |
+| `walterlow/freecut` | 반입 없음 | 반입 없음 | `reference only` | 2026-10-08 스파이크 판정: 시험(185파일) 품질은 좋지만 타임라인이 8만 줄 규모이고 손질 함수도 저장소를 import한다. 붙기 계산은 우리 것과 같은 수준 | MIT (2,239 star, 2026-09-29 확인) | 통째 반입 시 구조 오염 |
+| `AIEraDev/Clypra` | 반입 없음 | 반입 없음 | `reference only` | 2026-10-08 스파이크 판정: `gapEngine.ts`(리플·빈 구간)는 거의 순수하고 시험도 있어 서버 리플 규칙을 정할 때 참고한다. 리플은 서버 몫이라 웹에 옮길 코드가 아니다 | MIT (3,311 star, 2026-10-07 확인) | Tauri·자체 엔진에 결합 |
 
 **2026-08-31 재확인 메모**: owner가 "캡컷 같은 오픈소스 없냐"고 물어 웹 검색으로 재조사했다.
 검색 결과 상당수(스타 수 4~8만대를 주장하는 블로그 글)가 GitHub API로 대조해보니 부풀려져
@@ -174,7 +177,7 @@ VideoBox의 기본 반입 방식은 이 방식이다.
 | `jamiepine/voicebox` | local-first TTS studio 방향 참고용 |
 | `mlfoundations/open_clip` | 추후 multimodal retrieval 검증용 |
 | `tauri-apps/tauri` | 추후 desktop wrapper 검토용 |
-| `Augani/openreel-video` | 경량 후편집기 UI shell 검토용 |
+| `Augani/openreel-video` | 경량 후편집기 UI shell 검토용(2026-10-08 `reference only`로 내림 — 양 끝 띠 손잡이·클립 끝 붙기 동작만 참고) |
 | `aqm857886159/Nomi` | 로컬 우선 AI 편집 흐름 참고용 |
 | `chatman-media/timeline-studio` | 타임라인/플레이어 구조 참고용 |
 | `palmier-io/palmier-pro` | 에이전트 편집 UX 참고용 |
@@ -197,7 +200,7 @@ VideoBox의 기본 반입 방식은 이 방식이다.
 1. `editing session` 데이터 모델 고정
 2. 수정 API와 부분 재생성 규칙 고정
 3. 얇은 자체 검수 UI로 실제 수정 흐름 검증
-4. 그 다음 `openreel-video` 같은 편집기 셸을 `partial port` 방식으로 검토
+4. 그 다음 `openreel-video` 같은 편집기 셸을 `partial port` 방식으로 검토(2026-10-08: `reference only`로 내렸다 — 동작 둘만 참고)
 
 즉, 현재 기준으로 오픈소스 편집기 반입 시점은 `segment alignment`, `script scene planning`, `broll/music recommendation`, `timeline`, `preview/export` 기반이 안정화된 뒤, 경량 후편집기 milestone에서 시작하는 것이 맞다.
 

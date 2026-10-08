@@ -245,7 +245,8 @@ $expectedTask14LocalPaths = @(
   'apps/web/src/features/editor/timeline/time-scale.ts',
   'apps/web/src/features/editor/timeline/timeline-geometry.ts',
   'apps/web/src/features/editor/timeline/snapping.ts',
-  'apps/web/src/features/editor/timeline/hit-testing.ts'
+  'apps/web/src/features/editor/timeline/hit-testing.ts',
+  'apps/web/src/features/editor/timeline/rulerScale.ts'
 )
 $expectedTask14ForbiddenTerms = @('EditorCore', 'next/', 'database', 'renderer', 'IndexedDB', 'OPFS', 'browser-export', 'EditorCommandPort', 'document', 'window', 'canvas')
 $expectedTask14UpstreamPaths = @(
@@ -254,7 +255,8 @@ $expectedTask14UpstreamPaths = @(
   [pscustomobject]@{ path = 'apps/web/src/timeline/snapping/build.ts'; sha256 = '7cf9b8dc203a691af38e99d16ceb401cb881055b93244f9f6afa65338ef46e1a' },
   [pscustomobject]@{ path = 'apps/web/src/timeline/snapping/resolve.ts'; sha256 = '73f7865940cd914b09070ca3daa03325b03a31bd33ebb6766dc0975736c6fc0d' },
   [pscustomobject]@{ path = 'apps/web/src/timeline/snapping/threshold.ts'; sha256 = '951ed0604bcd5960384a520a14cf66f554c2580f4e0098e0307939db73ced686' },
-  [pscustomobject]@{ path = 'apps/web/src/timeline/zoom-utils.ts'; sha256 = '00d105f58146956d915b4614ee1796a73513ff786bed90dd07d1245ee2fb84b6' }
+  [pscustomobject]@{ path = 'apps/web/src/timeline/zoom-utils.ts'; sha256 = '00d105f58146956d915b4614ee1796a73513ff786bed90dd07d1245ee2fb84b6' },
+  [pscustomobject]@{ path = 'apps/web/src/timeline/ruler-utils.ts'; sha256 = '8acde0c6a49be27d9517fcabfc9239bcaeb8ae24586aeb05e08338b8b140ce57' }
 )
 $task14 = @($referenceOnlyDecisions | Where-Object { $_.task -eq 'Task 14 timeline geometry' })
 if ($task14.Count -ne 1) { Add-Error 'Task 14 reference-only provenance decision drift' }

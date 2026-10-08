@@ -1785,3 +1785,37 @@ describe("끌기·자르기 중 붙기 (스파이크 H-d)", () => {
     expect(onTrimNarration.mock.calls[0][0].endSec).toBeCloseTo(6.48, 9);
   });
 });
+
+describe("눈금 간격 (스파이크 H-e)", () => {
+  const longView: EditorViewModel = { ...view, output: { ...view.output, durationSec: 120 } };
+
+  it("120초 전체 보기(1343px)는 121개 대신 15초마다 9개이고 글자 위치가 시간과 맞는다", () => {
+    render(<TimelineDock view={longView} viewportWidthPx={1343} />);
+    fireEvent.click(screen.getByRole("button", { name: "타임라인 전체 보기" })); // 처음 화면은 60초만 보인다
+    const marks = screen.getAllByRole("listitem", { name: /^눈금/ });
+    expect(marks).toHaveLength(9);
+    expect(screen.getByLabelText("눈금 15초")).toBeInTheDocument();
+    expect(screen.getByLabelText("눈금 120초")).toHaveTextContent("2:00");
+    const pps = timelinePixelsPerSecond();
+    expect(pps).toBeCloseTo(1343 / 120, 5);
+    expect(parseFloat(screen.getByLabelText("눈금 15초").style.left)).toBeCloseTo(15 * pps, 2);
+    expect(screen.getByLabelText("눈금 15초")).toHaveTextContent("15s");
+  });
+
+  it("잔눈금은 글자 없이 15초 사이 3초마다 그려진다", () => {
+    const { container } = render(<TimelineDock view={longView} viewportWidthPx={1343} />);
+    fireEvent.click(screen.getByRole("button", { name: "타임라인 전체 보기" }));
+    const minors = container.querySelectorAll(".vb-ruler-minor");
+    expect(minors.length).toBeGreaterThan(30);
+    for (const minor of minors) {
+      expect(minor).toHaveAttribute("aria-hidden", "true");
+      expect(minor.textContent).toBe("");
+    }
+  });
+
+  it("짧은 영상(20초, 400px = 20px/초)은 6초마다가 아니라 최소 간격을 지킨다", () => {
+    render(<TimelineDock view={view} viewportWidthPx={400} />);
+    // 20px/초 x 120px 최소 -> 10초(200px)마다: 0, 10, 20
+    expect(screen.getAllByRole("listitem", { name: /^눈금/ }).map((el) => el.getAttribute("aria-label"))).toEqual(["눈금 0초", "눈금 10초", "눈금 20초"]);
+  });
+});
