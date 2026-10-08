@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ko" data-mode="__VB_MODE__">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1920, height=1080" />
+<style>
+@font-face{font-family:"NotoKR";src:url("assets/NotoSansKR-Variable.ttf");font-weight:100 900}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1920px;height:1080px;overflow:hidden;background:#0f1218}
+html[data-mode="overlay"],html[data-mode="overlay"] body{background:transparent}
+#root{position:relative;width:1920px;height:1080px;font-family:"NotoKR",sans-serif;color:#f3f5f8}
+#card{position:absolute;left:0;top:0;width:1920px;height:1080px}
+html[data-mode="overlay"] #card{left:80px;top:50px;width:1760px;height:980px;border-radius:40px;background:rgba(15,18,24,0.86)}
+#t{position:absolute;left:140px;top:90px;width:1640px;font-size:64px;font-weight:800;white-space:nowrap;overflow:hidden}
+#s{position:absolute;left:140px;top:190px;width:1640px;font-size:34px;color:#9aa6b8;white-space:nowrap;overflow:hidden}
+.row{position:absolute;left:140px;width:1640px;height:110px}
+.lab{position:absolute;left:0;top:30px;width:420px;font-size:40px;font-weight:600;white-space:nowrap;overflow:hidden}
+.bar{position:absolute;left:440px;top:10px;height:90px;width:0;border-radius:10px;background:#4f8cff}
+.row.win .bar{background:#ffb020}
+.val{position:absolute;left:464px;top:22px;font-size:52px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+#m{position:absolute;left:0;top:-200px;font-size:52px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap;visibility:hidden}
+</style>
+</head>
+<body>
+<div id="root" data-composition-id="main" data-start="0" data-duration="__VB_DURATION__" data-width="1920" data-height="1080">
+<div id="card" class="clip" data-start="0" data-duration="__VB_DURATION__" data-track-index="0"></div>
+<div id="t" class="clip" data-start="0" data-duration="__VB_DURATION__" data-track-index="1"></div>
+<div id="s" class="clip" data-start="0" data-duration="__VB_DURATION__" data-track-index="2"></div>
+<div id="r0" class="row clip" style="top:300px" data-start="0" data-duration="__VB_DURATION__" data-track-index="3"><div id="l0" class="lab"></div><div id="b0" class="bar"></div><div id="v0" class="val"></div></div>
+<div id="r1" class="row clip" style="top:440px" data-start="0" data-duration="__VB_DURATION__" data-track-index="4"><div id="l1" class="lab"></div><div id="b1" class="bar"></div><div id="v1" class="val"></div></div>
+<div id="r2" class="row clip" style="top:580px" data-start="0" data-duration="__VB_DURATION__" data-track-index="5"><div id="l2" class="lab"></div><div id="b2" class="bar"></div><div id="v2" class="val"></div></div>
+<div id="r3" class="row clip" style="top:720px" data-start="0" data-duration="__VB_DURATION__" data-track-index="6"><div id="l3" class="lab"></div><div id="b3" class="bar"></div><div id="v3" class="val"></div></div>
+<div id="r4" class="row clip" style="top:860px" data-start="0" data-duration="__VB_DURATION__" data-track-index="7"><div id="l4" class="lab"></div><div id="b4" class="bar"></div><div id="v4" class="val"></div></div>
+<div id="m"></div>
+</div>
+<script src="data.js"></script>
+<script src="motion-runtime.js"></script>
+<script src="template.js"></script>
+</body>
+</html>

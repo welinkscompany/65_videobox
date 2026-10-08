@@ -61,3 +61,7 @@ artifacts
 # 호스트에서만 도는 파이썬 환경. `.venv-chatterbox`(윈도우용 목소리 엔진, 1.9GB)가
 # `**/.venv`에 안 걸려 이미지에 실려 있었다(2026-10-02 실측). 컨테이너는 안 읽는다.
 **/.venv-*
+
+# 설명 모션 다리(호스트 전용, 2026-10-08). 템플릿과 하이퍼프레임 node_modules(약 130MB)는
+# 이 컴퓨터의 다리만 읽는다. 컨테이너는 템플릿 이름표만 파이썬(motion_templates.py)에서 읽는다.
+scripts/motion-bridge

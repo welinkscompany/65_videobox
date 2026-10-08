@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ko" data-mode="__VB_MODE__">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1920, height=1080" />
+<style>
+@font-face{font-family:"NotoKR";src:url("assets/NotoSansKR-Variable.ttf");font-weight:100 900}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1920px;height:1080px;overflow:hidden;background:#0f1218}
+html[data-mode="overlay"],html[data-mode="overlay"] body{background:transparent}
+#root{position:relative;width:1920px;height:1080px;font-family:"NotoKR",sans-serif;color:#f3f5f8}
+#card{position:absolute;left:0;top:0;width:1920px;height:1080px}
+html[data-mode="overlay"] #card{left:80px;top:50px;width:1760px;height:980px;border-radius:40px;background:rgba(15,18,24,0.86)}
+#card{background:radial-gradient(circle at 50% 40%,#1c2a1f,#0b0f0c)}
+#lead{position:absolute;top:300px;left:0;width:1920px;text-align:center;font-size:54px;color:#9fd9a8;font-weight:600;white-space:nowrap;overflow:hidden}
+#num{position:absolute;top:400px;left:0;width:1920px;text-align:center;font-size:230px;line-height:1.1;font-weight:900;color:#7dff9a;font-variant-numeric:tabular-nums;letter-spacing:-4px;white-space:nowrap}
+#cap{position:absolute;top:720px;left:0;width:1920px;text-align:center;font-size:46px;color:#dfe6e0;white-space:nowrap;overflow:hidden}
+</style>
+</head>
+<body>
+<div id="root" data-composition-id="main" data-start="0" data-duration="__VB_DURATION__" data-width="1920" data-height="1080">
+<div id="card" class="clip" data-start="0" data-duration="__VB_DURATION__" data-track-index="0"></div>
+<div id="lead" class="clip" data-start="0" data-duration="__VB_DURATION__" data-track-index="1"></div>
+<div id="num" class="clip" data-start="0" data-duration="__VB_DURATION__" data-track-index="2"></div>
+<div id="cap" class="clip" data-start="0" data-duration="__VB_DURATION__" data-track-index="3"></div>
+</div>
+<script src="data.js"></script>
+<script src="motion-runtime.js"></script>
+<script src="template.js"></script>
+</body>
+</html>

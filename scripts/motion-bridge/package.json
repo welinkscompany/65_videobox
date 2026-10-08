@@ -1,0 +1,9 @@
+{
+  "name": "videobox-motion-bridge",
+  "private": true,
+  "description": "VideoBox 설명 모션 다리가 이 컴퓨터에서 부르는 하이퍼프레임. 컨테이너에는 안 들어간다.",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "hyperframes": "0.8.140"
+  }
+}

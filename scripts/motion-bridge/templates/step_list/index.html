@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ko" data-mode="__VB_MODE__">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1920, height=1080" />
+<style>
+@font-face{font-family:"NotoKR";src:url("assets/NotoSansKR-Variable.ttf");font-weight:100 900}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1920px;height:1080px;overflow:hidden;background:#0f1218}
+html[data-mode="overlay"],html[data-mode="overlay"] body{background:transparent}
+#root{position:relative;width:1920px;height:1080px;font-family:"NotoKR",sans-serif;color:#f3f5f8}
+#card{position:absolute;left:0;top:0;width:1920px;height:1080px}
+html[data-mode="overlay"] #card{left:80px;top:50px;width:1760px;height:980px;border-radius:40px;background:rgba(15,18,24,0.86)}
+#t{position:absolute;left:140px;top:110px;width:1640px;font-size:76px;font-weight:800;white-space:nowrap;overflow:hidden}
+.st{position:absolute;left:140px;width:1640px;height:130px;display:flex;align-items:center;font-size:52px;font-weight:600;border-bottom:2px solid #232b38;opacity:0}
+.no{flex:none;width:96px;height:96px;border-radius:50%;background:#4f8cff;display:flex;align-items:center;justify-content:center;font-size:48px;font-weight:800;margin-right:40px}
+.tx{white-space:nowrap;overflow:hidden}
+</style>
+</head>
+<body>
+<div id="root" data-composition-id="main" data-start="0" data-duration="__VB_DURATION__" data-width="1920" data-height="1080">
+<div id="card" class="clip" data-start="0" data-duration="__VB_DURATION__" data-track-index="0"></div>
+<div id="t" class="clip" data-start="0" data-duration="__VB_DURATION__" data-track-index="1"></div>
+<div id="s0" class="st clip" style="top:280px" data-start="0" data-duration="__VB_DURATION__" data-track-index="2"><div id="n0" class="no"></div><div id="x0" class="tx"></div></div>
+<div id="s1" class="st clip" style="top:430px" data-start="0" data-duration="__VB_DURATION__" data-track-index="3"><div id="n1" class="no"></div><div id="x1" class="tx"></div></div>
+<div id="s2" class="st clip" style="top:580px" data-start="0" data-duration="__VB_DURATION__" data-track-index="4"><div id="n2" class="no"></div><div id="x2" class="tx"></div></div>
+<div id="s3" class="st clip" style="top:730px" data-start="0" data-duration="__VB_DURATION__" data-track-index="5"><div id="n3" class="no"></div><div id="x3" class="tx"></div></div>
+<div id="s4" class="st clip" style="top:880px" data-start="0" data-duration="__VB_DURATION__" data-track-index="6"><div id="n4" class="no"></div><div id="x4" class="tx"></div></div>
+</div>
+<script src="data.js"></script>
+<script src="motion-runtime.js"></script>
+<script src="template.js"></script>
+</body>
+</html>
