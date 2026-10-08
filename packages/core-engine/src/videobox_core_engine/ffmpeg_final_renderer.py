@@ -1315,8 +1315,11 @@ class FfmpegFinalRenderer:
             )
             filters.append(
                 f"[{index}:v]trim=start={item.source_in_sec}:end={item.source_out_sec},setpts=PTS-STARTPTS,"
-                f"{scale}{fade},"
-                f"setsar={sar},setpts=PTS+{item.start_sec}/TB[{label}]"
+                f"{scale},"
+                # 나타나기/사라지기는 **타임라인 시각(`st`)** 으로 적혀 있다. 시각을 옮기기 전
+                # (0초에서 시작하는 줄기)에 걸면 12초 장면이 그림 안의 12초를 찾아 영영
+                # 안 나타난다(2026-10-08 실측) -- 반드시 옮긴 뒤에 건다.
+                f"setsar={sar},setpts=PTS+{item.start_sec}/TB{fade}[{label}]"
             )
             filters.append(
                 f"[{canvas}][{label}]overlay=x={overlay_x}:y={overlay_y}:"
@@ -1339,7 +1342,7 @@ class FfmpegFinalRenderer:
             )
             filters.append(
                 f"[{source_index}:v]trim=duration={end_sec - start_sec},setpts=PTS-STARTPTS,"
-                f"{scale}{fade},setpts=PTS+{start_sec}/TB[{label}]"
+                f"{scale},setpts=PTS+{start_sec}/TB{fade}[{label}]"
             )
             filters.append(
                 f"[{canvas}][{label}]overlay=x={overlay_x}:y={overlay_y}:"

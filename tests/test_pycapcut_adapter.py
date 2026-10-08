@@ -666,3 +666,41 @@ def test_export_rejects_an_out_of_catalog_transition_type(tmp_path: Path) -> Non
         PyCapCutRealExportAdapter(store=store, video_width=320, video_height=240).export_timeline(
             project_id=project.project_id, timeline=timeline, drafts_root=tmp_path / "drafts", draft_name="invalid-transition",
         )
+
+
+def _image_overlay_timeline(store: LocalProjectStore, tmp_path: Path, overlay_file: Path, asset_type: AssetType, end_sec: float) -> tuple[str, dict]:
+    project = store.bootstrap_project(name="CapCut Overlay Refusal")
+    narration_file = tmp_path / "narration.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=6", str(narration_file)])
+    narration_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_file)
+    overlay_asset = store.register_asset(project_id=project.project_id, asset_type=asset_type, source_path=overlay_file)
+    timeline = {
+        "narration_source_uri": narration_asset.storage_uri,
+        "export_overlays": [{"overlay_type": "image_overlay", "asset_id": overlay_asset.asset_id, "start_sec": 1.0, "end_sec": end_sec}],
+        "tracks": [{"track_type": "narration", "clips": [{"asset_uri": f"local://projects/{project.project_id}/segments/seg_001", "start_sec": 0.0, "end_sec": 6.0}]}],
+    }
+    return project.project_id, timeline
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_a_transparent_motion_overlay_is_refused_with_a_clean_reason_not_a_type_error(tmp_path: Path) -> None:
+    """pycapcut은 webm 길이를 문자열로 받아 `TypeError`로 죽는다(2026-10-08 실측) -- 깨끗한 사유로 바꾼다."""
+    webm = tmp_path / "card.webm"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=white@0.0:s=64x48:r=15:d=4,format=yuva420p",
+               "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0", str(webm)])
+    store = LocalProjectStore(tmp_path)
+    project_id, timeline = _image_overlay_timeline(store, tmp_path, webm, AssetType.BROLL_VIDEO, end_sec=3.0)
+    with pytest.raises(PyCapCutExportError) as raised:
+        PyCapCutRealExportAdapter(store=store).export_timeline(project_id=project_id, timeline=timeline, drafts_root=tmp_path / "drafts", draft_name="webm")
+    assert str(raised.value) == "capcut_transparent_motion_unsupported"
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_an_overlay_window_longer_than_its_clip_gets_a_code_the_screen_can_translate(tmp_path: Path) -> None:
+    clip = tmp_path / "short.mp4"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=blue:s=64x48:r=15:d=1", str(clip)])
+    store = LocalProjectStore(tmp_path)
+    project_id, timeline = _image_overlay_timeline(store, tmp_path, clip, AssetType.BROLL_VIDEO, end_sec=5.0)
+    with pytest.raises(PyCapCutExportError) as raised:
+        PyCapCutRealExportAdapter(store=store).export_timeline(project_id=project_id, timeline=timeline, drafts_root=tmp_path / "drafts", draft_name="short")
+    assert str(raised.value) == "capcut_overlay_shorter_than_window"

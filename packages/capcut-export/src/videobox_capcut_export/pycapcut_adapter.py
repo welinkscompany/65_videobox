@@ -802,12 +802,15 @@ class PyCapCutRealExportAdapter:
         except (KeyError, OSError, ValueError) as exc:
             raise PyCapCutExportError(f"Unable to resolve image overlay asset '{asset_id}'.") from exc
 
-        material = VideoMaterial(str(path))
+        try:
+            material = VideoMaterial(str(path))
+        except TypeError as exc:
+            # 투명 모션(webm)은 pycapcut이 길이를 문자열로 받아 `TypeError`로 죽는다
+            # (2026-10-08 실측). 날것 예외 대신 화면이 옮길 수 있는 코드로 알린다.
+            raise PyCapCutExportError("capcut_transparent_motion_unsupported") from exc
         duration_us = _seconds_to_us(end_sec - start_sec)
         if material.duration < duration_us:
-            raise PyCapCutExportError(
-                f"Image overlay asset '{asset_id}' is shorter than its requested timeline window."
-            )
+            raise PyCapCutExportError("capcut_overlay_shorter_than_window")
         script.add_segment(
             VideoSegment(
                 material,

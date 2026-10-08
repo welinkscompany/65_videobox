@@ -45,6 +45,9 @@ const FINAL_RENDER_FAILURES: Record<string, string> = {
   short_form_already_exists: "이 편집본에는 숏폼이 이미 있어요. 숏폼 다시 만들기를 누르면 장면을 새로 골라 줘요.",
   // 다시 만들려는데 고를 장면이 하나도 없을 때. 지금 숏폼은 그대로 둔다.
   short_form_has_no_scene_to_pick: "숏폼에 넣을 장면을 찾지 못했어요. 지금 숏폼은 그대로 뒀어요. 장면을 넣거나 자막을 채운 뒤 다시 해 주세요.",
+  // CapCut으로 넘길 때 얹은 영상이 문제인 두 경우(`pycapcut_adapter._add_image_overlay`).
+  capcut_transparent_motion_unsupported: "투명 모션은 아직 캡컷으로 넘길 수 없어요. 전체 화면 모션으로 만들거나 이 얹기를 빼고 넘겨 주세요.",
+  capcut_overlay_shorter_than_window: "얹은 영상이 얹는 구간보다 짧아요. 얹는 구간을 영상 길이에 맞추거나 이 얹기를 빼고 넘겨 주세요.",
   asset_file_missing: "쓰던 파일을 찾지 못했어요. 그 파일이 자리에 있는지 확인한 뒤 다시 만들어 주세요.",
   asset_file_permission_denied: "쓰던 파일을 열 수 없었어요. 그 파일이 다른 프로그램에서 열려 있지 않은지 확인한 뒤 다시 만들어 주세요.",
   external_command_failed: "영상을 합치는 도중에 멈췄어요. 다시 만들어 주세요. 그래도 안 되면 쓰던 파일이 온전한지 확인해 주세요.",

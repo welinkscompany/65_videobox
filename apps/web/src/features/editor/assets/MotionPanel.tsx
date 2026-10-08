@@ -226,7 +226,7 @@ export function MotionPanel({ projectId, sceneSeconds = null, onMade, onBusyChan
         <Button type="button" variant="ghost" className="vb-infographic__style" aria-pressed={layout === "overlay"} disabled={busy}
           onClick={() => setLayout("overlay")}>작은 창(투명)</Button>
       </div>
-      <span className="vb-infographic__hint">{layout === "overlay" ? "영상 위에 작게 얹어요. 바탕이 비쳐 보여요." : "화면을 가득 채워요."}</span>
+      <span className="vb-infographic__hint">{layout === "overlay" ? "영상 위에 작게 얹어요. 바탕이 비쳐 보여요. 얹는 구간이 모션보다 길면 모션이 끝나고 사라져요." : "화면을 가득 채워요."}</span>
     </div> : null}
 
     {template ? <label className="vb-infographic__field">
