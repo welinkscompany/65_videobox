@@ -2169,7 +2169,7 @@ export const api = {
   /** 고를 수 있는 설명 모션 종류. 화면이 이름·글자 수 한도를 베껴 적지 않으려고 서버에서 받는다. */
   listMotionTemplates: () => request<{ templates: MotionTemplate[] }>("/api/library/motion-templates"),
   /** 설명 모션 한 편. 6초짜리가 15초쯤, 30초짜리가 1분 안쪽으로 걸려서 부르는 쪽이 기다림을 화면에 말해야 한다. */
-  createMotion: (payload: MotionRequest) => request<MotionResult>("/api/library/motions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  createMotion: (payload: MotionRequest, signal?: AbortSignal) => request<MotionResult>("/api/library/motions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload), signal }),
   createSceneImage: (projectId: string, payload: SceneImageRequest) => request<SceneImage>(`/api/projects/${encodeURIComponent(projectId)}/scene-images`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   startSceneVideo: (projectId: string, payload: SceneVideoRequest) => request<SceneVideoStart>(`/api/projects/${encodeURIComponent(projectId)}/scene-videos`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   getSceneVideoStatus: (projectId: string, jobId: string) => request<SceneVideoStatus>(`/api/projects/${encodeURIComponent(projectId)}/scene-videos/${encodeURIComponent(jobId)}`),

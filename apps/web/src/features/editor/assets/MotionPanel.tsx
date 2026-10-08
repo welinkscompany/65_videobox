@@ -10,7 +10,7 @@
  *  처음부터 다시 올라간다.
  *
  *  스타일은 인포그래픽 패널의 것을 그대로 쓴다(팔레트·CSS를 새로 만들지 않는다). */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
@@ -18,6 +18,8 @@ import { api, ApiRequestError, type MotionResult, type MotionTemplate } from "..
 
 type BarRow = { label: string; value: string };
 type Prefix = "₩" | "$" | "";
+/** 서버는 다리를 240초 기다리고 nginx 벽은 600초다. 그 사이 화면이 영영 잠겨 있지 않게 280초에서 스스로 놓는다. */
+const CLIENT_LIMIT_MS = 280_000;
 const FORBIDDEN = /[<>]/;
 const PREFIXES: { value: Prefix; label: string }[] = [{ value: "₩", label: "₩" }, { value: "$", label: "$" }, { value: "", label: "없음" }];
 
@@ -44,6 +46,13 @@ export function MotionPanel({ projectId, sceneSeconds = null, onMade, onBusyChan
   const [busy, setBusy] = useState(false);
   const [made, setMade] = useState<{ result: MotionResult; inProject: boolean } | null>(null);
   const [failed, setFailed] = useState("");
+
+  const alive = useRef(true);
+  const running = useRef<AbortController | null>(null);
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; running.current?.abort(); };
+  }, []);
 
   useEffect(() => { onBusyChange?.(busy); }, [busy, onBusyChange]);
   useEffect(() => () => { onBusyChange?.(false); }, [onBusyChange]);
@@ -94,11 +103,19 @@ export function MotionPanel({ projectId, sceneSeconds = null, onMade, onBusyChan
   );
 
   const create = async () => {
+    // 다음 렌더를 기다리지 않고 부모에게 바로 알린다 -- 그 사이 팝업이 닫히면 안 된다.
+    onBusyChange?.(true);
     setBusy(true);
     setFailed("");
     setMade(null);
+    const controller = new AbortController();
+    running.current = controller;
+    const timer = setTimeout(() => controller.abort(), CLIENT_LIMIT_MS);
     try {
-      const result = await api.createMotion({ template: key, variables: variables(), duration_sec: duration, layout: "full" });
+      // fetch가 취소를 못 알아듣고 매달려 있어도 화면은 놓여나도록 취소 신호와 겨룬다.
+      const gone = new Promise<never>((_, reject) => controller.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
+      const result = await Promise.race([api.createMotion({ template: key, variables: variables(), duration_sec: duration, layout: "full" }, controller.signal), gone]);
+      if (controller.signal.aborted || !alive.current) return;
       let inProject = false;
       if (result.library_asset_id && projectId) {
         try {
@@ -110,11 +127,15 @@ export function MotionPanel({ projectId, sceneSeconds = null, onMade, onBusyChan
       }
       if (result.library_asset_id) onMade?.();
       else if (result.library_error) console.warn("motion library save failed:", result.library_error);
+      if (!alive.current || controller.signal.aborted) return;
       setMade({ result, inProject });
     } catch (error) {
-      setFailed(messageFor(error));
+      if (!alive.current) return;
+      setFailed(controller.signal.aborted ? "너무 오래 걸려요. 잠시 뒤 자료실 영상을 확인해 보고, 없으면 다시 해 보세요. 만들어졌다면 그곳에 들어 있을 수 있어요." : messageFor(error));
     } finally {
-      setBusy(false);
+      clearTimeout(timer);
+      if (running.current === controller) running.current = null;
+      if (alive.current) setBusy(false);
     }
   };
 

@@ -189,4 +189,25 @@ describe("MotionPanel", () => {
     await screen.findByRole("status");
     await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(false));
   });
+  it("280초가 지나도 답이 없으면 놓여나서 닫을 수 있고, 늦게 온 답은 쓰지 않는다", async () => {
+    let release: (value: MotionResult) => void = () => {};
+    vi.spyOn(api, "createMotion").mockReturnValue(new Promise<MotionResult>((resolve) => { release = resolve; }));
+    const materialize = vi.spyOn(api, "materializeLibraryAsset").mockResolvedValue({} as never);
+    const onBusyChange = vi.fn();
+    render(<MotionPanel projectId="project-a" onBusyChange={onBusyChange} />);
+    await fillBars();
+    vi.useFakeTimers();
+    try {
+      make();
+      expect(onBusyChange).toHaveBeenCalledWith(true);
+      await vi.advanceTimersByTimeAsync(280_000);
+    } finally { vi.useRealTimers(); }
+    expect((await screen.findByRole("alert")).textContent).toContain("너무 오래 걸려요");
+    expect(screen.getByRole("button", { name: "모션 만들기" })).toHaveProperty("disabled", false);
+    expect(onBusyChange).toHaveBeenLastCalledWith(false);
+    release(made());
+    await Promise.resolve();
+    expect(materialize).not.toHaveBeenCalled();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
 });
