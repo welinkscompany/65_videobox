@@ -209,3 +209,55 @@ def test_prepare_writes_its_own_log_so_the_launcher_needs_no_redirect(tmp_path: 
     assert "fake-browser-output" in text
     assert "모션 도구 준비가 끝났습니다" in text
     assert not fixture["lock"].exists()
+
+
+@_windows_only
+def test_a_prepare_that_loses_the_lock_leaves_the_running_ones_log_alone(tmp_path: Path) -> None:
+    fixture = _prepare_fixture(tmp_path, engine_installed=True, node_body="exit /b 0")
+    fixture["lock"].write_text("", encoding="utf-8")
+    log = tmp_path / "prepare.log"
+    log.write_text("KEEP-THIS-LINE\n", encoding="utf-8")
+    result = _run_prepare(fixture, "-LogPath", str(log))
+    assert result.returncode == 0 and "이미 준비하고 있습니다" in result.stdout
+    assert "KEEP-THIS-LINE" in log.read_text(encoding="utf-8", errors="replace")
+    log.unlink()  # 기록을 닫지 않고 끝났다면 여기서 못 지운다
+
+
+@_windows_only
+def test_a_lock_path_that_cannot_be_opened_counts_as_already_preparing(tmp_path: Path) -> None:
+    """잠금 자리에 디렉터리가 있으면 UnauthorizedAccessException이다. 죽지 말고 `이미 준비 중`으로 끝낸다."""
+    fixture = _prepare_fixture(tmp_path, engine_installed=True, node_body="exit /b 0")
+    fixture["lock"].mkdir()
+    result = _run_prepare(fixture)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "이미 준비하고 있습니다" in result.stdout
+    assert _call_lines(fixture) == []
+
+
+@_windows_only
+def test_prepare_success_closes_its_log_and_appends(tmp_path: Path) -> None:
+    """두 번 돌려도 기록이 쌓이고(덮어쓰지 않고), 끝나면 파일이 닫혀 있다."""
+    fixture = _prepare_fixture(tmp_path, engine_installed=True, node_body="exit /b 0")
+    log = tmp_path / "prepare.log"
+    for _ in range(2):
+        result = _run_prepare(fixture, "-LogPath", str(log))
+        assert result.returncode == 0, result.stdout + result.stderr
+    text = log.read_text(encoding="utf-8", errors="replace")
+    assert text.count("모션 도구 준비가 끝났습니다") == 2
+    log.unlink()
+
+
+@_windows_only
+def test_prepare_children_do_not_inherit_a_stdin_that_never_closes(tmp_path: Path) -> None:
+    """숨은 창으로 띄우면 stdin이 안 닫히는 파이프일 수 있다. 가짜 node가 stdin을 읽어도 멈추지 않아야 한다."""
+    fixture = _prepare_fixture(tmp_path, engine_installed=True, node_body="set /p ignored=\r\necho reached-after-stdin")
+    parent = subprocess.Popen(
+        _prepare_command(fixture), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    try:
+        parent.wait(timeout=60)  # communicate()는 stdin을 닫아 시험을 거짓 초록으로 만든다
+        out = parent.stdout.read().decode("oem", errors="replace")
+    finally:
+        parent.kill()
+    assert parent.returncode == 0, out
+    assert "모션 도구 준비가 끝났습니다" in out

@@ -26,7 +26,6 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-if ($LogPath) { try { Start-Transcript -LiteralPath $LogPath -Force | Out-Null } catch { } }
 $bridgeRoot = if ($BridgeRoot) { $BridgeRoot } else { Join-Path $PSScriptRoot 'motion-bridge' }
 $lock = if ($LockPath) { $LockPath } else { Join-Path ([System.IO.Path]::GetTempPath()) 'videobox-motion-prepare.lock' }
 
@@ -40,7 +39,7 @@ $lockStream = $null
 for ($attempt = 0; $attempt -lt 2 -and $null -eq $lockStream; $attempt++) {
     try {
         $lockStream = Open-PrepareLock $lock
-    } catch [System.IO.IOException] {
+    } catch [System.IO.IOException], [System.UnauthorizedAccessException] {
         $age = $null
         try { $age = ((Get-Date) - (Get-Item -LiteralPath $lock -ErrorAction Stop).LastWriteTime).TotalMinutes } catch { $age = $null }
         if ($null -eq $age -and $attempt -eq 0) { continue }   # 그새 지워졌다 -- 한 번 더 만든다
@@ -57,6 +56,10 @@ if ($null -eq $lockStream) {
     exit 0
 }
 
+# 잠금을 얻은 쪽만 기록을 남긴다(이미 준비 중이면 그 기록을 덮어쓰지 않는다). 끝나는 길마다 닫는다.
+$transcribing = $false
+if ($LogPath) { try { Start-Transcript -LiteralPath $LogPath -Append | Out-Null; $transcribing = $true } catch { } }
+
 function Format-Argument([string]$Value) {
     # Start-Process는 배열을 그냥 공백으로 이어 붙인다 -- 공백이 든 경로는 따옴표로 감싼다.
     if ($Value -match '[\s"]') { return '"' + $Value.Replace('"', '\"') + '"' }
@@ -67,13 +70,16 @@ function Invoke-Bounded([string]$File, [string[]]$Arguments, [int]$Seconds, [str
     $quoted = @($Arguments | ForEach-Object { Format-Argument $_ })
     $startArguments = @{ FilePath = $File; ArgumentList = $quoted; WorkingDirectory = $bridgeRoot; NoNewWindow = $true; PassThru = $true }
     $childLog = $null
+    # 숨은 창으로 켜졌으면 stdin이 안 닫히는 파이프일 수 있다 -- 자식이 물려받아 멈추지 않게 빈 파일을 먹인다.
+    $emptyInput = [System.IO.Path]::GetTempFileName()
+    $startArguments.RedirectStandardInput = $emptyInput
     if ($LogPath) {
         # 로그 파일로 모은다 -- 끝난 뒤 한꺼번에 기록에 옮긴다.
         $childLog = [System.IO.Path]::GetTempFileName()
         $startArguments.RedirectStandardOutput = $childLog
         $startArguments.RedirectStandardError = $childLog + '.err'
     }
-    $process = Start-Process @startArguments
+    try { $process = Start-Process @startArguments } finally { Remove-Item -LiteralPath $emptyInput -Force -ErrorAction SilentlyContinue }
     # Windows PowerShell 5.1: Handle을 먼저 건드리지 않으면 끝난 뒤 ExitCode가 $null로 읽힌다.
     $null = $process.Handle
     if (-not $process.WaitForExit($Seconds * 1000)) {
@@ -125,5 +131,5 @@ try {
 } finally {
     try { $lockStream.Dispose() } catch { }
     Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue
-    if ($LogPath) { try { Stop-Transcript | Out-Null } catch { } }
+    if ($transcribing) { try { Stop-Transcript | Out-Null } catch { } }
 }

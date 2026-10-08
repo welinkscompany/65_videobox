@@ -336,3 +336,49 @@ def test_the_handler_refuses_a_huge_body_before_reading_it() -> None:
     handler.rfile = None  # 읽으려 하면 바로 터진다
     with pytest.raises(motion._BodyTooLarge):
         handler._payload()
+
+
+# --- 숨은 창으로 켠 다리 (stdin 상속) ---
+
+def test_run_bounded_never_lets_the_child_inherit_stdin() -> None:
+    seen: dict = {}
+
+    class _Done:
+        pid = 1
+        returncode = 0
+
+        def communicate(self, timeout=None):  # noqa: ANN001
+            return ("", "")
+
+    def popen(*args, **kwargs):  # noqa: ANN002, ANN003
+        seen.update(kwargs)
+        return _Done()
+
+    motion.run_bounded(["node"], timeout=1, env={}, cwd=Path("."), popen=popen)
+    assert seen["stdin"] is subprocess.DEVNULL
+
+
+def test_a_child_that_reads_stdin_does_not_hang_when_the_bridge_has_an_open_pipe_for_stdin(tmp_path: Path) -> None:
+    """숨은 창으로 켠 다리는 stdin이 닫히지 않는 파이프다. 그걸 물려받은 node는 읽기에서 멈췄다(실측: 180초 뒤 504)."""
+    runner = tmp_path / "runner.py"
+    runner.write_text(
+        "import importlib.util, subprocess, sys\n"
+        f"spec = importlib.util.spec_from_file_location('m', {str(_PATH)!r})\n"
+        "m = importlib.util.module_from_spec(spec); sys.modules['m'] = m; spec.loader.exec_module(m)\n"
+        "done = m.run_bounded([sys.executable, '-c', 'import sys; sys.stdin.read(); print(1)'], timeout=15, env=None, cwd='.')\n"
+        "print('rc', done.returncode, done.stdout.strip())\n",
+        encoding="utf-8",
+    )
+    parent = subprocess.Popen([sys.executable, str(runner)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        # communicate()는 stdin을 닫아 버려 시험이 거짓 초록이 된다 -- 열어 둔 채 기다린다.
+        parent.wait(timeout=60)
+        out, err = parent.stdout.read(), parent.stderr.read()
+    finally:
+        parent.kill()
+    assert "rc 0 1" in out, (out, err)
+
+
+@pytest.mark.parametrize("falsy", [0, False, [], {}, ""])
+def test_a_falsy_layout_is_not_silently_full(falsy) -> None:
+    assert motion.check_render_request(_body(layout=falsy)) == (400, {"error": "unknown_layout"})

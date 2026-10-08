@@ -209,7 +209,9 @@ def check_render_request(body: dict) -> RenderOrder | tuple[int, dict]:
     template = body.get("template")
     if not isinstance(template, str) or template not in TEMPLATE_KEYS:
         return 400, {"error": "unknown_template"}
-    layout = body.get("layout") or "full"
+    layout = body.get("layout")
+    if layout is None:
+        layout = "full"
     if not isinstance(layout, str) or layout not in LAYOUT_FORMATS:
         return 400, {"error": "unknown_layout"}
     try:
@@ -312,6 +314,7 @@ def run_bounded(arguments, *, timeout, env, cwd, popen=subprocess.Popen, killer=
         arguments,
         cwd=str(cwd),
         env=env,
+        stdin=subprocess.DEVNULL,  # 숨은 창으로 켠 다리의 stdin을 물려받으면 node가 읽기에서 멈춘다
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
