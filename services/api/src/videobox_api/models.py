@@ -7,6 +7,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from videobox_core_engine.caption_translation import SUPPORTED_CAPTION_LANGUAGES
 from videobox_core_engine.editing_session import MAX_RIPPLE_PLAYBACK_RATE, MIN_RIPPLE_PLAYBACK_RATE
+from videobox_core_engine.motion_templates import MAX_MOTION_DURATION_SEC, MIN_MOTION_DURATION_SEC, check_safe_text
 from videobox_core_engine.overlay_shapes import (
     SHAPE_OVERLAY_MOTION_SET,
     SHAPE_OVERLAY_MOTIONS,
@@ -537,6 +538,54 @@ class InfographicStyleListResponse(BaseModel):
     그림은 매번 새로 만드는 것이지 지금 걸려 있는 상태가 아니다."""
 
     styles: list[InfographicStyleResponse]
+
+
+class MotionCreateRequest(BaseModel):
+    """설명 모션 한 편. 템플릿 이름·숫자·글만 받는다 -- HTML·코드는 받는 칸이 없다(2026-10-08 결정).
+
+    `variables`의 칸별 검사는 템플릿마다 달라서 `MotionService`가 `parse_motion_variables`로 한다.
+    `layout`은 2단계에서 `full`만 연다: 완성본 렌더러가 투명 webm의 알파를 아직 못 읽는다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    template: str = Field(min_length=1, max_length=40)
+    variables: dict[str, Any]
+    duration_sec: float = Field(ge=MIN_MOTION_DURATION_SEC, le=MAX_MOTION_DURATION_SEC, allow_inf_nan=False)
+    layout: Literal["full"] = "full"
+    title: str | None = Field(default=None, max_length=60)
+
+    @field_validator("title")
+    @classmethod
+    def _safe_title(cls, value: str | None) -> str | None:
+        return None if value is None else check_safe_text(value.strip())
+
+
+class MotionResponse(BaseModel):
+    library_asset_id: str | None = None
+    template: str
+    title: str
+    duration_sec: float
+    layout: str
+    format: str
+    byte_size: int
+    elapsed_sec: float
+    #: 자료실 등록이 실패했으면 그 이유. 모션 자체는 만들어졌다.
+    library_error: str | None = None
+
+
+class MotionTemplateResponse(BaseModel):
+    key: str
+    korean_name: str
+    description: str
+    default_duration_sec: float
+    min_duration_sec: float
+    max_duration_sec: float
+    limits: dict[str, int]
+
+
+class MotionTemplateListResponse(BaseModel):
+    templates: list[MotionTemplateResponse]
 
 
 class SceneImageCreateRequest(BaseModel):

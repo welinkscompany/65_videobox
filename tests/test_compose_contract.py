@@ -5,6 +5,7 @@ import yaml
 
 from videobox_core_engine.infographic_host_bridge import BRIDGE_PORT
 from videobox_core_engine.infographic_service import TOTAL_BUDGET_SECONDS
+from videobox_core_engine.motion_host_bridge import BRIDGE_PORT as MOTION_BRIDGE_PORT, BRIDGE_TIMEOUT_SECONDS as MOTION_BRIDGE_TIMEOUT_SECONDS
 from videobox_core_engine.short_form_scene_pick import (
     BACKGROUND_BUDGET_SECONDS,
     SYNCHRONOUS_BUDGET_SECONDS,
@@ -571,3 +572,26 @@ def test_the_container_carries_the_bridge_token_without_requiring_it_to_parse() 
     compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
     environment = compose["services"]["videobox-workspace"]["environment"]
     assert environment["VIDEOBOX_BRIDGE_TOKEN"] == "${VIDEOBOX_BRIDGE_TOKEN:-}"
+
+
+def test_the_motion_path_may_only_reach_this_machine() -> None:
+    """모션 다리도 그림 다리와 같은 규칙이다 -- 이 기계의 8202뿐(2026-10-08 결정)."""
+    compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    environment = compose["services"]["videobox-workspace"]["environment"]
+    assert environment["VIDEOBOX_MOTION_BRIDGE_URL"] == (
+        f"${{VIDEOBOX_MOTION_BRIDGE_URL:-http://host.docker.internal:{MOTION_BRIDGE_PORT}}}"
+    )
+
+
+def test_the_proxy_waits_longer_than_a_motion_can_take() -> None:
+    """다리 렌더 상한 < 컨테이너 대기 < nginx. 하나라도 뒤집히면 화면은 우리 문구 대신 504 HTML을 본다."""
+    import importlib.util
+    import sys
+
+    spec = importlib.util.spec_from_file_location("motion_bridge_timeout_check", ROOT / "scripts" / "host_motion_service.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["motion_bridge_timeout_check"] = module
+    spec.loader.exec_module(module)
+    config = (ROOT / "docker/workspace-nginx.conf").read_text(encoding="utf-8")
+    proxy = int(re.search(r"proxy_read_timeout\s+(\d+)s\s*;", config).group(1))
+    assert module.RENDER_TIMEOUT_SECONDS < MOTION_BRIDGE_TIMEOUT_SECONDS < proxy

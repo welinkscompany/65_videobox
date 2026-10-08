@@ -64,6 +64,9 @@ from dataclasses import replace
 from videobox_core_engine.infographic_host_bridge import InfographicHostBridge
 from videobox_core_engine.infographic_service import InfographicService
 from videobox_api.routers.infographics import build_infographics_router
+from videobox_core_engine.motion_host_bridge import MotionHostBridge
+from videobox_core_engine.motion_service import MotionService
+from videobox_api.routers.motions import build_motions_router
 from videobox_api.routers.scene_images import build_scene_images_router
 from videobox_api.routers.scene_videos import build_scene_videos_router
 from videobox_api.routers.script_drafts import build_script_drafts_router
@@ -1342,6 +1345,12 @@ def create_app(
         bridge=InfographicHostBridge.from_environment(),
         library_ingest=app.state.library_ingest_service,
     )
+    # 설명 모션(2026-10-08 결정 2단계). 인포그래픽과 같은 이유로 다리가 없어도 서비스는 둔다 --
+    # 그래야 화면이 "꺼져 있어요"를 정확히 말한다. 두뇌(런타임)는 안 쓴다: 템플릿과 숫자·글뿐이다.
+    app.state.motion_service = MotionService(
+        bridge=MotionHostBridge.from_environment(),
+        library_ingest=app.state.library_ingest_service,
+    )
     # `scene_image_service`와 같은 이유 -- 켜지 않았으면 `None`이다. owner 결정
     # 2026-08-29(2회차, "원래 만든거외에 별도로 만들자"): 이 서비스는
     # `SceneImageService`와 별개다. `library_ingest`(owner 요청 2026-08-29
@@ -1624,6 +1633,7 @@ def create_app(
     )
     app.include_router(build_media_inbox_router(orchestrator, resolved_media_inbox_library_root))
     app.include_router(build_infographics_router())
+    app.include_router(build_motions_router())
     app.include_router(build_scene_images_router(store))
     app.include_router(build_scene_videos_router(store))
     app.include_router(build_script_drafts_router())
