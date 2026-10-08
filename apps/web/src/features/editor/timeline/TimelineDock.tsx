@@ -509,12 +509,17 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   // 잡는데, 실제 클립 칸은 그보다 좁다. 아무도 다시 맞추지 않아 짧은 영상의 끝 1초가 가려진 채 열렸다
   // (2026-10-09 정적 검토). 사람이 아직 배율을 건드리지 않았다면 잰 폭이 처음 들어오는 순간(그리고
   // 그 뒤 폭이 바뀔 때) 처음 배율을 그 폭으로 다시 계산한다.
-  const lastFittedWidthRef = useRef<number | null>(null);
+  // 같은 (폭, 길이) 쌍은 한 번만 맞춘다. 길이도 열쇠다: 편집기가 자리만 먼저 뜨고 영상 길이가 나중에 정해지면
+  // 폭은 그대로여도 새 길이로 다시 맞춰야 한다(마감 점검 d: 0907이 처음에 끝 1.2초가 잘려 열렸다).
+  const lastFittedRef = useRef<{ widthPx: number; durationSec: number } | null>(null);
   useEffect(() => {
-    if (!Number.isFinite(measuredTrackWidthPx) || measuredTrackWidthPx <= 0 || !(view.output.durationSec > 0) || userZoomedRef.current || lastFittedWidthRef.current === measuredTrackWidthPx) return;
-    const first = lastFittedWidthRef.current === null;
-    lastFittedWidthRef.current = measuredTrackWidthPx;
-    dispatch({ type: "zoom", pixelsPerSecond: initialPixelsPerSecond({ durationSec: view.output.durationSec, viewportWidthPx: measuredTrackWidthPx }), anchorPx: 0 });
+    const durationSec = view.output.durationSec;
+    if (!Number.isFinite(measuredTrackWidthPx) || measuredTrackWidthPx <= 0 || !(durationSec > 0) || userZoomedRef.current) return;
+    const last = lastFittedRef.current;
+    if (last && last.widthPx === measuredTrackWidthPx && last.durationSec === durationSec) return;
+    const first = last === null;
+    lastFittedRef.current = { widthPx: measuredTrackWidthPx, durationSec };
+    dispatch({ type: "zoom", pixelsPerSecond: initialPixelsPerSecond({ durationSec, viewportWidthPx: measuredTrackWidthPx }), anchorPx: 0 });
     if (first) dispatch({ type: "scroll", seconds: 0 });
   }, [measuredTrackWidthPx, view.output.durationSec]);
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
@@ -613,10 +618,15 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
       rects: dedupedRects.map((item) => ({ ...item, zIndex: 0 })),
     });
     if (hit.kind === "body") {
-      dispatch({ type: "select", clipId: hit.clipId });
-      const narrationClip = narrationByClipId.get(hit.clipId);
-      const caption = captionsByPlacementId.get(hit.clipId);
-      const timelineClip = timelineClipById.get(hit.clipId);
+      // 몸통인지(가장자리·빈 곳이 아닌지)만 중심점 검사로 가른다. **어느 클립인지는 누른 그 클립이다** --
+      // 같은 줄에서 겹친 클립(742e1924의 90초 영상)의 중심은 둘 다에 속해, 검사 결과에 맡기면 겹친 위쪽 클립을
+      // 눌러도 이름순으로 다른 클립이 골라졌다. 마우스는 맨 위에 그려진 클립의 단추를 누르므로 이렇게 하면
+      // 눌린 클립이 늘 골라진다.
+      const clickedClipId = rect.clipId;
+      dispatch({ type: "select", clipId: clickedClipId });
+      const narrationClip = narrationByClipId.get(clickedClipId);
+      const caption = captionsByPlacementId.get(clickedClipId);
+      const timelineClip = timelineClipById.get(clickedClipId);
       const segmentId = narrationClip?.segmentId ?? caption?.owningSegmentId ?? caption?.segmentId ?? timelineClip?.segmentId;
       // 재생 위치를 먼저 옮기고 **그 다음에** 고른다. 순서가 반대면, seek이 재생
       // 위치에서 장면을 다시 유도하면서 방금 고른 클립을 덮어쓴다(경계에서는 앞
@@ -624,7 +634,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
       const segmentStartSec = narrationClip?.startSec ?? caption?.startSec ?? timelineClip?.startSec;
       if (segmentStartSec !== undefined) onPlaybackSeek?.(segmentStartSec);
       if (segmentId) onSelectSegment?.(segmentId);
-      const placement = placementsByClipId.get(hit.clipId);
+      const placement = placementsByClipId.get(clickedClipId);
       if (placement) setSelectedPlacementIds((current) => additive ? (current.includes(placement.placementId) ? current.filter((id) => id !== placement.placementId) : [...current, placement.placementId]) : [placement.placementId]);
       else if (!additive) setSelectedPlacementIds([]);
     }

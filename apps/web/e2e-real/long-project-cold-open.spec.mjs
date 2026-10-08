@@ -66,3 +66,28 @@ test("짧은 영상(0907 같은 3.75초)은 처음 열 때 전체 길이가 칸 
     expect(fit.pxPerSec * 3.7512).toBeGreaterThan(fit.laneWidth * 0.9);
   }
 });
+
+// 마감 점검 d: 0907(7.75초)은 처음 열 때 끝 1.2초가 잘려 있었다 -- 실제 매니페스트 모양으로 네 크기에서 클립 오른쪽 끝이 칸 안인지 잰다.
+const REAL_0907 = JSON.parse(readFileSync("src/features/editor/__fixtures__/manifest-0907-b26195af.json", "utf-8"));
+test("0907 실제 모양(7.75초)은 네 크기에서 처음 열 때 마지막 클립 끝까지 칸 안에 보인다", async ({ page }) => {
+  const { clean } = readFixture();
+  await page.route("**/playback-manifest", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    await route.fulfill({ response, json: { ...REAL_0907, project_id: body.project_id, session_id: body.session_id, timeline_id: body.timeline_id, session_revision: body.session_revision } });
+  });
+  for (const viewport of VIEWPORTS) {
+    await page.setViewportSize(viewport);
+    await page.goto("about:blank");
+    await page.goto(`/projects/${clean.projectId}/editor?session_id=${clean.sessionId}`);
+    await expect(page.getByRole("region", { name: "타임라인" })).toBeVisible();
+    await page.waitForTimeout(800);
+    const fit = await page.getByRole("region", { name: "타임라인" }).evaluate((region) => {
+      const lanes = region.querySelector(".vb-timeline-lanes-viewport");
+      const rights = [...region.querySelectorAll('[data-testid="timeline-clip"]')].map((clip) => clip.getBoundingClientRect().right);
+      return { laneWidth: lanes.clientWidth, laneRight: lanes.getBoundingClientRect().right, maxRight: Math.max(...rights), scrollWidth: lanes.scrollWidth };
+    });
+    expect(fit.maxRight, JSON.stringify(viewport)).toBeLessThanOrEqual(fit.laneRight + 1);
+    expect(fit.scrollWidth).toBeLessThanOrEqual(fit.laneWidth + 1);
+  }
+});

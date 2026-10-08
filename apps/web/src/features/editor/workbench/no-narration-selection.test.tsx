@@ -48,14 +48,9 @@ describe("내레이션 줄이 없는 프로젝트 (742e1924 실제 모양)", () 
     render(<EditorWorkbench view={view} session={session as never} />);
     openInspector();
     fitAll();
-    const sceneOneClip = view.tracks.find((item) => item.role === "broll")!.clips.find((clip) => clip.startSec === 90)!;
     const ownerRange = new Map(view.captions.map((caption) => [caption.owningSegmentId, caption] as const));
     for (const track of view.tracks.filter((item) => item.role === "broll")) {
       for (const clip of track.clips) {
-        // 실제 데이터의 흠: 장면 1의 영상이 90~102초에 놓여 84~96초 영상과 같은 줄에서 겹친다. 84~96초 클립의
-        // 가운데(90초)를 누르면 장면 1 클립이 맞는다 -- 겹침 자체는 데이터 문제라 여기서는 가운데가 안 겹치는 클립만 누른다.
-        const center = (clip.startSec + clip.endSec) / 2;
-        if (clip.segmentId !== sceneOneClip.segmentId && center >= sceneOneClip.startSec && center < sceneOneClip.endSec) continue;
         fireEvent.click(clipButton(`broll:${clip.clipId}`));
         const caption = ownerRange.get(clip.segmentId)!;
         expect(inspectorRanges(), clip.segmentId).toContain(range(caption.startSec, caption.endSec));

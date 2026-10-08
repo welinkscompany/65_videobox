@@ -1904,6 +1904,37 @@ describe("눈금 간격 (스파이크 H-e)", () => {
       expect(Number(timeline.getAttribute("data-pixels-per-second")) * 60).toBeLessThanOrEqual(1175 + 1e-6);
     });
 
+    it("0907 실제 수치: 7.75초, 바깥 폭 1360, 잰 칸 폭 1175 -> 처음 열면 전체가 1175 안에 든다 (마감 점검 d)", () => {
+      const observer = stubObserver();
+      const short: EditorViewModel = { ...view, output: { ...view.output, durationSec: 7.75 }, tracks: [], captions: [], gaps: [] };
+      render(<TimelineDock view={short} viewportWidthPx={1360} />);
+      const timeline = screen.getByRole("region", { name: "타임라인" });
+      observer.report(1175);
+      const pxPerSec = Number(timeline.getAttribute("data-pixels-per-second"));
+      expect(pxPerSec * 7.75).toBeLessThanOrEqual(1175 + 1e-6);
+      expect(pxPerSec * 7.75).toBeGreaterThan(1175 * 0.99);
+      for (const [width, duration] of [[1190, 3.75], [1000, 30], [640, 7.75], [300, 59.9]] as const) {
+        cleanup();
+        const o = stubObserver();
+        render(<TimelineDock view={{ ...short, output: { ...short.output, durationSec: duration } }} viewportWidthPx={width + 185} />);
+        o.report(width);
+        const px = Number(screen.getByRole("region", { name: "타임라인" }).getAttribute("data-pixels-per-second"));
+        expect(px * duration, `${width}/${duration}`).toBeLessThanOrEqual(width + 1e-6);
+      }
+    });
+
+    it("칸 폭이 먼저 들어오고 영상 길이가 나중에 정해져도(편집기가 자리만 먼저 뜬 경우) 새 길이로 다시 맞춘다 (마감 점검 d 원인)", () => {
+      const observer = stubObserver();
+      const placeholder: EditorViewModel = { ...view, output: { ...view.output, durationSec: 1 }, tracks: [], captions: [], gaps: [] };
+      const rendered = render(<TimelineDock view={placeholder} viewportWidthPx={1360} />);
+      const timeline = screen.getByRole("region", { name: "타임라인" });
+      observer.report(1175);
+      rendered.rerender(<TimelineDock view={{ ...placeholder, output: { ...placeholder.output, durationSec: 7.75 } }} viewportWidthPx={1360} />);
+      const pxPerSec = Number(timeline.getAttribute("data-pixels-per-second"));
+      expect(pxPerSec * 7.75).toBeLessThanOrEqual(1175 + 1e-6);
+      expect(pxPerSec * 7.75).toBeGreaterThan(1175 * 0.99);
+    });
+
     it("사람이 이미 배율을 건드렸다면 폭이 바뀌어도 다시 맞추지 않는다", () => {
       const observer = stubObserver();
       render(<TimelineDock view={view} viewportWidthPx={1000} />);
@@ -1914,5 +1945,21 @@ describe("눈금 간격 (스파이크 H-e)", () => {
       observer.report(700);
       expect(timeline.getAttribute("data-pixels-per-second")).toBe(zoomed);
     });
+  });
+
+  it("같은 줄에서 겹친 두 영상 클립은 누른 쪽이 골라진다 -- 중심이 겹쳐도 이름순으로 다른 클립이 잡히지 않는다 (742e1924 90초 영상)", () => {
+    const overlapped: EditorViewModel = {
+      ...view, captions: [], gaps: [],
+      tracks: [{ trackId: "b", role: "broll", clips: [
+        { clipId: "b-aaa", segmentId: "segment-1", type: "broll", assetId: null, assetUri: null, startSec: 2, endSec: 8, controls: {} },
+        { clipId: "b-zzz", segmentId: "segment-2", type: "broll", assetId: null, assetUri: null, startSec: 4, endSec: 10, controls: {} },
+      ] }],
+    };
+    const onSelectSegment = vi.fn();
+    render(<TimelineDock view={overlapped} viewportWidthPx={WIDTH_FOR_100_PX_PER_SECOND} onSelectSegment={onSelectSegment} />);
+    // 두 클립 모두 중심(5~7초)이 겹침: b-aaa 중심 5초는 b-zzz 안(4~10초)에도 속한다.
+    fireEvent.click(timelineClipSelection("b-zzz"));
+    fireEvent.click(timelineClipSelection("b-aaa"));
+    expect(onSelectSegment.mock.calls.map((call) => call[0])).toEqual(["segment-2", "segment-1"]);
   });
 });
