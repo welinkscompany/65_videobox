@@ -44,7 +44,7 @@ describe("watchExactPreview", () => {
     expect(calls).toBe(4);
   });
 
-  it("간격이 1, 1.5, 2.25, 3.375, 5초로 늘고 성공하면 더 묻지 않는다", async () => {
+  it("간격이 1, 1.5, 2.25, 3초(최대)로 늘고 성공하면 더 묻지 않는다", async () => {
     vi.useFakeTimers();
     const stamps: number[] = [];
     const start = Date.now();
@@ -52,7 +52,7 @@ describe("watchExactPreview", () => {
     const done = watchExactPreview({ fetchStatus, generationId: "g-1", isActive: () => true });
     await vi.runAllTimersAsync();
     await done;
-    expect(stamps.map((t, i) => t - (i === 0 ? start : stamps[i - 1]!)).slice(0, 5)).toEqual([1000, 1500, 2250, 3375, 5000]);
+    expect(stamps.map((t, i) => t - (i === 0 ? start : stamps[i - 1]!)).slice(0, 5)).toEqual([1000, 1500, 2250, 3000, 3000]);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(fetchStatus).toHaveBeenCalledTimes(6);
   });
@@ -112,5 +112,40 @@ describe("watchExactPreview", () => {
     await vi.runAllTimersAsync();
     expect((await done).kind).toBe("timed_out");
     expect(fetchStatus).toHaveBeenCalledTimes(5);
+  });
+
+  it("끝나지 않는 요청은 시간이 지나면 오류 한 번으로 세고, 연달아 세 번이면 멈춘다", async () => {
+    vi.useFakeTimers();
+    const fetchStatus = vi.fn(() => new Promise<ExactPreviewResponse>(() => {}));
+    const done = watchExactPreview({ fetchStatus, generationId: "g-1", isActive: () => true });
+    await vi.runAllTimersAsync();
+    expect(await done).toEqual({ kind: "failed", error_detail: "preview_status_unreachable" });
+    expect(fetchStatus).toHaveBeenCalledTimes(3);
+  });
+
+  it("시간이 지나면 진행 중인 요청에 중단 신호를 보낸다", async () => {
+    vi.useFakeTimers();
+    const signals: AbortSignal[] = [];
+    const fetchStatus = vi.fn((_id: string, signal: AbortSignal) => { signals.push(signal); return new Promise<ExactPreviewResponse>(() => {}); });
+    void watchExactPreview({ fetchStatus, generationId: "g-1", isActive: () => true });
+    await vi.advanceTimersByTimeAsync(1000 + 12_000 + 1);
+    expect(signals[0]?.aborted).toBe(true);
+  });
+
+  it("화면이 닫히면(바깥 신호) 진행 중인 요청을 끊고 cancelled로 끝난다", async () => {
+    vi.useFakeTimers();
+    const outer = new AbortController();
+    let active = true;
+    const signals: AbortSignal[] = [];
+    const fetchStatus = vi.fn((_id: string, signal: AbortSignal) => { signals.push(signal); return new Promise<ExactPreviewResponse>(() => {}); });
+    const done = watchExactPreview({ fetchStatus, generationId: "g-1", isActive: () => active, signal: outer.signal });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(signals).toHaveLength(1);
+    active = false;
+    outer.abort();
+    expect(signals[0]?.aborted).toBe(true);
+    await vi.runAllTimersAsync();
+    expect((await done).kind).toBe("cancelled");
+    expect(fetchStatus).toHaveBeenCalledTimes(1);
   });
 });

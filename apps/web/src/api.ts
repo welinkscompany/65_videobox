@@ -2595,8 +2595,8 @@ export const api = {
   getSceneTransitionSuggestions: (projectId: string, sessionId: string) =>
     request<{ suggestions: SceneTransitionSuggestion[] }>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/transition-suggestions`),
   /** 미리보기를 기다리는 동안 묻는 가벼운 길 -- 세션·매니페스트는 끝난 뒤 한 번만 다시 읽는다. */
-  getExactPreviewStatus: (projectId: string, generationId: string) =>
-    request<ExactPreviewResponse>(`/api/projects/${encodeURIComponent(projectId)}/exact-previews/${encodeURIComponent(generationId)}`),
+  getExactPreviewStatus: (projectId: string, generationId: string, signal?: AbortSignal) =>
+    request<ExactPreviewResponse>(`/api/projects/${encodeURIComponent(projectId)}/exact-previews/${encodeURIComponent(generationId)}`, { signal }),
   startExactPreview: (projectId: string, sessionId: string, payload: { expected_revision: number; start_sec?: number; end_sec?: number }) =>
     request<ExactPreviewResponse>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/exact-preview`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),

@@ -732,11 +732,20 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   // 길이 경계는 mutation 쪽과 **같은 것**을 쓴다. 120초를 넘는 영상은 여전히
   // 사람이 눌러야 한다 -- 열기만 해도 몇 분짜리 FFmpeg가 도는 것은 고친 게 아니다.
   const autoPreviewStartedFor = useRef<string | null>(null);
+  const exactPreviewInFlight = useRef(new Map<string, ReturnType<typeof api.startExactPreview>>());
   /** 편집본 미리보기를 시키고, 그 생성분을 지켜보기 시작한다. 시키는 네 자리(자동·새로 만들기·
    *  선택 구간·편집 뒤)가 모두 이 하나를 거친다 -- 기다리는 방식이 둘로 갈라지지 않게. */
   const requestExactPreview = (payload: Parameters<typeof api.startExactPreview>[2], isCurrent: () => boolean = () => true) => {
     const epoch = routeEpoch.current.value;
-    return api.startExactPreview(projectId, sessionId!, payload).then((started) => {
+    // 같은 (편집본, 요청 내용)을 이미 시키는 중이면 그 요청을 같이 기다린다 -- 자동·새로 만들기·
+    // 편집 뒤가 겹쳐 같은 판수로 생성을 두 번 시키면 서버에서 서로 밀어낼 수 있다.
+    const flightKey = JSON.stringify([projectId, sessionId, payload]);
+    let raw = exactPreviewInFlight.current.get(flightKey);
+    if (!raw) {
+      raw = api.startExactPreview(projectId, sessionId!, payload).finally(() => { exactPreviewInFlight.current.delete(flightKey); });
+      exactPreviewInFlight.current.set(flightKey, raw);
+    }
+    return raw.then((started) => {
       if (routeEpoch.current.value !== epoch || !isCurrent()) return started;
       // 서버는 늘 생성분 번호를 준다. 없으면 지켜볼 대상이 없으니 아무것도 하지 않는다.
       if (started?.generation_id) setWatchedPreview({ key: requestKey, generationId: started.generation_id, settled: false });
@@ -768,10 +777,12 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   useEffect(() => {
     if (!generationToWatch) return;
     let active = true;
+    const controller = new AbortController();
     void watchExactPreview({
-      fetchStatus: (id) => api.getExactPreviewStatus(projectId, id),
+      fetchStatus: (id, signal) => api.getExactPreviewStatus(projectId, id, signal),
       generationId: generationToWatch,
       isActive: () => active,
+      signal: controller.signal,
     }).then((outcome) => {
       if (!active) return;
       if (outcome.kind === "timed_out" || (outcome.kind === "failed" && outcome.error_detail === EXACT_PREVIEW_UNREACHABLE)) {
@@ -781,7 +792,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       setWatchedPreview((current) => current?.key === requestKey ? { ...current, generationId: generationToWatch, settled: true } : current);
       setRefreshToken((current) => current + 1);
     });
-    return () => { active = false; };
+    return () => { active = false; controller.abort(); };
   }, [projectId, requestKey, generationToWatch]);
 
   // 후보 결과 미리보기가 끝날 때까지 기다린다. **상태만 물어본다** -- 이 경로는

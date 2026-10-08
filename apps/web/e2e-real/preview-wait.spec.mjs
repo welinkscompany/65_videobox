@@ -17,6 +17,26 @@ const kindOf = (url) => {
   return null;
 };
 
+// 실패 원인 수집: 미리보기 관련 응답을 전부 모아 두었다가, 시험이 실패하면 서버가 준 이유(error_message)와
+// 서버가 지금 말하는 상태를 한꺼번에 찍는다.
+let diag = [];
+test.beforeEach(async ({ page }) => {
+  diag = [];
+  page.on("response", async (response) => {
+    const url = response.url();
+    if (!/exact-preview/.test(url) || /\/content/.test(url)) return;
+    diag.push({ at: new Date().toISOString().slice(11, 23), method: response.request().method(), path: new URL(url).pathname.split("/").slice(-2).join("/"), status: response.status(), body: (await response.text().catch(() => "")).slice(0, 700) });
+  });
+});
+test.afterEach(async ({ request }, testInfo) => {
+  const failedBodies = diag.filter((item) => /"status":\s*"(failed|stale)"/.test(item.body)).map((item) => `${item.at} ${item.method} ${item.path} ${item.body}`);
+  console.log("RUN-DIAG", JSON.stringify({ test: testInfo.title, outcome: testInfo.status, failedBodies }));
+  if (testInfo.status === testInfo.expectedStatus) return;
+  let server = null;
+  try { server = (await serverManifest(request, readFixture().clean)).exact_preview; } catch (error) { server = String(error); }
+  console.log("FAIL-DIAG", JSON.stringify({ test: testInfo.title, responses: diag, serverExactPreview: server }));
+});
+
 const PLAYER = "video[aria-label='편집본 미리보기']";
 
 // 앞 시험이 남긴 상태가 낡았을 수 있다 -- 재생기가 안 보이면 새로 만들기를 눌러 맞춘다.

@@ -483,7 +483,7 @@ describe("EditorWorkbenchRoute", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
 
     expect(status).toHaveBeenCalledTimes(3);
-    expect(status).toHaveBeenCalledWith("project-a", "g-2");
+    expect(status).toHaveBeenCalledWith("project-a", "g-2", expect.anything());
     expect(session.mock.calls.length - afterOpen).toBe(1);
     vi.useRealTimers();
   });
@@ -499,6 +499,17 @@ describe("EditorWorkbenchRoute", () => {
 
     expect(suggestions).toHaveBeenCalledTimes(1);
     expect(suggestions).toHaveBeenCalledWith("project-a", "session-a");
+  });
+
+  it("같은 판수의 미리보기 생성을 겹쳐 시키지 않는다 (자동 시작 중 새로 만들기)", async () => {
+    const start = vi.spyOn(api, "startExactPreview").mockImplementation(() => new Promise(() => {}) as never);
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    await waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+    const refresh = screen.getByRole("button", { name: /미리보기 (새로 )?만드는 중|미리보기 새로 만들기/ });
+    fireEvent.click(refresh);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    expect(start).toHaveBeenCalledTimes(1);
   });
 
   it("accepts a local-first exchange as a memory source", async () => {
@@ -3744,6 +3755,8 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(1);
     // 편집기를 열면 미리보기를 한 번 만든다 -- 빈 화면으로 열리지 않게. 이 시험이
     // 재는 것은 **편집 뒤**의 생성이므로, 화면이 다 뜬 뒤부터 다시 센다.
+    // 자동 시작이 아직 안 끝났으면 새로 만들기는 그 요청을 같이 기다린다(겹쳐 시키지 않는다) -- 먼저 끝낸다.
+    await act(async () => { resolveOldPreview({}); });
     vi.mocked(api.startExactPreview).mockClear();
     fireEvent.click(screen.getByRole("button", { name: "미리보기 새로 만들기" }));
     await waitFor(() => expect(startPreview).toHaveBeenCalledTimes(1));
