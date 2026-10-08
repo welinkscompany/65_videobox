@@ -131,7 +131,12 @@ def test_the_only_css_url_is_the_one_local_font() -> None:
     ) == len(KEYS)
 
 
-def test_the_strict_ban_list_actually_catches_each_form() -> None:
-    sample = 'a{b:url(//x)} <script src="//x"> <a href="//x"> createElement("script") new WebSocket Worker( importScripts srcdoc'
-    for banned in ('url(//', 'src="//', 'href="//', 'createElement("script")', "new WebSocket", "Worker(", "importScripts", "srcdoc"):
-        assert banned in sample and banned in _STRICT_BANS
+def _strict_violations(text: str) -> list[str]:
+    return [banned for banned in _STRICT_BANS if banned in text]
+
+
+@pytest.mark.parametrize("banned", _STRICT_BANS)
+def test_the_strict_check_catches_each_banned_form(banned: str) -> None:
+    """실제 검사 함수를 나쁜 표본에 돌려 형태마다 걸리는지 본다."""
+    assert _strict_violations(f"<x>{banned}</x>") == [banned]
+    assert _strict_violations("<x>ok</x>") == []

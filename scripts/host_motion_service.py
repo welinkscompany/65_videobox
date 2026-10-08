@@ -70,6 +70,14 @@ _MAXIMUM_DEPTH = 3
 _RENDER_LOCK = threading.Lock()
 _NETWORK_MENTION = re.compile(r"(?i)\bcdn\b|googleapis|jsdelivr|unpkg|https://")
 
+#: 렌더 자식(node·크롬)에게 넘기는 환경 변수. 이 밖의 것은 넘기지 않는다.
+_ENVIRONMENT_ALLOWLIST = (
+    "SystemRoot", "windir", "PATH", "PATHEXT", "TEMP", "TMP", "USERPROFILE", "LOCALAPPDATA",
+    "APPDATA", "HOME", "HOMEDRIVE", "HOMEPATH", "COMSPEC", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE",
+)
+#: 요청 본문 상한. 변수 상한(16KB)에 JSON 껍데기를 더해도 이보다 작다.
+MAXIMUM_BODY_BYTES = 64 * 1024
+
 _RECOVERY = {
     "node_not_found": "node를 찾지 못했습니다. Node.js 24를 설치한 뒤 VideoBox를 다시 켜세요.",
     "ffmpeg_not_found": "ffmpeg를 찾지 못했습니다. ffmpeg를 설치한 뒤 VideoBox를 다시 켜세요.",
@@ -199,10 +207,10 @@ def _inspect(value: object, depth: int) -> str | None:
 
 def check_render_request(body: dict) -> RenderOrder | tuple[int, dict]:
     template = body.get("template")
-    if template not in TEMPLATE_KEYS:
+    if not isinstance(template, str) or template not in TEMPLATE_KEYS:
         return 400, {"error": "unknown_template"}
     layout = body.get("layout") or "full"
-    if layout not in LAYOUT_FORMATS:
+    if not isinstance(layout, str) or layout not in LAYOUT_FORMATS:
         return 400, {"error": "unknown_layout"}
     try:
         duration = float(body.get("duration_sec"))
@@ -215,6 +223,8 @@ def check_render_request(body: dict) -> RenderOrder | tuple[int, dict]:
         return 400, {"error": "variables_must_be_an_object"}
     try:
         encoded = json.dumps(variables, ensure_ascii=False, allow_nan=True).encode("utf-8")
+    except RecursionError:
+        return 400, {"error": "variables_too_deep"}
     except (TypeError, ValueError):
         return 400, {"error": "text_not_allowed"}
     if len(encoded) > MAXIMUM_VARIABLES_BYTES:
@@ -260,8 +270,10 @@ def prepare_composition(*, settings: BridgeSettings, order: RenderOrder, scratch
 
 
 def engine_environment(base: Mapping[str, str], *, browser: Path) -> dict[str, str]:
-    env = dict(base)
-    env.pop("VIDEOBOX_BRIDGE_TOKEN", None)
+    # 다리의 환경에는 다른 비밀(API 키·토큰·클라우드 자격)이 있을 수 있다. 렌더에는 필요한 것만 준다.
+    # 대소문자는 윈도우 환경 변수 규칙대로 무시하고 맞춘다. 프록시 변수는 일부러 안 넘긴다(죽은 프록시만 적용).
+    wanted = {name.upper() for name in _ENVIRONMENT_ALLOWLIST}
+    env = {name: value for name, value in base.items() if name.upper() in wanted}
     env.update(
         {
             "HYPERFRAMES_NO_TELEMETRY": "1",
@@ -345,6 +357,12 @@ def render_motion(*, settings: BridgeSettings, order: RenderOrder, scratch: Path
     return RenderedMotion(out, mentions)
 
 
+def _short_reason(exc: BaseException) -> str:
+    """경로가 없는 짧은 이유. `engine_failed: ...`처럼 앞의 낱말만 쓰고, 그 밖은 예외 종류 이름이다."""
+    head = str(exc).split(":", 1)[0].strip()
+    return head if re.fullmatch(r"[a-z_]{3,40}", head) else type(exc).__name__
+
+
 def render_request_payload(body: dict, *, settings: BridgeSettings | None, renderer=render_motion, lock=_RENDER_LOCK) -> tuple[int, dict]:
     if settings is None:
         return 503, {"error": "motion_engine_not_prepared"}
@@ -362,16 +380,19 @@ def render_request_payload(body: dict, *, settings: BridgeSettings | None, rende
             started = time.monotonic()
             try:
                 rendered = renderer(settings=settings, order=checked, scratch=Path(directory))
+                size = rendered.path.stat().st_size
+                if size > MAXIMUM_VIDEO_BYTES:
+                    return 500, {"error": "render_too_large"}
                 video = rendered.path.read_bytes()
             except subprocess.TimeoutExpired:
                 return 504, {"error": "render_timed_out"}
             except (RuntimeError, OSError, ValueError) as exc:
-                return 500, {"error": "render_failed", "detail": str(exc)}
+                # 전체 내용(경로 포함)은 다리 로그에만 남기고, 부르는 쪽에는 짧은 종류만 준다.
+                print(f"[motion-bridge] render_failed: {exc}", file=sys.stderr, flush=True)
+                return 500, {"error": "render_failed", "detail": _short_reason(exc)}
             elapsed = round(time.monotonic() - started, 2)
     finally:
         lock.release()
-    if len(video) > MAXIMUM_VIDEO_BYTES:
-        return 500, {"error": "render_too_large", "detail": str(len(video))}
     return 200, {
         "video_base64": base64.b64encode(video).decode("ascii"),
         "format": LAYOUT_FORMATS[checked.layout],
@@ -396,6 +417,10 @@ LONGEST_VARIABLES = {
 }
 
 
+class _BodyTooLarge(Exception):
+    pass
+
+
 class _Handler(BaseHTTPRequestHandler):
     server_version = "VideoBoxMotionBridge/1.0"
     settings: BridgeSettings | None = None
@@ -416,6 +441,8 @@ class _Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         if length <= 0:
             return {}
+        if length > MAXIMUM_BODY_BYTES:
+            raise _BodyTooLarge
         decoded = json.loads(self.rfile.read(length).decode("utf-8"))
         return decoded if isinstance(decoded, dict) else {}
 
@@ -447,10 +474,17 @@ class _Handler(BaseHTTPRequestHandler):
             return
         try:
             payload = self._payload()
-        except (ValueError, OSError):
+        except _BodyTooLarge:
+            self._reply(413, {"error": "request_too_large"})
+            return
+        except (ValueError, OSError, RecursionError):
             self._reply(400, {"error": "unreadable_request"})
             return
-        self._reply(*render_request_payload(payload, settings=self.settings))
+        try:
+            result = render_request_payload(payload, settings=self.settings)
+        except RecursionError:
+            result = (400, {"error": "variables_too_deep"})
+        self._reply(*result)
 
 
 def build_server(*, port: int, settings: BridgeSettings | None, bridge_token: str) -> ThreadingHTTPServer:

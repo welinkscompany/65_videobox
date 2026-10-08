@@ -272,3 +272,67 @@ def test_run_bounded_kills_the_whole_tree_when_time_runs_out() -> None:
     with pytest.raises(subprocess.TimeoutExpired):
         motion.run_bounded(["node"], timeout=1, env={}, cwd=Path("."), popen=lambda *a, **k: _Slow(), killer=killed.append)
     assert killed == [4242]
+
+
+# --- 수정 1차 (리뷰 반영) ---
+
+def test_the_render_child_gets_only_what_it_needs(monkeypatch) -> None:
+    base = {
+        "FAKE_SECRET_KEY": "s", "HF_TOKEN": "h", "NPM_TOKEN": "n", "AWS_SECRET_ACCESS_KEY": "a",
+        "VIDEOBOX_BRIDGE_TOKEN": "t", "HTTP_PROXY": "http://evil:1", "ALL_PROXY": "http://evil:2", "https_proxy": "http://evil:3",
+        "Path": "/bin", "SystemRoot": "/win", "TEMP": "/t",
+    }
+    env = motion.engine_environment(base, browser=Path("chrome.exe"))
+    for name in ("FAKE_SECRET_KEY", "HF_TOKEN", "NPM_TOKEN", "AWS_SECRET_ACCESS_KEY", "VIDEOBOX_BRIDGE_TOKEN", "HTTP_PROXY", "ALL_PROXY", "https_proxy"):
+        assert name not in env, name
+    assert env["Path"] == "/bin" and env["SystemRoot"] == "/win" and env["TEMP"] == "/t"
+    assert env["HTTPS_PROXY"] == "http://127.0.0.1:9"
+    assert env["HYPERFRAMES_NO_TELEMETRY"] == "1"
+
+
+@pytest.mark.parametrize("bad", [["a"], {"a": 1}, 5, None, 1.5])
+def test_an_unhashable_or_odd_layout_is_a_400_not_a_crash(bad) -> None:
+    result = motion.check_render_request(_body(layout=bad))
+    if bad is None:
+        assert isinstance(result, motion.RenderOrder) and result.layout == "full"
+    else:
+        assert result == (400, {"error": "unknown_layout"})
+
+
+@pytest.mark.parametrize("bad", [["bar_compare"], {"a": 1}, 5, None])
+def test_an_unhashable_or_odd_template_is_a_400(bad) -> None:
+    assert motion.check_render_request(_body(template=bad)) == (400, {"error": "unknown_template"})
+
+
+def test_a_deeply_nested_body_is_refused_not_crashed() -> None:
+    deep: object = 1
+    for _ in range(5000):
+        deep = [deep]
+    assert motion.check_render_request(_body(variables={"x": deep}))[1]["error"] in ("variables_too_deep", "variables_too_large")
+
+
+def test_a_failed_render_tells_the_caller_only_a_short_pathless_reason(settings, capsys) -> None:
+    def broken(**kwargs):  # noqa: ANN003
+        raise RuntimeError("engine_failed: Error at /Users/secret/comp/index.html line 3")
+
+    status, payload = motion.render_request_payload(_body(), settings=settings, renderer=broken, lock=threading.Lock())
+    assert (status, payload) == (500, {"error": "render_failed", "detail": "engine_failed"})
+    assert "secret" in capsys.readouterr().err
+
+
+def test_an_oversized_output_is_refused_before_it_is_read(settings, monkeypatch) -> None:
+    monkeypatch.setattr(motion, "MAXIMUM_VIDEO_BYTES", 4)
+    status, payload = motion.render_request_payload(_body(), settings=settings, renderer=_writes(b"TOOBIG"), lock=threading.Lock())
+    assert (status, payload) == (500, {"error": "render_too_large"})
+
+
+def test_the_handler_refuses_a_huge_body_before_reading_it() -> None:
+    class _Headers(dict):
+        def get(self, key, default=None):  # noqa: ANN001
+            return super().get(key, default)
+
+    handler = motion._Handler.__new__(motion._Handler)
+    handler.headers = _Headers({"Content-Length": str(motion.MAXIMUM_BODY_BYTES + 1)})
+    handler.rfile = None  # 읽으려 하면 바로 터진다
+    with pytest.raises(motion._BodyTooLarge):
+        handler._payload()
