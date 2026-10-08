@@ -40,6 +40,15 @@ CLEAN_SCENE_BOUNDS: tuple[tuple[str, float, float], ...] = (
 CLEAN_PROJECT_NAME = "편집 실사용 시험"
 DUPLICATED_PROJECT_NAME = "겹친 오버레이 재현"
 PARENT = "timeline_001:001"
+NO_NARRATION_PROJECT_NAME = "내레이션 없는 프로젝트 재현"
+#: 742e1924(2026-10-09 실기 점검)의 모양: 내레이션 줄이 비어 있고, 자막의 `segment_id`(계보)는 분할 전 낡은
+#: 값인데 `owning_segment_id`만 장면마다 다르다. (소유 id, 시작, 끝, 자막의 낡은 계보 id)
+NO_NARRATION_SCENES: tuple[tuple[str, float, float, str], ...] = (
+    (PARENT, 0.0, 2.0, PARENT),
+    (f"{PARENT}__split_2", 2.0, 4.5, f"{PARENT}__split_2"),
+    (f"{PARENT}__split_2__split_2", 4.5, 7.0, f"{PARENT}__split_2"),
+    (f"{PARENT}__split_2__split_3", 7.0, 9.5, f"{PARENT}__split_2"),
+)
 
 _COLORS = ("blue", "green", "orange", "purple")
 _CAPTIONS = ("첫 장면", "둘째 장면", "셋째 장면", "넷째 장면")
@@ -197,7 +206,34 @@ def _seed_duplicated(store: LocalProjectStore, media: dict[str, Any]) -> dict[st
     return {"project_id": project.project_id, "session_id": session["session_id"], "timeline_id": timeline["timeline_id"]}
 
 
+def _seed_no_narration(store: LocalProjectStore, media: dict[str, Any]) -> dict[str, str]:
+    project = store.bootstrap_project(name=NO_NARRATION_PROJECT_NAME)
+    assets = _register(store, project.project_id, media)
+    timeline = store.save_timeline_run(
+        project_id=project.project_id, output_mode="landscape", timeline_payload=_timeline_payload([])
+    )
+    segments = []
+    for i, (sid, start, end, lineage) in enumerate(NO_NARRATION_SCENES):
+        segments.append(_segment(
+            sid, start, end, _CAPTIONS[i], assets["brolls"][i], [],
+            content_windows=[{
+                "start_offset_sec": 0.0, "duration_sec": end - start, "source_segment_id": lineage,
+                "caption_text": _CAPTIONS[i], "visual_overlays": [],
+            }],
+        ))
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={"segments": segments, "history": []},
+    )
+    return {"project_id": project.project_id, "session_id": session["session_id"], "timeline_id": timeline["timeline_id"]}
+
+
 def seed_editor_fixtures(*, projects_root: Path, media_dir: Path) -> dict[str, dict[str, str]]:
     media = _make_media(Path(media_dir))
     store = LocalProjectStore(Path(projects_root))
-    return {"clean": _seed_clean(store, media), "duplicated_overlays": _seed_duplicated(store, media)}
+    return {
+        "clean": _seed_clean(store, media),
+        "duplicated_overlays": _seed_duplicated(store, media),
+        "no_narration": _seed_no_narration(store, media),
+    }

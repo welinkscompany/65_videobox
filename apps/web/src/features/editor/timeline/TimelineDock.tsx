@@ -234,8 +234,8 @@ function sourceSnapCandidates(view: EditorViewModel): readonly SnapCandidate[] {
       Object.freeze({ kind: "neighbor-end" as const, id: `gap:${gap.gapId}:end`, timeSec: gap.endSec }),
     ]),
     ...view.captions.flatMap((caption) => [
-      Object.freeze({ kind: "neighbor-start" as const, id: `caption:${caption.segmentId}:start`, timeSec: caption.startSec }),
-      Object.freeze({ kind: "neighbor-end" as const, id: `caption:${caption.segmentId}:end`, timeSec: caption.endSec }),
+      Object.freeze({ kind: "neighbor-start" as const, id: `caption:${caption.placementId ?? caption.segmentId}:start`, timeSec: caption.startSec }),
+      Object.freeze({ kind: "neighbor-end" as const, id: `caption:${caption.placementId ?? caption.segmentId}:end`, timeSec: caption.endSec }),
     ]),
   ]);
 }
@@ -296,6 +296,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
         : reduceTimelineNavigation(navigation, { type: "seek", seconds: initial.playbackSec }, initial);
     },
   );
+  const userZoomedRef = useRef(false);
   const [pointerDraft, setPointerDraft] = useState<TimelinePointerDraft | null>(null);
   const pointerDraftRef = useRef<TimelinePointerDraft | null>(null);
   pointerDraftRef.current = pointerDraft;
@@ -502,8 +503,20 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   };
   const runZoom = (command: TimelineZoomCommand, anchorPx?: number) => {
     const control = zoomControls[command];
-    if (control.enabled) control.run(anchorPx);
+    if (control.enabled) { userZoomedRef.current = true; control.run(anchorPx); }
   };
+  // **처음 배율은 실제로 잰 칸 폭으로 다시 맞춘다.** 첫 렌더는 머리 칸(9rem)까지 든 바깥 폭으로 배율을
+  // 잡는데, 실제 클립 칸은 그보다 좁다. 아무도 다시 맞추지 않아 짧은 영상의 끝 1초가 가려진 채 열렸다
+  // (2026-10-09 정적 검토). 사람이 아직 배율을 건드리지 않았다면 잰 폭이 처음 들어오는 순간(그리고
+  // 그 뒤 폭이 바뀔 때) 처음 배율을 그 폭으로 다시 계산한다.
+  const lastFittedWidthRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (measuredTrackWidthPx <= 0 || userZoomedRef.current || lastFittedWidthRef.current === measuredTrackWidthPx) return;
+    const first = lastFittedWidthRef.current === null;
+    lastFittedWidthRef.current = measuredTrackWidthPx;
+    dispatch({ type: "zoom", pixelsPerSecond: initialPixelsPerSecond({ durationSec: view.output.durationSec, viewportWidthPx: measuredTrackWidthPx }), anchorPx: 0 });
+    if (first) dispatch({ type: "scroll", seconds: 0 });
+  }, [measuredTrackWidthPx, view.output.durationSec]);
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     const action = navigationKeyAction(event.key, isEditableTarget(event.target), { state, fps: view.fps });
     if (!action) return;

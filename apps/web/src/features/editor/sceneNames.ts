@@ -1,4 +1,5 @@
 import type { EditorViewModel } from "./editorViewModel";
+import { captionOwnerSegmentId } from "./sceneSpans";
 
 /** 장면 번호는 **타임라인 순서**를 따른다. 검토 화면과 미리 듣기 이름이 이미
  *  그렇게 세고 있어서, 여기서 다르게 세면 같은 장면이 화면마다 다른 번호로
@@ -45,7 +46,7 @@ export function sceneLabelsBySegmentId(view: EditorViewModel): ReadonlyMap<strin
   const captionBySegmentId = new Map<string, string>();
   for (const caption of view.captions) {
     const head = captionHead(caption.text);
-    if (head && !captionBySegmentId.has(caption.segmentId)) captionBySegmentId.set(caption.segmentId, head);
+    if (head && !captionBySegmentId.has(captionOwnerSegmentId(caption))) captionBySegmentId.set(captionOwnerSegmentId(caption), head);
   }
   const labels = new Map<string, string>();
   for (const [segmentId, number] of numbers) {

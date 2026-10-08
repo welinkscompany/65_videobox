@@ -38,8 +38,8 @@ export function resolvePlaybackSelection(
 ): string | null {
   finite(seconds, "Playback seconds");
   const { pinnedSegmentId, frameSec } = options;
-  const pinned = pinnedSegmentId === null ? undefined : segments.find((segment) => segment.segmentId === pinnedSegmentId);
-  if (pinned && pinned.startSec - frameSec <= seconds && seconds < pinned.endSec) return pinned.segmentId;
+  // 같은 장면이 구간을 여럿 가질 수 있다(자막과 영상 클립이 서로 다른 시각에 놓임) -- 그중 어느 것이든 맞으면 누른 장면이다.
+  if (pinnedSegmentId !== null && segments.some((segment) => segment.segmentId === pinnedSegmentId && segment.startSec - frameSec <= seconds && seconds < segment.endSec)) return pinnedSegmentId;
   const half = frameSec / 2;
   return segments.find((segment) => segment.startSec - half <= seconds && seconds < segment.endSec - half)?.segmentId
     ?? activeSegmentIdAt(segments, seconds);

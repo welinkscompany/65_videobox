@@ -1,3 +1,4 @@
+import { captionOwnerSegmentId } from "../sceneSpans";
 import type { ShapeOverlayMotion, ShapeOverlayShape } from "../../../api";
 import type { EditorCaptionStyle, EditorControls, EditorViewModel } from "../editorViewModel";
 import { isVideoAssetUri } from "../assetKind";
@@ -293,7 +294,7 @@ export function projectInspectorTargets({ view, selectedSegmentId }: Readonly<{ 
       }));
   });
   const captionTargets = view.captions
-    .filter((caption) => (caption.owningSegmentId ?? caption.segmentId) === selectedSegmentId)
+    .filter((caption) => captionOwnerSegmentId(caption) === selectedSegmentId)
     .map((caption) => ({
       id: `caption:${caption.captionId ?? caption.segmentId}`,
       kind: "caption" as const,

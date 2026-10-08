@@ -15,6 +15,7 @@ import { PreviewStage, type AuditionRequest, type AuditionSource } from "../prev
 import { sceneNumbersBySegmentId } from "../sceneNames";
 import { TimelineDock } from "../timeline/TimelineDock";
 import type { TimelineZoomCommand } from "../timeline/timelineZoomShortcuts";
+import { captionOwnerSegmentId, playbackSelectionSpans, sceneSpanBySegmentId, sceneSpans } from "../sceneSpans";
 import { clampPlaybackSeconds, resolvePlaybackSelection, safeFrameDurationSec } from "../transcript/playbackNavigation";
 import { isVideoAssetUri } from "../assetKind";
 import { EditorWorkbenchReadOnlyAdapters } from "./editorWorkbenchReadOnlyAdapters";
@@ -40,16 +41,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
  * 현재 선택 장면 찾기, 내보내기 팝업에서 장면 클릭)이라 하나로 모았다 --
  * 코드리뷰(2026-08-29)로 잡힌 결함: 예전엔 세 곳에 각자 손으로 있어서 이 규칙이
  * 한 곳에서만 갱신되고 나머지에 안 옮겨질 위험이 있었다. */
-function findNarrationOrCaptionBySegment(
-  tracks: EditorViewModel["tracks"],
-  captions: EditorViewModel["captions"],
-  segmentId: string,
-) {
-  return tracks
-    .filter((track) => track.role === "narration")
-    .flatMap((track) => track.clips)
-    .find((clip) => clip.segmentId === segmentId)
-    ?? captions.find((caption) => caption.segmentId === segmentId);
+function findNarrationOrCaptionBySegment(view: EditorViewModel, segmentId: string) {
+  return sceneSpanBySegmentId(view, segmentId);
 }
 
 export function persistedPanelPixels(size: PanelSize, minPx: number, fallback: number) {
@@ -305,12 +298,11 @@ function EditorWorkbenchInstance({
     }
     const segmentIds = new Set([
       ...view.tracks.filter((track) => track.role === "narration").flatMap((track) => track.clips.map((clip) => clip.segmentId)),
-      ...view.captions.map((caption) => caption.segmentId),
       // 분할된 캡션은 `owningSegmentId`로 골라진다(TimelineDock.selectClip) --
       // segmentId만 모으면 그 선택이 "존재하지 않는 장면"으로 보여 리비전이
       // 바뀔 때마다(예: 백그라운드 재검증) 조용히 첫 장면으로 되돌아갔다
       // (2026-09-20 실측).
-      ...view.captions.map((caption) => caption.owningSegmentId ?? caption.segmentId),
+      ...view.captions.map(captionOwnerSegmentId),
     ]);
     setSelectedSegmentId((current) => current && segmentIds.has(current) ? current : segmentIds.has(view.local.selectedSegmentId ?? "") ? view.local.selectedSegmentId : null);
     setPlaybackSec((current) => clampPlaybackSeconds(current, view.output.durationSec));
@@ -329,7 +321,7 @@ function EditorWorkbenchInstance({
     }
     const key = `${view.sessionId}:${normalizedRequestedSegmentId}`;
     if (activeRequestedSegmentKey.current === key) return;
-    const requestedNarration = findNarrationOrCaptionBySegment(view.tracks, view.captions, normalizedRequestedSegmentId);
+    const requestedNarration = findNarrationOrCaptionBySegment(view, normalizedRequestedSegmentId);
     if (!requestedNarration) {
       activeRequestedSegmentKey.current = null;
       return;
@@ -402,12 +394,9 @@ function EditorWorkbenchInstance({
     // 장면을 나누고 나면 자막 구간과 장면 구간이 어긋난다. 그래서 7초를 눌렀는데
     // 5~7초 장면이 골라지고 `나누기`가 영영 잠겼다(2026-08-17 실제 앱에서 확인).
     // 컷 도구가 다루는 단위는 장면이므로, 고를 것도 장면이어야 한다.
-    const narrationSpans = view.tracks
-      .filter((track) => track.role === "narration")
-      .flatMap((track) => track.clips.map((clip) => ({ segmentId: clip.segmentId, startSec: clip.startSec, endSec: clip.endSec })));
-    // 다만 내레이션이 **긴 통짜 하나**일 때는(원본 영상 소리로 만든 초안) 장면이
-    // 하나뿐이라 아무것도 구분하지 못한다. 그때는 자막이 의미 단위다.
-    const spans = narrationSpans.length > 1 ? narrationSpans : view.captions.length ? view.captions : narrationSpans;
+    // 다만 내레이션이 **긴 통짜 하나**이거나 없을 때는 장면이 하나뿐이라 아무것도 구분하지 못한다.
+    // 그때는 자막이 의미 단위다 -- 자막의 장면은 낡은 `segmentId`가 아니라 소유 id로 센다(`sceneSpans.ts`).
+    const spans = playbackSelectionSpans(view);
     // 누른 자국은 **지금 고른 장면과 같을 때만** 지킨다. 세션 초기화·id 정리·requestedNarration 같은
     // 다른 경로가 선택을 바꿨는데 낡은 자국이 남아 이기는 일을 막는다.
     const pinned = pinnedSegmentIdRef.current !== null && pinnedSegmentIdRef.current === selectedSegmentId ? pinnedSegmentIdRef.current : null;
@@ -418,15 +407,13 @@ function EditorWorkbenchInstance({
   };
   const selectedNarration = selectedSegmentId === null
     ? null
-    : findNarrationOrCaptionBySegment(view.tracks, view.captions, selectedSegmentId) ?? null;
+    : findNarrationOrCaptionBySegment(view, selectedSegmentId) ?? null;
   const assetTarget = selectedNarration === null ? null : { segmentId: selectedNarration.segmentId, startSec: selectedNarration.startSec, endSec: selectedNarration.endSec };
   // 캡컷처럼 컷 도구를 타임라인 위에 둔다. 2026-08-17까지 이 툴바에는 편집하는
   // 단추가 하나도 없었고, 나누기·붙이기는 `선택 구간 편집`이라는 이름 뒤에 있어
   // 컷편집을 찾는 사람은 만나지 못했다. 실제 변경은 기존 InspectorAction 경로가 한다.
   const cutTools = cutToolbarState({
-    clips: view.tracks
-      .filter((track) => track.role === "narration")
-      .flatMap((track) => track.clips)
+    clips: sceneSpans(view)
       .map((clip) => ({
         segmentId: clip.segmentId,
         startSec: clip.startSec,
@@ -628,7 +615,7 @@ function EditorWorkbenchInstance({
   const showVariantCompare = variantMode !== "master";
   const masterSegmentIds = Array.from(new Set([
     ...view.tracks.flatMap((track) => track.clips.map((clip) => clip.segmentId)),
-    ...view.captions.map((caption) => caption.segmentId),
+    ...view.captions.map(captionOwnerSegmentId),
   ]));
   const highlightVariant = serverVariants.find((variant) => variant.kind === "vertical_highlight");
   const resolveConflict = (field: string, decision: "keep_local" | "rebase_master") => {
@@ -862,7 +849,7 @@ function EditorWorkbenchInstance({
           projectId={view.projectId}
           onOpenEditor={() => setExportOpen(false)}
           onOpenSegment={({ segmentId }) => {
-            const target = findNarrationOrCaptionBySegment(view.tracks, view.captions, segmentId);
+            const target = findNarrationOrCaptionBySegment(view, segmentId);
             if (target) {
               selectSegment(segmentId);
               setPlaybackSec(clampPlaybackSeconds(target.startSec, view.output.durationSec));

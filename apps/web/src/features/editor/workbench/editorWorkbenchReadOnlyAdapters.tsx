@@ -9,6 +9,7 @@ import { isAllowedLocalUrl } from "../../../lib/network-guard";
 import { AutoCaptionCard } from "../transcript/AutoCaptionCard";
 import { ScriptPane } from "../script/ScriptPane";
 import { TranscriptPanel } from "../transcript/TranscriptPanel";
+import { captionOwnerSegmentId, sceneSpanBySegmentId } from "../sceneSpans";
 import { projectTranscriptEntries } from "../transcript/transcriptProjection";
 import type { ApprovedTtsCandidate, InspectorAction, PartialRegenerationControls, VoiceSampleChoice } from "../inspector/InspectorControls";
 import { projectInspectorTargets } from "../inspector/inspectorRegistry";
@@ -37,7 +38,7 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, selectedS
       }
     }
     for (const caption of view.captions) {
-      const key = caption.owningSegmentId ?? caption.segmentId;
+      const key = captionOwnerSegmentId(caption);
       const known = timelineSegmentOrder.get(key);
       if (known === undefined || caption.startSec < known) timelineSegmentOrder.set(key, caption.startSec);
     }
@@ -79,15 +80,10 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, selectedS
       sourceCheck={localSources.length > 0 ? <section aria-label="소스 확인" className="vb-editor-workbench__sources"><h2>소스 확인</h2><p>편집본은 그대로 두고 원본만 봐요.</p><div>{localSources.map((source) => <Button key={source.id} type="button" variant="outline" onClick={() => onPreviewSource?.(source)} aria-label={`${source.label} 원본 열기`}>{source.label}</Button>)}</div></section> : null}
       analysisPanel={<MediaAnalysisStatusPanel projectId={view.projectId} />}
       script={<ScriptPane projectId={view.projectId} />}
-      transcript={<TranscriptPanel frameSec={view.fps.num > 0 && view.fps.den > 0 ? view.fps.den / view.fps.num : 1 / 30} entries={projectTranscriptEntries({ narration: view.tracks.filter((track) => track.role === "narration").flatMap((track) => track.clips.map((clip) => ({ segmentId: clip.segmentId, startSec: clip.startSec, endSec: clip.endSec }))), captions: view.captions })} isSaving={isSavingCaption} onSaveCaption={onSaveCaption} onDeleteSegment={onInspectorAction ? (segmentId) => onInspectorAction({ kind: "set-cut-action", segmentId, cutAction: "remove" }) : undefined} onSeek={onSeek} onSelectSegment={onSelectSegment} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} autoCaption={session ? <AutoCaptionCard projectId={view.projectId} sessionId={session.sessionId} expectedRevision={session.expectedRevision} captionLanguage={session.captionLanguage ?? null} onApplied={() => { void onMediaAdded?.(); }} /> : null} />}
+      transcript={<TranscriptPanel frameSec={view.fps.num > 0 && view.fps.den > 0 ? view.fps.den / view.fps.num : 1 / 30} entries={projectTranscriptEntries({ narration: view.tracks.filter((track) => track.role === "narration").flatMap((track) => track.clips.map((clip) => ({ segmentId: clip.segmentId, startSec: clip.startSec, endSec: clip.endSec }))), captions: view.captions.map((caption) => ({ segmentId: captionOwnerSegmentId(caption), startSec: caption.startSec, endSec: caption.endSec, text: caption.text })) })} isSaving={isSavingCaption} onSaveCaption={onSaveCaption} onDeleteSegment={onInspectorAction ? (segmentId) => onInspectorAction({ kind: "set-cut-action", segmentId, cutAction: "remove" }) : undefined} onSeek={onSeek} onSelectSegment={onSelectSegment} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} autoCaption={session ? <AutoCaptionCard projectId={view.projectId} sessionId={session.sessionId} expectedRevision={session.expectedRevision} captionLanguage={session.captionLanguage ?? null} onApplied={() => { void onMediaAdded?.(); }} /> : null} />}
     />;
   }
-  const narrationClips = view.tracks.filter((track) => track.role === "narration").flatMap((track) => track.clips);
-  const selectedRange = selectedSegmentId === null
-    ? null
-    : narrationClips.find((clip) => clip.segmentId === selectedSegmentId)
-      ?? view.captions.find((caption) => caption.segmentId === selectedSegmentId)
-      ?? null;
+  const selectedRange = selectedSegmentId === null ? null : sceneSpanBySegmentId(view, selectedSegmentId) ?? null;
   const selectedSessionSegmentIndex = selectedSegmentId === null ? -1 : session?.segments.findIndex((segment) => segment.segmentId === selectedSegmentId) ?? -1;
   const selectedSessionSegment = selectedSessionSegmentIndex >= 0 ? session?.segments[selectedSessionSegmentIndex] ?? null : null;
   return <RightDock

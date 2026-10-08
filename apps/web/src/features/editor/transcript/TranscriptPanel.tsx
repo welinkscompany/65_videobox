@@ -75,7 +75,7 @@ export function TranscriptPanel({
     <section aria-label="캡션" className="vb-editor-workbench__summary">
       <h2>캡션</h2>
       {visibleEntries.length ? <ol>
-        {visibleEntries.map((entry) => <li key={entry.segmentId}>
+        {visibleEntries.map((entry) => <li key={`${entry.segmentId}:${entry.startSec}`}>
           <Button aria-current={entry.segmentId === activeSegmentId ? "true" : undefined} aria-label={`${entry.text} 캡션 선택`} disabled={isSaving} onClick={() => select(entry)} type="button">
             {entry.text} · {seconds(entry.startSec)}–{seconds(entry.endSec)}
           </Button>

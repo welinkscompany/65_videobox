@@ -18,6 +18,7 @@
  *    노이즈·변형·소리 정리가 들어왔다). 그래서 여기서도 권할 수 있게 됐다 --
  *    의도 목록이 넓어지면 이 파일도 같이 넓힌다는 약속을 지킨 것이다.
  */
+import { captionOwnerSegmentId } from "../sceneSpans";
 import type { EditorViewModel } from "../editorViewModel";
 import { sceneNumbersBySegmentId } from "../sceneNames";
 
@@ -60,7 +61,7 @@ export function buildQualityFollowUps(
   const scene = `${sceneNumber}번 장면`;
   const broll = clipsFor(view, segmentId, "broll");
   const hasAnyBroll = view.tracks.some((track) => track.role === "broll" && track.clips.length > 0);
-  const caption = view.captions.find((item) => item.segmentId === segmentId);
+  const caption = view.captions.find((item) => captionOwnerSegmentId(item) === segmentId);
   const suggestions: string[] = [];
 
   // 소리부터 권한다. 음악·효과음이 비어 있는 것이 완성본에서 가장 크게 티가 나고,

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -1862,5 +1862,38 @@ describe("눈금 간격 (스파이크 H-e)", () => {
     render(<TimelineDock view={view} viewportWidthPx={400} />);
     // 20px/초 x 120px 최소 -> 10초(200px)마다: 0, 10, 20
     expect(screen.getAllByRole("listitem", { name: /^눈금/ }).map((el) => el.getAttribute("aria-label"))).toEqual(["눈금 0초", "눈금 10초", "눈금 20초"]);
+  });
+
+  describe("처음 배율을 잰 칸 폭으로 다시 맞춘다 (2026-10-09 정적 검토)", () => {
+    // 첫 렌더의 바깥 폭(머리 칸 포함)보다 실제 클립 칸이 좁다. ResizeObserver가 실제 폭을 알려 오면 맞춘다.
+    function stubObserver(): { report: (width: number) => void } {
+      const callbacks: Array<(entries: unknown[]) => void> = [];
+      vi.stubGlobal("ResizeObserver", class { constructor(callback: (entries: unknown[]) => void) { callbacks.push(callback); } observe() {} unobserve() {} disconnect() {} });
+      return { report: (width) => act(() => { for (const callback of callbacks) callback([{ contentRect: { width } }]); }) };
+    }
+    afterEach(() => { vi.unstubAllGlobals(); });
+
+    it("잰 폭이 처음 들어오면 영상 전체가 그 폭 안에 들어온다 (끝 1초가 가려지지 않는다)", () => {
+      const observer = stubObserver();
+      // 바깥 폭 1000(머리 칸 144px 포함), 실제 칸 폭 856.
+      render(<TimelineDock view={view} viewportWidthPx={1000} />);
+      const timeline = screen.getByRole("region", { name: "타임라인" });
+      expect(Number(timeline.getAttribute("data-pixels-per-second")) * view.output.durationSec).toBeGreaterThan(856); // 고치기 전 상태: 넘친다
+      observer.report(856);
+      const pxPerSec = Number(timeline.getAttribute("data-pixels-per-second"));
+      expect(pxPerSec * view.output.durationSec).toBeLessThanOrEqual(856 + 1e-6);
+      expect(pxPerSec).toBeCloseTo(856 / view.output.durationSec, 6);
+    });
+
+    it("사람이 이미 배율을 건드렸다면 폭이 바뀌어도 다시 맞추지 않는다", () => {
+      const observer = stubObserver();
+      render(<TimelineDock view={view} viewportWidthPx={1000} />);
+      const timeline = screen.getByRole("region", { name: "타임라인" });
+      observer.report(856);
+      fireEvent.click(screen.getByRole("button", { name: "타임라인 확대" }));
+      const zoomed = timeline.getAttribute("data-pixels-per-second");
+      observer.report(700);
+      expect(timeline.getAttribute("data-pixels-per-second")).toBe(zoomed);
+    });
   });
 });
