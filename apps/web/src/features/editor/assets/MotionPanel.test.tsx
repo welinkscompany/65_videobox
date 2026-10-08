@@ -165,4 +165,28 @@ describe("MotionPanel", () => {
     expect(screen.getByRole("button", { name: "모션 만들기" })).toHaveProperty("disabled", true);
     expect(create).not.toHaveBeenCalled();
   });
+  it("단계 줄은 넓은 틀을 쓰고(입력·지우기 둘뿐), 막대 줄은 네 칸 틀을 그대로 쓴다", async () => {
+    render(<MotionPanel projectId="project-a" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "단계 목록" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "단계 목록" }));
+    const row = (await screen.findByLabelText("1번째 단계")).closest(".vb-infographic__fact");
+    expect(row?.className).toContain("vb-infographic__fact--wide");
+    fireEvent.click(screen.getByRole("button", { name: "막대 비교" }));
+    const bar = (await screen.findByLabelText("1번째 이름")).closest(".vb-infographic__fact");
+    expect(bar?.className).not.toContain("--wide");
+  });
+
+  it("만드는 동안 바쁨을 알리고 끝나면 거둔다", async () => {
+    let release: (value: MotionResult) => void = () => {};
+    vi.spyOn(api, "createMotion").mockReturnValue(new Promise<MotionResult>((resolve) => { release = resolve; }));
+    vi.spyOn(api, "materializeLibraryAsset").mockResolvedValue({} as never);
+    const onBusyChange = vi.fn();
+    render(<MotionPanel projectId="project-a" onBusyChange={onBusyChange} />);
+    await fillBars();
+    make();
+    await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(true));
+    release(made());
+    await screen.findByRole("status");
+    await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(false));
+  });
 });

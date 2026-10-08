@@ -902,6 +902,30 @@ describe("편집기에서 모션 만들기 열기", () => {
     expect(await screen.findByRole("dialog", { name: "모션 만들기" })).toBeVisible();
   });
 
+  it("만드는 동안에는 Esc를 눌러도 닫히지 않고, 끝나면 닫힌다", async () => {
+    vi.spyOn(apiModule.api, "listMotionTemplates").mockResolvedValue({ templates: [
+      { key: "money_counter", korean_name: "금액 카운터", description: "d", default_duration_sec: 5, min_duration_sec: 3, max_duration_sec: 30, limits: {} },
+    ] } as never);
+    let release: (value: unknown) => void = () => {};
+    vi.spyOn(apiModule.api, "createMotion").mockReturnValue(new Promise((resolve) => { release = resolve; }) as never);
+    vi.spyOn(apiModule.api, "materializeLibraryAsset").mockResolvedValue({} as never);
+    render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "모션" }));
+    const dialog = await screen.findByRole("dialog", { name: "모션 만들기" });
+    fireEvent.change(await screen.findByLabelText("금액", {}, { timeout: 5000 }), { target: { value: "12345" } });
+    fireEvent.click(screen.getByRole("button", { name: "모션 만들기", description: undefined } as never) ?? dialog);
+    await screen.findByRole("button", { name: /만드는 중/ }, { timeout: 5000 });
+
+    fireEvent.keyDown(dialog, { key: "Escape", code: "Escape" });
+    expect(screen.getByRole("dialog", { name: "모션 만들기" })).toBeVisible();
+
+    release({ library_asset_id: null, template: "money_counter", title: "t", duration_sec: 5, layout: "full", format: "mp4", byte_size: 1, elapsed_sec: 1, library_error: null });
+    await screen.findByRole("status", {}, { timeout: 5000 });
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "모션 만들기" }), { key: "Escape", code: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "모션 만들기" })).toBeNull(), { timeout: 5000 });
+  });
+
   it("프로젝트를 모르면 모션 만들기를 열지 않는다", () => {
     render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} />);
 

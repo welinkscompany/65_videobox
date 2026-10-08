@@ -279,6 +279,13 @@ class ProjectAssetMaterializer:
             "source_library_content_sha256": expected,
             "source_library_origin": str(library_asset.get("origin") or "user"),
         }
+        # 프로젝트 카드는 `metadata.title`을 이름으로 읽는다. 없으면 `자료 N`이라 방금 가져온 것을 못 찾는다.
+        # 자료실이 가진 파일 이름에서 확장자만 떼어 싣는다(없거나 비면 안 싣는다 -- 옛 동작 그대로).
+        user_metadata = library_asset.get("user_metadata")
+        filename = str(user_metadata.get("filename") or "").strip() if isinstance(user_metadata, dict) else ""
+        stem = Path(filename).stem.strip()[:60]
+        if stem:
+            metadata["title"] = stem
         with self._lock_for(f"{project_id}:{library_asset_id}:{expected}"):
             # Re-check inside the lock: the ingest worker may replace/finish a
             # file while the API is waiting.  Never register a stale snapshot.

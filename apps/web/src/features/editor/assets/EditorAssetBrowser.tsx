@@ -237,6 +237,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
   const [narrationOpen, setNarrationOpen] = useState(false);
   const [infographicOpen, setInfographicOpen] = useState(false);
   const [motionOpen, setMotionOpen] = useState(false);
+  const [motionBusy, setMotionBusy] = useState(false);
   const [footageOpen, setFootageOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const visibleCards = matchingCards.slice(0, shown);
@@ -369,13 +370,14 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
             <InfographicPanel onMade={onMediaAdded} />
           </DialogContent>
         </Dialog>
-        <Dialog open={motionOpen} onOpenChange={setMotionOpen}>
+        {/* 만드는 동안은 닫히지 않는다(Esc·바깥 누르기·닫기 단추 모두). 닫으면 다시 열 때 빈 칸만 보여 아무것도 안 도는 것 같다. */}
+        <Dialog open={motionOpen} onOpenChange={(next) => { if (!next && motionBusy) return; setMotionOpen(next); }}>
           <DialogContent className="vb-dialog-content">
             <DialogHeader>
               <DialogTitle>모션 만들기</DialogTitle>
               <DialogDescription>숫자와 글을 적으면 움직이는 설명 영상으로 만들어 이 프로젝트에 넣어요.</DialogDescription>
             </DialogHeader>
-            <MotionPanel projectId={projectId} sceneSeconds={target ? target.endSec - target.startSec : null} onMade={onMediaAdded} />
+            <MotionPanel projectId={projectId} sceneSeconds={target ? target.endSec - target.startSec : null} onMade={onMediaAdded} onBusyChange={setMotionBusy} />
           </DialogContent>
         </Dialog>
         <Dialog open={narrationOpen} onOpenChange={setNarrationOpen}>

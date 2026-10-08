@@ -21,7 +21,13 @@ type Prefix = "₩" | "$" | "";
 const FORBIDDEN = /[<>]/;
 const PREFIXES: { value: Prefix; label: string }[] = [{ value: "₩", label: "₩" }, { value: "$", label: "$" }, { value: "", label: "없음" }];
 
-export function MotionPanel({ projectId, sceneSeconds = null, onMade }: { projectId?: string; sceneSeconds?: number | null; onMade?: () => void }) {
+export function MotionPanel({ projectId, sceneSeconds = null, onMade, onBusyChange }: {
+  projectId?: string;
+  sceneSeconds?: number | null;
+  onMade?: () => void;
+  /** 만드는 동안 `true`. 팝업이 이걸 보고 닫기를 막는다 -- 닫았다 다시 열면 빈 칸만 보여 아무것도 안 도는 것 같다. */
+  onBusyChange?: (busy: boolean) => void;
+}) {
   const [templates, setTemplates] = useState<MotionTemplate[]>([]);
   const [key, setKey] = useState("");
   const [title, setTitle] = useState("");
@@ -38,6 +44,9 @@ export function MotionPanel({ projectId, sceneSeconds = null, onMade }: { projec
   const [busy, setBusy] = useState(false);
   const [made, setMade] = useState<{ result: MotionResult; inProject: boolean } | null>(null);
   const [failed, setFailed] = useState("");
+
+  useEffect(() => { onBusyChange?.(busy); }, [busy, onBusyChange]);
+  useEffect(() => () => { onBusyChange?.(false); }, [onBusyChange]);
 
   useEffect(() => {
     let alive = true;
@@ -177,7 +186,7 @@ export function MotionPanel({ projectId, sceneSeconds = null, onMade }: { projec
     </> : null}
 
     {key === "step_list" ? <div className="vb-infographic__facts" role="group" aria-label="단계">
-      {steps.map((step, index) => <div className="vb-infographic__fact" key={index}>
+      {steps.map((step, index) => <div className="vb-infographic__fact vb-infographic__fact--wide" key={index}>
         <Input aria-label={`${index + 1}번째 단계`} value={step} disabled={busy} maxLength={limit("step", 24)} placeholder="상품 소싱하고 가격 정하기"
           onChange={(event) => setSteps(steps.map((current, at) => (at === index ? event.target.value : current)))} />
         <Button type="button" variant="ghost" disabled={busy || steps.length <= limit("min_items", 2)} aria-label={`${index + 1}번째 단계 지우기`}
