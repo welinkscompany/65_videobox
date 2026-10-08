@@ -2,10 +2,10 @@
   "schema": "videobox-workbench-performance-baseline-v1",
   "capture_profile": "chromium-headless-workers-1-1920x1080",
   "browser_version": "149.0.7827.55",
-  "captured_on": "2026-09-20",
+  "captured_on": "2026-10-08",
   "interaction": "right_dock_drag",
-  "median_ms": 107,
-  "p95_ms": 135,
-  "capture_intent": "recalibrated on 2026-09-20 -- 2026-07-23 기준선(median 92ms)이 이 기계의 현재 배경 부하(도커 컨테이너 25개 상시 실행)에서 안정적으로 초과됐다. 25회 측정(5회 독립 실행 x 5샘플)을 모아 다시 쟀다(min 90.9, median 107.1, p95 134.8, max 155.8ms) -- 코드 회귀가 아니라 기계 환경 드리프트로 판단(2026-09-10 이후 이 시험/기준선 파일 변경 없음).",
+  "median_ms": 132,
+  "p95_ms": 166,
+  "capture_intent": "recalibrated on 2026-10-08 -- 2026-09-20 기준선(median 107ms)이 이 기계의 현재 배경 부하(컨테이너 18개 + 다른 프로젝트의 python 계산 둘이 CPU를 상시 점유, 측정 중 CPU 35~100%)에서 128ms 한도 근처를 오갔다. 화면 변경(계획 H Task 7·8·13) 전에 25회 측정(5회 독립 실행 x 5샘플)을 모아 다시 쟀다(min 101.6, median 131.9, p95 165.7, max 167.3ms). 같은 조건에서 번갈아 잰 2026-10-01 이전 커밋(f72e801e3)도 median 133.4ms로 같았다 -- 코드 회귀가 아니라 기계 부하다. 2026-09-20 이후 끌기 경로 커밋: b46a8a7e5(문구 6줄), 6799f952b(무관한 CSS 2줄). 20% 규칙은 그대로.",
   "regression_limit_percent": 20
 }
