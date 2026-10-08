@@ -635,3 +635,15 @@
 .vb-timeline-lane-headers [role="listitem"] > button { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: var(--vb-timeline-header-btn); min-width: var(--vb-timeline-header-btn); height: var(--vb-timeline-header-btn); min-height: var(--vb-timeline-header-btn); padding: 0; }
 .vb-timeline-lanes-viewport { position: relative; min-width: 0; overflow: hidden; }
 .vb-timeline-scale > [role="list"] { height: var(--vb-timeline-ruler-h); }
+
+/* 가장자리 손잡이(2026-10-08 점검 §3-8, 스파이크 H-c). 잡는 폭은 넓게, 보이는 띠는 얇게. 크기는 위 변수 둘뿐이다.
+   z-index 4: 클립을 고르면 재생 머리가 그 시작 모서리로 오는데(z-index 3, 잡는 폭 0.9rem) 손잡이가 그 밑에 깔리면 못 잡는다. */
+.vb-trim-handle { position: absolute; z-index: 4; top: 0; bottom: 0; width: var(--vb-trim-hit-w); max-width: 50%; padding: 0; border: 0; background: transparent; cursor: ew-resize; pointer-events: auto; }
+.vb-trim-handle::before { content: ""; position: absolute; top: 0; bottom: 0; width: var(--vb-trim-handle-w); max-width: 100%; background: var(--vb-accent); border-radius: var(--vb-radius-sm); }
+.vb-trim-handle--start { left: 0; } .vb-trim-handle--start::before { left: 0; }
+.vb-trim-handle--end { right: 0; } .vb-trim-handle--end::before { right: 0; }
+.vb-clip-body-drag { position: absolute; top: 0; bottom: 0; left: var(--vb-trim-hit-w); right: var(--vb-trim-hit-w); padding: 0; border: 0; background: transparent; cursor: grab; pointer-events: auto; }
+.vb-clip-body-drag:active { cursor: grabbing; }
+.vb-trim-handle:focus-visible, .vb-clip-body-drag:focus-visible { outline: 2px solid var(--vb-accent); outline-offset: -2px; }
+/* 손잡이 띠가 있는 클립은 이름을 띠 안쪽에서 시작한다 -- 띠가 이름 첫 글자를 덮지 않게(스크린샷으로 확인). */
+.vb-timeline-clip:has(.vb-trim-handle) .vb-timeline-clip__name { left: calc(var(--vb-trim-handle-w) + 1px); max-width: calc(100% - 2 * var(--vb-trim-handle-w) - 2px); }

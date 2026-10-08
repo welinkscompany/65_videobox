@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import type { EditorViewModel } from "../editorViewModel";
 import { gapReasonLabel, TimelineDock } from "./TimelineDock";
@@ -314,11 +316,12 @@ describe("TimelineDock", () => {
     expect(controls).toHaveAttribute("data-mutation-controls", "true");
     expect(controls).toHaveStyle({ position: "absolute", inset: "0", overflow: "hidden" });
     expect(start).toHaveAttribute("data-trim-edge", "start");
-    expect(start).toHaveStyle({ position: "absolute", left: "0", top: "0" });
+    // 자리는 CSS 클래스(.vb-trim-handle--start/end, .vb-clip-body-drag)가 정한다 -- 인라인 3등분은 없어졌다.
+    expect(start).toHaveClass("vb-trim-handle", "vb-trim-handle--start");
     expect(end).toHaveAttribute("data-trim-edge", "end");
-    expect(end).toHaveStyle({ position: "absolute", right: "0", top: "0" });
+    expect(end).toHaveClass("vb-trim-handle", "vb-trim-handle--end");
     expect(reorder).toHaveAttribute("data-reorder-control", "true");
-    expect(reorder).toHaveStyle({ position: "absolute", left: "33.333%", width: "33.334%" });
+    expect(reorder).toHaveClass("vb-clip-body-drag");
   });
 
   it("겹치는 clipId을 가진 다른 레인이 있어도 내레이션 클립을 고르고 트림 손잡이를 볼 수 있다 (2026-09-18 실물 재현)", () => {
@@ -1451,5 +1454,174 @@ describe("타임라인을 늘리고 줄인다 (대표님 지시 2026-09-12)", ()
     expect(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "내레이션 2번째 장면, 3초부터" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "내레이션 3번째 장면, 6초부터" })).toBeInTheDocument();
+  });
+});
+
+/** 가장자리 손잡이·몸통 끌기(2026-10-08 점검 §3-8, 스파이크 H-c). */
+describe("가장자리 손잡이와 몸통 끌기", () => {
+  const placedView: EditorViewModel = {
+    ...view,
+    tracks: view.tracks.map((track) => track.role === "broll"
+      ? { ...track, clips: track.clips.map((clip) => ({ ...clip, placementId: "broll:b-1" })) }
+      : track),
+  };
+  const brollHandles = () => ({
+    start: screen.getByRole("button", { name: /영상 1.* 시작 자르기$/ }),
+    end: screen.getByRole("button", { name: /영상 1.* 끝 자르기$/ }),
+    move: screen.getByRole("button", { name: /영상 1.* 이동$/ }),
+  });
+
+  it("자르기 손잡이는 클립 양 끝의 얇은 띠이고 글자를 보이지 않는다 (2026-10-08 §3-8)", () => {
+    render(<TimelineDock view={placedView} viewportWidthPx={400} onUpdatePlacements={vi.fn()} />);
+    selectTimelineClip("broll:b-1");
+    const { start, end, move } = brollHandles();
+    expect(start).toHaveClass("vb-trim-handle", "vb-trim-handle--start");
+    expect(end).toHaveClass("vb-trim-handle", "vb-trim-handle--end");
+    expect(move).toHaveClass("vb-clip-body-drag");
+    for (const control of [start, end, move]) expect(control.querySelector(".sr-only")).not.toBeNull();
+    expect(start.closest("[data-placement-controls]")).not.toBeNull();
+  });
+
+  it("내레이션 손잡이도 같은 띠이고 순서 바꾸기가 몸통을 덮는다", () => {
+    render(<TimelineDock view={view} viewportWidthPx={400} />);
+    selectTimelineClip("n-1");
+    const start = screen.getByRole("button", { name: /내레이션 1.* 시작 자르기$/ });
+    const reorder = screen.getByRole("button", { name: /내레이션 1.* 순서 바꾸기$/ });
+    expect(start).toHaveClass("vb-trim-handle", "vb-trim-handle--start");
+    expect(reorder).toHaveClass("vb-clip-body-drag");
+    expect(reorder.querySelector(".sr-only")).not.toBeNull();
+  });
+
+  it("손잡이는 키보드로 한 프레임씩 그대로 움직인다", () => {
+    const onUpdatePlacements = vi.fn();
+    render(<TimelineDock view={placedView} viewportWidthPx={400} onUpdatePlacements={onUpdatePlacements} />);
+    selectTimelineClip("broll:b-1");
+    fireEvent.keyDown(brollHandles().end, { key: "ArrowLeft" });
+    expect(onUpdatePlacements).toHaveBeenCalledTimes(1);
+    expect(onUpdatePlacements.mock.calls[0][0].changes[0].endSec).toBeCloseTo(9 - 1 / 25, 6);
+  });
+
+  it("좁은 클립은 손잡이만 그리고 몸통 끌기는 확대 안내로 바꾼다", () => {
+    const narrowView: EditorViewModel = {
+      ...cutEditedBrollView,
+      tracks: cutEditedBrollView.tracks.map((track) => track.role === "broll"
+        ? { ...track, clips: track.clips.map((clip) => ({ ...clip, placementId: `broll:${clip.clipId}` })) }
+        : track),
+    };
+    render(<TimelineDock view={narrowView} viewportWidthPx={400} onUpdatePlacements={vi.fn()} />);
+    selectTimelineClip("broll:b-cut-1"); // 0.3초 -- 몇 px짜리 자투리
+    const move = screen.getByRole("button", { name: /이동$/ });
+    expect(move).toHaveClass("sr-only");
+    expect(move).not.toHaveClass("vb-clip-body-drag");
+    expect(move.closest("[data-testid=timeline-clip]")).toHaveAttribute("title", "확대하면 끌어서 옮길 수 있어요");
+    // 키보드는 산다: 같은 단추가 살아 있고 초점을 받는다.
+    expect(move).toBeEnabled();
+    expect(screen.getByRole("button", { name: /시작 자르기$/ })).toHaveClass("vb-trim-handle");
+  });
+
+  it("넓은 클립에는 확대 안내 제목이 없다", () => {
+    render(<TimelineDock view={placedView} viewportWidthPx={400} onUpdatePlacements={vi.fn()} />);
+    selectTimelineClip("broll:b-1");
+    expect(timelineClip("broll:b-1")).not.toHaveAttribute("title");
+  });
+
+  it("몸통을 끌면 그만큼 옮겨서 놓을 때 한 번만 저장한다", () => {
+    const onUpdatePlacements = vi.fn();
+    render(<TimelineDock view={placedView} viewportWidthPx={400} onUpdatePlacements={onUpdatePlacements} />);
+    selectTimelineClip("broll:b-1");
+    const pps = timelinePixelsPerSecond();
+    const { move } = brollHandles();
+    pointer(move, "pointerdown", 100);
+    pointer(move, "pointermove", 100 + 2 * pps);
+    expect(onUpdatePlacements).not.toHaveBeenCalled();
+    pointer(move, "pointerup", 100 + 2 * pps);
+    expect(onUpdatePlacements).toHaveBeenCalledTimes(1);
+    const change = onUpdatePlacements.mock.calls[0][0].changes[0];
+    expect(change.startSec).toBeCloseTo(7, 1);
+    expect(change.endSec).toBeCloseTo(11, 1);
+  });
+
+  it("가장자리 손잡이를 끌면 그 끝만 줄어든다", () => {
+    const onUpdatePlacements = vi.fn();
+    render(<TimelineDock view={placedView} viewportWidthPx={400} onUpdatePlacements={onUpdatePlacements} />);
+    selectTimelineClip("broll:b-1");
+    const pps = timelinePixelsPerSecond();
+    const { end } = brollHandles();
+    pointer(end, "pointerdown", 300);
+    pointer(end, "pointermove", 300 - pps);
+    pointer(end, "pointerup", 300 - pps);
+    const change = onUpdatePlacements.mock.calls[0][0].changes[0];
+    expect(change.startSec).toBe(5);
+    expect(change.endSec).toBeCloseTo(8, 1);
+  });
+
+  it("3px 안쪽의 흔들림은 끌기가 아니고 놓아도 저장하지 않는다", () => {
+    const onUpdatePlacements = vi.fn();
+    render(<TimelineDock view={placedView} viewportWidthPx={400} onUpdatePlacements={onUpdatePlacements} />);
+    selectTimelineClip("broll:b-1");
+    const { move, end } = brollHandles();
+    pointer(move, "pointerdown", 100);
+    pointer(move, "pointermove", 102);
+    pointer(move, "pointerup", 102);
+    pointer(end, "pointerdown", 300);
+    pointer(end, "pointermove", 298);
+    pointer(end, "pointerup", 298);
+    expect(onUpdatePlacements).not.toHaveBeenCalled();
+    expect(timelineClip("broll:b-1")).toHaveAttribute("data-start-seconds", "5");
+  });
+
+  it("Esc를 누르면 끌던 것을 버리고 놓아도 저장하지 않는다", () => {
+    const onUpdatePlacements = vi.fn();
+    render(<TimelineDock view={placedView} viewportWidthPx={400} onUpdatePlacements={onUpdatePlacements} />);
+    selectTimelineClip("broll:b-1");
+    const { move } = brollHandles();
+    pointer(move, "pointerdown", 100);
+    pointer(move, "pointermove", 180);
+    expect(timelineClip("broll:b-1")).not.toHaveAttribute("data-start-seconds", "5");
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(timelineClip("broll:b-1")).toHaveAttribute("data-start-seconds", "5");
+    pointer(move, "pointerup", 180);
+    expect(onUpdatePlacements).not.toHaveBeenCalled();
+  });
+
+  it("pointercancel이나 캡처를 잃으면 끌던 것을 버린다", () => {
+    const onUpdatePlacements = vi.fn();
+    render(<TimelineDock view={placedView} viewportWidthPx={400} onUpdatePlacements={onUpdatePlacements} />);
+    selectTimelineClip("broll:b-1");
+    const { move, start } = brollHandles();
+    pointer(move, "pointerdown", 100);
+    pointer(move, "pointermove", 180);
+    pointer(move, "pointercancel");
+    pointer(move, "pointerup", 180);
+    expect(onUpdatePlacements).not.toHaveBeenCalled();
+
+    pointer(start, "pointerdown", 100);
+    pointer(start, "pointermove", 140);
+    fireEvent.lostPointerCapture(screen.getByTestId("timeline-track"));
+    expect(timelineClip("broll:b-1")).toHaveAttribute("data-start-seconds", "5");
+    pointer(start, "pointerup", 140);
+    expect(onUpdatePlacements).not.toHaveBeenCalled();
+  });
+
+  it("클립 밖(트랙 칸 어디)에서 놓아도 끌던 값으로 저장한다", () => {
+    const onUpdatePlacements = vi.fn();
+    render(<TimelineDock view={placedView} viewportWidthPx={400} onUpdatePlacements={onUpdatePlacements} />);
+    selectTimelineClip("broll:b-1");
+    const pps = timelinePixelsPerSecond();
+    const { move } = brollHandles();
+    pointer(move, "pointerdown", 100);
+    pointer(move, "pointermove", 100 + pps);
+    pointer(screen.getByTestId("timeline-track"), "pointerup", 100 + pps);
+    expect(onUpdatePlacements).toHaveBeenCalledTimes(1);
+    expect(onUpdatePlacements.mock.calls[0][0].changes[0].startSec).toBeCloseTo(6, 1);
+  });
+
+  it("커서: 손잡이는 좌우 크기, 몸통은 잡기, 크기는 변수에서 온다", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
+    expect(css).toMatch(/\.vb-trim-handle\s*\{[^}]*cursor:\s*ew-resize/);
+    expect(css).toMatch(/\.vb-clip-body-drag\s*\{[^}]*cursor:\s*grab/);
+    expect(css).toMatch(/\.vb-trim-handle\s*\{[^}]*width:\s*var\(--vb-trim-hit-w\)/);
+    expect(css).toMatch(/\.vb-trim-handle::before\s*\{[^}]*width:\s*var\(--vb-trim-handle-w\)/);
+    expect(css).toMatch(/\.vb-clip-body-drag\s*\{[^}]*left:\s*var\(--vb-trim-hit-w\)/);
   });
 });
