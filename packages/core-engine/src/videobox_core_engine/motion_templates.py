@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 
 from pydantic import (
+    AfterValidator,
     BeforeValidator,
     BaseModel,
     ConfigDict,
@@ -55,8 +56,10 @@ def _check_if_text(value: Any) -> Any:
 def _text(max_length: int, *, min_length: int = 0) -> Any:
     return Annotated[
         str,
-        StringConstraints(strip_whitespace=True, min_length=min_length, max_length=max_length),
+        StringConstraints(strict=True, strip_whitespace=True, min_length=min_length, max_length=max_length),
         BeforeValidator(_check_if_text),
+        # 강제 변환(bytes -> str)으로 앞 검사를 비켜 가는 길을 막는다. strict와 함께 이중 방어다.
+        AfterValidator(check_safe_text),
     ]
 
 
@@ -64,7 +67,7 @@ class BarItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     label: _text(10, min_length=1)  # type: ignore[valid-type]
-    value: float = Field(ge=0, le=1e12, allow_inf_nan=False)
+    value: float = Field(ge=0, le=1e12, allow_inf_nan=False, strict=True)
 
 
 class BarCompareVariables(BaseModel):
@@ -86,7 +89,7 @@ class MoneyCounterVariables(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     lead: _text(20) = ""  # type: ignore[valid-type]
-    amount: int = Field(ge=0, le=10**12)
+    amount: int = Field(ge=0, le=10**12, strict=True)
     prefix: Literal["₩", "$", ""] = "₩"
     suffix: _text(4) = ""  # type: ignore[valid-type]
     caption: _text(30) = ""  # type: ignore[valid-type]
@@ -174,6 +177,10 @@ def _describe(error: Mapping[str, Any]) -> str:
         text = "쓸 수 없는 글자가 있어요"
     elif kind == "value_error" and "bars_all_zero" in message:
         label, text = "막대", "하나는 0보다 커야 해요"
+    elif kind == "string_type":
+        text = "글로 적어 주세요"
+    elif kind in ("float_type", "int_type"):
+        text = "숫자로 적어 주세요(따옴표 없이)"
     elif kind == "literal_error":
         text = "다시 골라 주세요"
     else:
@@ -183,6 +190,8 @@ def _describe(error: Mapping[str, Any]) -> str:
 
 def parse_motion_variables(template_key: str, variables: Mapping[str, Any]) -> BaseModel:
     template = resolve_motion_template(template_key)
+    if not isinstance(variables, Mapping):
+        raise MotionVariablesInvalid(("내용: 칸을 채워 주세요",))
     try:
         return template.variables_model.model_validate(dict(variables))
     except ValidationError as exc:

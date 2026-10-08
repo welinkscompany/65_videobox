@@ -115,3 +115,26 @@ def test_the_default_title_comes_from_what_was_written() -> None:
     assert motion_default_title("bar_compare", parse_motion_variables("bar_compare", GOOD["bar_compare"])) == "월 수익 비교"
     assert motion_default_title("money_counter", parse_motion_variables("money_counter", GOOD["money_counter"])) == "첫 달 순매출"
     assert motion_default_title("money_counter", parse_motion_variables("money_counter", {"amount": 5})) == "금액 카운터"
+
+
+@pytest.mark.parametrize("wrapper", [bytes, bytearray])
+@pytest.mark.parametrize(("key", "build"), [
+    ("step_list", lambda v: {"title": v, "steps": ["a", "b"]}),
+    ("step_list", lambda v: {"title": "t", "steps": ["a", v]}),
+    ("bar_compare", lambda v: {"title": "t", "bars": [{"label": v, "value": 1}, {"label": "b", "value": 2}]}),
+    ("money_counter", lambda v: {"amount": 5, "caption": v}),
+])
+def test_bytes_cannot_smuggle_markup_past_the_text_check(wrapper, key, build) -> None:
+    assert "글로 적어 주세요" in _problems(key, build(wrapper(b"<b>x")))
+
+
+def test_nothing_but_a_mapping_is_accepted() -> None:
+    for bad in (None, [], "x"):
+        with pytest.raises(MotionVariablesInvalid):
+            parse_motion_variables("step_list", bad)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("value", [True, "5", "1e3"])
+def test_numbers_must_be_numbers(value) -> None:
+    assert "숫자로 적어 주세요" in _problems("bar_compare", {**GOOD["bar_compare"], "bars": [{"label": "a", "value": value}, {"label": "b", "value": 2}]})
+    assert "숫자로 적어 주세요" in _problems("money_counter", {"amount": value})

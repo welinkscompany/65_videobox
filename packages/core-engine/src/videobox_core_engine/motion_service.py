@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import tempfile
 from collections.abc import Mapping
@@ -35,6 +36,8 @@ from videobox_core_engine.motion_templates import (
     parse_motion_variables,
     resolve_motion_template,
 )
+
+_LOG = logging.getLogger(__name__)
 
 
 class MotionUnavailable(RuntimeError):
@@ -156,6 +159,8 @@ class MotionService:
                 )
             return str(ingested["library_asset_id"]), None
         except Exception as exc:  # noqa: BLE001 - 자료실 등록 실패가 만든 영상을 지우면 안 된다
+            # 화면에는 클래스 이름만 올리고, 짧은 이유는 로그에만 남긴다.
+            _LOG.warning("motion library ingest failed: %s: %s", type(exc).__name__, str(exc)[:200])
             return None, type(exc).__name__
 
 

@@ -19,6 +19,8 @@ from videobox_core_engine.motion_host_bridge import (
 )
 
 _LOCAL = f"http://127.0.0.1:{BRIDGE_PORT}"
+MP4 = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 8
+WEBM = b"\x1a\x45\xdf\xa3" + b"\x00" * 8
 ORDER = {"template": "bar_compare", "variables": {"title": "t"}, "duration_sec": 6.0, "layout": "full"}
 
 
@@ -62,15 +64,15 @@ def test_the_bridge_is_off_when_nobody_configured_an_address() -> None:
 
 def test_render_returns_the_bytes_the_host_made_and_waits_long_enough() -> None:
     seen: list = []
-    reply = {"video_base64": base64.b64encode(b"MP4").decode(), "format": "mp4", "elapsed_sec": 14.2}
+    reply = {"video_base64": base64.b64encode(MP4).decode(), "format": "mp4", "elapsed_sec": 14.2}
     clip = MotionHostBridge(http_client=_client(reply, seen=seen)).render(**ORDER)
-    assert (clip.video_bytes, clip.format, clip.elapsed_sec) == (b"MP4", "mp4", 14.2)
+    assert (clip.video_bytes, clip.format, clip.elapsed_sec) == (MP4, "mp4", 14.2)
     request, timeout = seen[0]
     assert timeout == BRIDGE_TIMEOUT_SECONDS
     assert json.loads(request.data.decode("utf-8")) == ORDER
 
 
-@pytest.mark.parametrize("reply", [{}, {"video_base64": "!!!", "format": "mp4"}, {"video_base64": "", "format": "mp4"}, {"video_base64": "TVA0", "format": "gif"}])
+@pytest.mark.parametrize("reply", [{}, {"video_base64": "!!!", "format": "mp4"}, {"video_base64": "", "format": "mp4"}, {"video_base64": base64.b64encode(MP4).decode(), "format": "gif"}])
 def test_a_reply_without_a_usable_video_is_a_refusal(reply: dict) -> None:
     with pytest.raises(MotionHostBridgeRefused):
         MotionHostBridge(http_client=_client(reply)).render(**ORDER)
@@ -101,3 +103,56 @@ def test_the_bridge_token_rides_along(monkeypatch) -> None:
     seen: list = []
     MotionHostBridge(http_client=_client({"status": "ready"}, seen=seen)).diagnose()
     assert seen[0][0].get_header(TOKEN_HEADER.capitalize()) == "m" * 43
+
+
+def _b64(data: bytes) -> str:
+    return base64.b64encode(data).decode()
+
+
+@pytest.mark.parametrize(("data", "fmt", "layout", "error"), [
+    (b"hello world bytes", "mp4", "full", "video_bytes_invalid"),
+    (MP4, "webm", "full", "video_format_mismatch"),
+    (WEBM, "webm", "full", "video_format_mismatch"),
+    (MP4, "mp4", "overlay", "video_format_mismatch"),
+])
+def test_the_video_must_be_what_it_claims_and_what_the_layout_asked(data, fmt, layout, error) -> None:
+    reply = {"video_base64": _b64(data), "format": fmt}
+    with pytest.raises(MotionHostBridgeRefused) as caught:
+        MotionHostBridge(http_client=_client(reply)).render(**{**ORDER, "layout": layout})
+    assert caught.value.error == error
+
+
+def test_overlay_webm_is_accepted() -> None:
+    clip = MotionHostBridge(http_client=_client({"video_base64": _b64(WEBM), "format": "webm"})).render(**{**ORDER, "layout": "overlay"})
+    assert clip.format == "webm"
+
+
+def test_an_oversize_reply_is_refused(monkeypatch) -> None:
+    from videobox_core_engine import motion_host_bridge as module
+
+    monkeypatch.setattr(module, "MAXIMUM_VIDEO_BYTES", 16)
+    monkeypatch.setattr(module, "_MAXIMUM_BASE64_CHARS", 24)
+    big = MP4 + b"\x00" * 40
+    with pytest.raises(MotionHostBridgeRefused) as caught:
+        MotionHostBridge(http_client=_client({"video_base64": _b64(big), "format": "mp4"})).render(**ORDER)
+    assert caught.value.error == "video_too_large"
+    monkeypatch.setattr(module, "_MAXIMUM_BASE64_CHARS", 10**6)
+    with pytest.raises(MotionHostBridgeRefused) as caught:
+        MotionHostBridge(http_client=_client({"video_base64": _b64(big), "format": "mp4"})).render(**ORDER)
+    assert caught.value.error == "video_too_large"
+
+
+def test_layout_formats_match_the_bridge() -> None:
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    from videobox_core_engine import motion_host_bridge as module
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "host_motion_service.py"
+    spec = importlib.util.spec_from_file_location("motion_bridge_formats_check", path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["motion_bridge_formats_check"] = mod
+    spec.loader.exec_module(mod)
+    assert mod.LAYOUT_FORMATS == module._LAYOUT_FORMATS
+    assert mod.MAXIMUM_VIDEO_BYTES == module.MAXIMUM_VIDEO_BYTES

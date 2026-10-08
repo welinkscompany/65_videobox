@@ -31,6 +31,11 @@ BRIDGE_PORT = 8202
 ENVIRONMENT_VARIABLE = "VIDEOBOX_MOTION_BRIDGE_URL"
 #: 다리 상한 180초 + 여유. nginx 600초 안이다.
 BRIDGE_TIMEOUT_SECONDS = 240
+#: 다리 자신이 지키는 상한(`MAXIMUM_VIDEO_BYTES`)과 같다. 넘는 답은 믿지 않는다.
+MAXIMUM_VIDEO_BYTES = 64 * 1024 * 1024
+_MAXIMUM_BASE64_CHARS = 4 * ((MAXIMUM_VIDEO_BYTES + 2) // 3)
+#: 다리의 `LAYOUT_FORMATS`와 같다 -- 시험이 대조한다.
+_LAYOUT_FORMATS = {"full": "mp4", "overlay": "webm"}
 
 
 class MotionHostBridgeUnavailable(RuntimeError):
@@ -116,13 +121,26 @@ class MotionHostBridge:
         fmt = reply.get("format")
         if not isinstance(encoded, str) or not encoded or fmt not in ("mp4", "webm"):
             raise MotionHostBridgeRefused(200, "no_video")
+        if len(encoded) > _MAXIMUM_BASE64_CHARS:
+            raise MotionHostBridgeRefused(200, "video_too_large")
         try:
             video = base64.b64decode(encoded, validate=True)
         except (binascii.Error, ValueError) as exc:
             raise MotionHostBridgeRefused(200, "no_video") from exc
         if not video:
             raise MotionHostBridgeRefused(200, "no_video")
-        return MotionClip(video_bytes=video, format=fmt, elapsed_sec=float(reply.get("elapsed_sec") or 0.0))
+        if len(video) > MAXIMUM_VIDEO_BYTES:
+            raise MotionHostBridgeRefused(200, "video_too_large")
+        # 말한 종류가 아니라 **바이트가 말하는 종류**를 믿는다.
+        if video[4:8] == b"ftyp":
+            actual = "mp4"
+        elif video[:4] == b"\x1a\x45\xdf\xa3":
+            actual = "webm"
+        else:
+            raise MotionHostBridgeRefused(200, "video_bytes_invalid")
+        if actual != fmt or actual != _LAYOUT_FORMATS.get(layout):
+            raise MotionHostBridgeRefused(200, "video_format_mismatch", f"claimed={fmt} actual={actual} layout={layout}")
+        return MotionClip(video_bytes=video, format=actual, elapsed_sec=float(reply.get("elapsed_sec") or 0.0))
 
     def _request(self, method: str, path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
         http_request = Request(
@@ -169,6 +187,7 @@ __all__ = [
     "BRIDGE_PORT",
     "BRIDGE_TIMEOUT_SECONDS",
     "ENVIRONMENT_VARIABLE",
+    "MAXIMUM_VIDEO_BYTES",
     "MotionClip",
     "MotionHostBridge",
     "MotionHostBridgeRefused",
