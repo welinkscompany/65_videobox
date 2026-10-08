@@ -64,4 +64,16 @@ describe("RightDock", () => {
     expect(screen.getByRole("button", { name: "캡션" })).toBeVisible();
     expect(screen.getByRole("button", { name: "화면 요소" })).toBeVisible();
   });
+
+  it("같은 id 둘이 매 렌더 새 배열로 와도 편집 대상 옵션은 고유 id 수와 같다 (2026-10-08 §3-6)", () => {
+    const make = () => [
+      { id: "overlay:dup", label: "이미지", kind: "overlay" },
+      { id: "overlay:dup", label: "이미지", kind: "overlay" },
+      { id: "overlay:other", label: "이미지", kind: "overlay" },
+    ] as never;
+    const { rerender } = render(<RightDock inspectorTargets={make()} />);
+    for (let index = 0; index < 5; index += 1) rerender(<RightDock inspectorTargets={make()} />);
+    const select = screen.getByRole("combobox", { name: "편집 대상" });
+    expect(select.querySelectorAll("option")).toHaveLength(2);
+  });
 });

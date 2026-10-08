@@ -14,6 +14,7 @@ import { Archive, LayoutGrid, List, Mic, Scissors } from "lucide-react";
 
 import { api, type Project, type ProjectWorkspaceSummary } from "../api";
 import { Button } from "../components/ui/button";
+import { RouteErrorFallback } from "./RouteErrorFallback";
 import { Input } from "../components/ui/input";
 import { CreationInterview } from "../features/creation/CreationInterview";
 import { DraftGapMedia } from "../features/media/DraftGapMedia";
@@ -212,7 +213,7 @@ export function createAppRouter(
   catalog = new ProjectCatalog(),
   history?: Parameters<typeof createRouter>[0]["history"],
 ) {
-  return createRouter({ routeTree, context: { catalog }, history });
+  return createRouter({ routeTree, context: { catalog }, history, defaultErrorComponent: RouteErrorFallback });
 }
 
 export function AppRouter({ router = createAppRouter() }: { router?: ReturnType<typeof createAppRouter> }) {

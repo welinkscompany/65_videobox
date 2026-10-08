@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "../../../components/ui/button";
 import { NativeSelect } from "../../../components/ui/native-select";
@@ -64,12 +64,16 @@ export function RightDock({
 }: RightDockProps) {
   const [selectedInspectorTargetId, setSelectedInspectorTargetId] = useState<string | null>(null);
   const inspectorTargetIdentity = inspectorTargets.map((target) => target.id).join("|");
+  // 매 렌더 새 배열이 와도 effect가 다시 돌지 않게, 내용 기준 식별자만 의존값으로 두고 최신 배열은 ref로 읽는다.
+  const inspectorTargetsRef = useRef(inspectorTargets);
+  inspectorTargetsRef.current = inspectorTargets;
 
   useEffect(() => {
-    setSelectedInspectorTargetId((current) => inspectorTargets.some((target) => target.id === current)
+    const latest = inspectorTargetsRef.current;
+    setSelectedInspectorTargetId((current) => latest.some((target) => target.id === current)
       ? current
-      : inspectorTargets[0]?.id ?? null);
-  }, [inspectorTargetIdentity, inspectorTargets]);
+      : latest[0]?.id ?? null);
+  }, [inspectorTargetIdentity]);
 
   const selectedInspectorTarget = inspectorTargets.find((target) => target.id === selectedInspectorTargetId) ?? null;
   const inspectorGroups = [
@@ -120,7 +124,7 @@ export function RightDock({
             variant="outline"
           >{group.label}</Button>)}
         </div> : null}
-        {inspectorTargets.length > 1 ? <label>편집 대상<NativeSelect aria-label="편집 대상" value={selectedInspectorTargetId ?? ""} onChange={(event) => setSelectedInspectorTargetId(event.target.value)}>{inspectorTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}</NativeSelect></label> : null}
+        {inspectorTargets.length > 1 ? <label>편집 대상<NativeSelect aria-label="편집 대상" value={selectedInspectorTargetId ?? ""} onChange={(event) => setSelectedInspectorTargetId(event.target.value)}>{inspectorTargets.filter((target, index, all) => all.findIndex((other) => other.id === target.id) === index).map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}</NativeSelect></label> : null}
         {!inspectorTargets.length ? <p>고칠 항목 없음</p> : null}
         {onInspectorAction ? <InspectorControls
           disabled={inspectorDisabled}

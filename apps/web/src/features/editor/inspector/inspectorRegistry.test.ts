@@ -397,3 +397,24 @@ describe("projectInspectorTargets", () => {
     expect(new Set(labels).size).toBe(labels.length);
   });
 });
+
+describe("편집 대상 목록 폭증 방지", () => {
+  it("같은 오버레이 id가 두 번 와도 편집 대상은 하나이고, 같은 이름은 번호로 구분한다 (2026-10-08 §3-6)", () => {
+    const overlay = (clipId: string) => ({ clipId, segmentId: "segment-1", type: "overlay", assetId: "img", assetUri: "local://a.png", startSec: 0, endSec: 1, controls: {}, overlayType: "image_overlay", overlayPayload: {} });
+    const targets = projectInspectorTargets({
+      view: { ...view, tracks: [{ trackId: "o", role: "overlay", clips: [overlay("dup"), overlay("dup"), overlay("other")] }], captions: [] } as never,
+      selectedSegmentId: "segment-1",
+    });
+    expect(targets.filter((target) => target.kind === "overlay" && !("isNew" in target && target.isNew)).map((target) => target.id)).toEqual(["overlay:dup", "overlay:other"]);
+    expect(targets.filter((target) => target.id.startsWith("overlay:")).map((target) => target.label)).toEqual(["이미지 1", "이미지 2"]);
+  });
+
+  it("캡션은 그 장면에 실제로 놓인 것만 -- 계보가 같은 형제 자막은 빼고", () => {
+    const caption = (captionId: string, owningSegmentId: string) => ({ captionId, segmentId: "segment-1", owningSegmentId, text: "t", startSec: 0, endSec: 1, style: {} });
+    const targets = projectInspectorTargets({
+      view: { ...view, tracks: [], captions: [caption("c-1", "segment-1"), caption("c-2", "segment-1__split_2")] } as never,
+      selectedSegmentId: "segment-1",
+    });
+    expect(targets.filter((target) => target.kind === "caption").map((target) => target.id)).toEqual(["caption:c-1"]);
+  });
+});

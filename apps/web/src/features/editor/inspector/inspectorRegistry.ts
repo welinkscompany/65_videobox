@@ -254,6 +254,24 @@ export function imageOverlayPresets(payload: Readonly<Record<string, unknown>>):
   };
 }
 
+/** 같은 id는 첫 번째만 남기고, 같은 이름이 둘 이상이면 등장 순서대로 ` 1`, ` 2`를
+ *  붙인다. 오염된 편집판은 같은 오버레이 id를 여러 번 내려 주는데, 그대로 두면
+ *  `편집 대상` 목록이 같은 항목으로 부풀어 어느 것이 어느 것인지 알 수 없다
+ *  (2026-10-08 점검 §3-6: 17 -> 3,581). */
+function distinctTargets(targets: readonly InspectorTarget[]): readonly InspectorTarget[] {
+  const seen = new Set<string>();
+  const unique = targets.filter((target) => (seen.has(target.id) ? false : (seen.add(target.id), true)));
+  const labelCounts = new Map<string, number>();
+  for (const target of unique) labelCounts.set(target.label, (labelCounts.get(target.label) ?? 0) + 1);
+  const labelOrder = new Map<string, number>();
+  return unique.map((target) => {
+    if ((labelCounts.get(target.label) ?? 0) < 2) return target;
+    const order = (labelOrder.get(target.label) ?? 0) + 1;
+    labelOrder.set(target.label, order);
+    return { ...target, label: `${target.label} ${order}` };
+  });
+}
+
 export function projectInspectorTargets({ view, selectedSegmentId }: Readonly<{ view: EditorViewModel; selectedSegmentId: string | null }>): readonly InspectorTarget[] {
   if (!selectedSegmentId) return [];
 
@@ -275,7 +293,7 @@ export function projectInspectorTargets({ view, selectedSegmentId }: Readonly<{ 
       }));
   });
   const captionTargets = view.captions
-    .filter((caption) => caption.segmentId === selectedSegmentId)
+    .filter((caption) => (caption.owningSegmentId ?? caption.segmentId) === selectedSegmentId)
     .map((caption) => ({
       id: `caption:${caption.captionId ?? caption.segmentId}`,
       kind: "caption" as const,
@@ -359,5 +377,5 @@ export function projectInspectorTargets({ view, selectedSegmentId }: Readonly<{ 
     value: { shape: "highlight_box", vertical: "middle", horizontal: "center", size: "medium", motion: "none" }, isNew: true,
   });
 
-  return [...mediaTargets, ...captionTargets, ...overlayTargets, ...newOverlayTargets];
+  return distinctTargets([...mediaTargets, ...captionTargets, ...overlayTargets, ...newOverlayTargets]);
 }
