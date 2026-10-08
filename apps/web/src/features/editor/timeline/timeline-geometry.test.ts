@@ -57,6 +57,17 @@ describe("timeline geometry", () => {
     expect(Object.keys(rect)).toEqual(["clipId", "lane", "x", "y", "width", "height"]);
   });
 
+  it("보이는 창 끝이 부동소수 오차로 클립 시작보다 겨우 큰 클립은 던지지 않고 건너뛴다 (2026-10-09 742e1924 실측)", () => {
+    // 실측: 창 [0, 60.00000000000001), 클립 시작 60초, 19.8333…px/초 -> 폭 0px가 되어 편집기가 통째로 죽었다.
+    const scale = { pixelsPerSecond: 1190 / 60, originSec: 0 };
+    const viewport = { startSec: 0, endSec: 60.00000000000001, topPx: 0, heightPx: 192 };
+    expect(deriveClipRect({ id: "edge", lane: "broll", startSec: 60, endSec: 63.92 }, viewport, scale, 32)).toBeNull();
+    expect(deriveClipRect({ id: "inside", lane: "broll", startSec: 58, endSec: 63.92 }, viewport, scale, 32)).not.toBeNull();
+    for (const endOffset of [1e-15, 1e-14, 1e-12, 1e-9]) {
+      expect(() => deriveClipRect({ id: "e", lane: "broll", startSec: 60, endSec: 61 }, { ...viewport, endSec: 60 + endOffset }, { pixelsPerSecond: 0.1, originSec: 0 }, 32)).not.toThrow();
+    }
+  });
+
   // 자유 멀티트랙 Phase 7 -- 줄이 **데이터에서** 온다.
   //
   // 지금은 `TIMELINE_LANES` 여섯 개가 코드에 박혀 있어서, 트랙을 추가해도

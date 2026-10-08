@@ -228,4 +228,15 @@ describe("timeline navigation", () => {
     expect(action).toEqual({ type: "select", clipId: "clip-a" });
     expect(frozenOptions).toEqual({ durationSec: 20, viewportWidthPx: 100, fps: { num: 30_000, den: 1_001 } });
   });
+
+  it("창 끝이 부동소수 오차로 클립 시작을 막 넘겨도 투영이 던지지 않는다 (742e1924)", () => {
+    const rects = projectVisibleTimelineClips({
+      clips: [{ id: "a", role: "broll", startSec: 58, endSec: 60 }, { id: "b", role: "broll", startSec: 60, endSec: 63.92 }],
+      viewport: { startSec: 0, endSec: 60.00000000000001, topPx: 0, heightPx: 192 },
+      pixelsPerSecond: 1190 / 60,
+      originSec: 0,
+      laneHeightPx: 32,
+    });
+    expect(rects.map((rect) => rect.clipId)).toEqual(["a"]);
+  });
 });

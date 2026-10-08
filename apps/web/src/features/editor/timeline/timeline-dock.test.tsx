@@ -1885,6 +1885,25 @@ describe("눈금 간격 (스파이크 H-e)", () => {
       expect(pxPerSec).toBeCloseTo(856 / view.output.durationSec, 6);
     });
 
+    it("0·음수·NaN·아주 작은 잰 폭이 와도 던지지 않고 배율이 유한한 양수로 남으며, 120초 실제 모양도 죽지 않는다", () => {
+      const observer = stubObserver();
+      const long: EditorViewModel = {
+        ...view,
+        output: { ...view.output, durationSec: 120 },
+        tracks: [{ trackId: "b", role: "broll", clips: Array.from({ length: 15 }, (_, index) => ({ clipId: `b-${index}`, segmentId: `s-${index}`, type: "broll", assetId: null, assetUri: null, startSec: index === 0 ? 90 : 12 + index * 6, endSec: index === 0 ? 102 : 18 + index * 6, controls: {} })) }],
+        captions: [], gaps: [],
+      };
+      render(<TimelineDock view={long} viewportWidthPx={1190} />);
+      const timeline = screen.getByRole("region", { name: "타임라인" });
+      for (const width of [0, -5, Number.NaN, 1, 3, 856, 856, 1175]) {
+        expect(() => observer.report(width)).not.toThrow();
+        const pxPerSec = Number(timeline.getAttribute("data-pixels-per-second"));
+        expect(Number.isFinite(pxPerSec) && pxPerSec > 0).toBe(true);
+      }
+      // 처음 배율은 최대 60초가 칸을 채우는 값이다(60초보다 긴 영상은 처음 60초만 보이고 나머지는 전체 보기). 그 60초가 칸 안에 든다.
+      expect(Number(timeline.getAttribute("data-pixels-per-second")) * 60).toBeLessThanOrEqual(1175 + 1e-6);
+    });
+
     it("사람이 이미 배율을 건드렸다면 폭이 바뀌어도 다시 맞추지 않는다", () => {
       const observer = stubObserver();
       render(<TimelineDock view={view} viewportWidthPx={1000} />);

@@ -511,7 +511,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   // 그 뒤 폭이 바뀔 때) 처음 배율을 그 폭으로 다시 계산한다.
   const lastFittedWidthRef = useRef<number | null>(null);
   useEffect(() => {
-    if (measuredTrackWidthPx <= 0 || userZoomedRef.current || lastFittedWidthRef.current === measuredTrackWidthPx) return;
+    if (!Number.isFinite(measuredTrackWidthPx) || measuredTrackWidthPx <= 0 || !(view.output.durationSec > 0) || userZoomedRef.current || lastFittedWidthRef.current === measuredTrackWidthPx) return;
     const first = lastFittedWidthRef.current === null;
     lastFittedWidthRef.current = measuredTrackWidthPx;
     dispatch({ type: "zoom", pixelsPerSecond: initialPixelsPerSecond({ durationSec: view.output.durationSec, viewportWidthPx: measuredTrackWidthPx }), anchorPx: 0 });

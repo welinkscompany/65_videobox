@@ -176,8 +176,11 @@ export function deriveClipRect(
   requireFinite(width, "Rectangle width");
   requireFinite(visibleTopPx, "Rectangle y");
   requireFinite(height, "Rectangle height");
+  // 그릴 수 없는 만큼 가장자리에 걸친 클립은 **그리지 않는다**(던지지 않는다). 보이는 창의 끝이 부동소수 오차로
+  // 클립 시작보다 1e-14초 큰 경우 폭이 0px로 떨어졌고, 그 한 번의 던짐이 편집기 전체를 "화면을 그리다
+  // 멈췄어요"로 죽였다(2026-10-09 742e1924, 창 끝 60.00000000000001초 vs 클립 시작 60초).
   if (width <= 0 || height <= 0) {
-    throw new RangeError("Rectangle width and height must be positive");
+    return null;
   }
 
   return {
