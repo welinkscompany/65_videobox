@@ -14,6 +14,7 @@ from videobox_domain_models.caption_style import CaptionStyle
 from videobox_core_engine.composition_plan import (
     DEFAULT_OUTPUT_HEIGHT,
     DEFAULT_OUTPUT_WIDTH,
+    _uncovered_intervals,
     materialize_editing_session_timeline,
     materialized_timeline_duration_sec,
     without_session_projection_clips,
@@ -132,7 +133,10 @@ def build_editor_playback_manifest(
             for segment in segments
             if isinstance(segment, dict) and segment.get("segment_id")
         ],
-        "gap_slots": [_gap_contract(gap) for gap in materialized.get("gap_slots", []) if isinstance(gap, dict)],
+        "gap_slots": [
+            *[_gap_contract(gap) for gap in materialized.get("gap_slots", []) if isinstance(gap, dict)],
+            *_removed_scene_gaps(session, materialized_timeline_duration_sec(materialized)),
+        ],
         "source_status": {"status": source_status, "source_session_id": source_session_id, "source_session_revision": source_revision},
         "audition": {"asset_urls": {asset_id: f"{asset_content_url_prefix}/{asset_id}/content" for asset_id in asset_ids}},
         "exact_preview": preview,
@@ -255,6 +259,44 @@ def _export_overlay_track(raw_overlays: object) -> dict[str, Any] | None:
             "overlay_payload": payload,
         })
     return {"track_id": "session_export_overlays", "track_type": "overlay", "clips": clips} if clips else None
+
+
+def _removed_scene_gaps(session: dict[str, Any], output_end_sec: float) -> list[dict[str, Any]]:
+    """뺀 장면 자리 중 **남은 장면이 덮지 않은 구간**을 빈 구간으로 센다.
+
+    장면을 빼면(`leave_gap`) 뒤 장면이 제자리에 남아 구멍이 생기는데, 예전에는 화면이
+    `빈 구간 0개`라고 했다(점검 §3-5). 당겨서 뺀 경우(`ripple`)에는 뒤 장면이 그 자리를
+    덮으므로 0개가 된다. 출력 끝 뒤는 구멍이 아니라 그냥 끝이므로 자른다.
+
+    한 장면 자리가 여러 조각으로 남으면 첫 조각만 `removed:<id>`이고 다음은
+    `removed:<id>:2`처럼 번호를 붙인다(이름표는 겹치면 안 된다).
+    """
+    segments = [item for item in session.get("segments", []) if isinstance(item, dict)]
+    covered = sorted(
+        (float(item.get("start_sec") or 0.0), float(item.get("end_sec") or 0.0))
+        for item in segments
+        if str(item.get("cut_action") or "keep") != "remove"
+        and float(item.get("end_sec") or 0.0) > float(item.get("start_sec") or 0.0)
+    )
+    gaps: list[dict[str, Any]] = []
+    for item in segments:
+        if str(item.get("cut_action") or "keep") != "remove":
+            continue
+        segment_id = str(item.get("segment_id") or "")
+        start = float(item.get("start_sec") or 0.0)
+        end = min(float(item.get("end_sec") or 0.0), output_end_sec)
+        if not segment_id or end <= start:
+            continue
+        pieces = [(a, b) for a, b in _uncovered_intervals(start=start, end=end, covered=covered) if b - a > 1e-6]
+        for ordinal, (piece_start, piece_end) in enumerate(pieces, start=1):
+            gaps.append({
+                "gap_id": f"removed:{segment_id}" if ordinal == 1 else f"removed:{segment_id}:{ordinal}",
+                "segment_id": segment_id,
+                "start_sec": piece_start,
+                "end_sec": piece_end,
+                "reason": "removed_scene",
+            })
+    return gaps
 
 
 def _gap_contract(gap: dict[str, Any]) -> dict[str, Any]:

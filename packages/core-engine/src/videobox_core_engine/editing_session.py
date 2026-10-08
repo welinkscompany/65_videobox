@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 from datetime import UTC, datetime
 from math import isfinite
 import uuid
@@ -22,6 +22,21 @@ from videobox_core_engine.overlay_shapes import (  # noqa: F401
 )
 
 MIN_SEGMENT_DURATION_SEC = 0.2
+
+#: 장면을 뺄 때 뒤 장면을 어떻게 하는가 (2026-10-08 계획 H Task 12, 점검 §3-5).
+#:
+#: - `leave_gap`: 뒤 장면은 그 자리에 둔다. 뺀 길이만큼 **구멍**이 남고, 화면은 그
+#:   구멍을 `뺀 장면 자리`(빈 구간)로 보여 준다. 오늘 출하된 동작 그대로다.
+#: - `ripple`: 캡컷 주 트랙 자석처럼 뒤 장면을 뺀 길이만큼 당긴다. 장면 시작 시각
+#:   하나로 자막·내레이션·B-roll·음악·효과음·오버레이가 따라오므로(`composition_plan`
+#:   의 `materialize_editing_session_timeline`) 한 곳만 고치면 된다.
+#:
+#: **정책은 이 상수 한 줄이다.** 화면(`PATCH …/cut-action`)과 유진(`SetCutActionOperation`)
+#: 이 모두 `update_segment_cut_action`을 `remove_mode=None`으로 부르므로 같이 바뀐다.
+#: 기본을 `ripple`로 바꾸는 것은 owner 결정이다(`docs/decisions/`에 아직 없다).
+RemoveMode = Literal["leave_gap", "ripple"]
+DEFAULT_REMOVE_MODE: RemoveMode = "leave_gap"
+_REMOVE_MODES: tuple[str, ...] = ("leave_gap", "ripple")
 # **리플 배속 허용 범위(owner 지시 2026-09-04, "속도는 캡컷이랑 동일하게 맞춰").**
 # 예전에는 `frozenset({1.0, 1.5, 2.0})` 셋뿐이라 1.25배를 쓸 방법이 없었다.
 # 캡컷 `속도`는 숫자칸이라 임의 배속을 받는다.
@@ -139,6 +154,11 @@ def _validate_segment_bounds(*, segments: list[dict[str, Any]]) -> None:
         end_sec = float(segment.get("end_sec", 0.0))
         if not isfinite(start_sec) or not isfinite(end_sec) or start_sec < 0 or end_sec - start_sec < MIN_SEGMENT_DURATION_SEC:
             raise ValueError(f"Segment duration must be at least {MIN_SEGMENT_DURATION_SEC} seconds.")
+        # **뺀 장면은 겹침 검사에서 뺀다**(계획 H Task 12). 당겨서 뺀 장면은 뒤 장면이 그
+        # 자리에 들어오고, 남겨 둔 채 뺀 장면은 이웃이 그 자리로 늘어날 수 있다. 길이
+        # 검사는 위에서 모두에게 했다.
+        if str(segment.get("cut_action") or "keep") == "remove":
+            continue
         normalized.append((start_sec, end_sec, str(segment.get("segment_id") or "")))
     ordered = sorted(normalized)
     for previous, current in zip(ordered, ordered[1:]):
@@ -1378,6 +1398,12 @@ def apply_yujin_editing_proposal(*, session: dict[str, Any], proposal: object) -
     def mutate(draft: dict[str, Any]) -> None:
         projected = _apply_yujin_editing_operations(session=draft, operations=operations)
         draft["segments"] = projected["segments"]
+        # 장면을 당겨서 빼는 정책(`remove_mode="ripple"`)은 장면과 함께 배치도 옮긴다.
+        # 여기서 장면만 가져오면 유진이 뺄 때만 배치가 안 따라와 화면과 결과가 갈린다.
+        # 정책이 기본(`leave_gap`)이면 연산이 배치를 안 건드리므로 이 줄은 값을 그대로
+        # 되쓸 뿐이다.
+        if "timeline_placement_overrides" in projected:
+            draft["timeline_placement_overrides"] = projected["timeline_placement_overrides"]
 
     return apply_user_transaction(
         session=session, label="유진 편집안 적용", affected_segment_ids=affected, mutate=mutate,
@@ -1586,19 +1612,103 @@ def update_segment_caption(
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 
+def _shift_placement_overrides(
+    session: dict[str, Any], *, delta_sec: float, selector: Any,
+) -> list[str]:
+    """`selector(placement)`가 참인 배치를 `delta_sec`만큼 옮기고 옮긴 이름표를 돌려준다."""
+    overrides = session.get("timeline_placement_overrides")
+    if not isinstance(overrides, dict):
+        return []
+    moved: list[str] = []
+    for key, placement in overrides.items():
+        if not isinstance(placement, dict) or not selector(key, placement):
+            continue
+        placement["start_sec"] = float(placement["start_sec"]) + delta_sec
+        if "end_sec" in placement:
+            placement["end_sec"] = float(placement["end_sec"]) + delta_sec
+        moved.append(str(key))
+    return moved
+
+
+def _shift_later_segments(segments: list[dict[str, Any]], *, after_index: int, delta_sec: float) -> None:
+    """목록에서 `after_index` 뒤에 있는 장면 전부를 옮긴다(리플 배속과 같은 규칙)."""
+    for later in segments[after_index + 1 :]:
+        later["start_sec"] = float(later["start_sec"]) + delta_sec
+        later["end_sec"] = float(later["end_sec"]) + delta_sec
+
+
 def update_segment_cut_action(
     *,
     session: dict[str, Any],
     segment_id: str,
     cut_action: str,
+    remove_mode: RemoveMode | None = None,
 ) -> dict[str, Any]:
+    """장면을 쓸지(`keep`/`trim`) 뺄지(`remove`) 정한다.
+
+    **뺄 때 뒤 장면을 어떻게 하는가는 `remove_mode`가 정한다**(`None`이면
+    `DEFAULT_REMOVE_MODE`). 화면과 유진이 모두 이 함수를 `None`으로 부른다 -- 정책이
+    한 곳에서만 정해지도록.
+
+    - `leave_gap`: 표시만 바꾼다(오늘 동작).
+    - `ripple`: 뺀 장면 길이 `D`만큼 목록에서 **그 뒤에 있는** 장면 전부를 당긴다.
+      배치(`timeline_placement_overrides`)는 시작이 뺀 장면 끝 이상인 것만 당긴다 --
+      뺀 자리에 걸치거나 들어 있는 것은 그대로 둔다. 뺀 장면에 `ripple_removed_sec`
+      (=D)와 당긴 배치 이름표(`ripple_shifted_placement_ids`)를 적는다.
+    - **되살릴 때**(`remove` -> 다른 값)는 지금 기본값이 아니라 **어떻게 뺐는지**를
+      따른다: `ripple_removed_sec`가 있으면 뒤 장면을 `+D` 밀어 넣고 그 칸을 지운다.
+      안 그러면 기본값을 바꾼 뒤 되살릴 때 장면이 겹친다.
+
+    전부 한 번의 `_apply_manual_mutation`이므로 되돌리기는 한 칸이다.
+    """
+    mode = DEFAULT_REMOVE_MODE if remove_mode is None else remove_mode
+    if mode not in _REMOVE_MODES:
+        raise ValueError(f"remove_mode must be one of {_REMOVE_MODES}: {remove_mode!r}")
     updated = deepcopy(session)
     normalized_cut_action = cut_action.strip()
-    for segment in updated.get("segments", []):
+    segments = updated.get("segments", [])
+    for index, segment in enumerate(segments):
         if str(segment.get("segment_id")) != segment_id:
             continue
+        was_removed = str(segment.get("cut_action") or "keep") == "remove"
+        will_remove = normalized_cut_action == "remove"
         segment["cut_action"] = normalized_cut_action
-        return _apply_manual_mutation(before=session, updated=updated, mutation_type="cut_action_update", segment_id=segment_id, extra={"cut_action": normalized_cut_action})
+        if will_remove and not was_removed and mode == "ripple":
+            removed_sec = float(segment["end_sec"]) - float(segment["start_sec"])
+            if removed_sec > 0:
+                removed_end = float(segment["end_sec"])
+                _shift_later_segments(segments, after_index=index, delta_sec=-removed_sec)
+                shifted = _shift_placement_overrides(
+                    updated, delta_sec=-removed_sec,
+                    selector=lambda _key, placement: float(placement.get("start_sec", 0.0)) >= removed_end,
+                )
+                segment["ripple_removed_sec"] = removed_sec
+                segment["ripple_shifted_placement_ids"] = shifted
+                _validate_segment_bounds(segments=segments)
+        elif was_removed and not will_remove:
+            removed_sec = float(segment.pop("ripple_removed_sec", 0.0) or 0.0)
+            shifted_ids = segment.pop("ripple_shifted_placement_ids", None)
+            if removed_sec > 0:
+                _shift_later_segments(segments, after_index=index, delta_sec=removed_sec)
+                if isinstance(shifted_ids, list):
+                    moved = {str(item) for item in shifted_ids}
+                    selector = lambda key, _placement: str(key) in moved  # noqa: E731
+                else:
+                    # 이름표가 없는 옛 기록: 되살릴 장면 시작 이후 배치를 민다.
+                    restored_start = float(segment["start_sec"])
+                    selector = lambda _key, placement: float(placement.get("start_sec", 0.0)) >= restored_start  # noqa: E731
+                _shift_placement_overrides(updated, delta_sec=removed_sec, selector=selector)
+            # 뺀 장면은 겹침 검사에서 빠져 있었으므로, 되살리면 이웃이 그 자리로 늘어나
+            # 있을 수 있다. 겹친 채 켜지 않는다.
+            for other in segments:
+                if other is segment or str(other.get("cut_action") or "keep") == "remove":
+                    continue
+                if float(segment["start_sec"]) < float(other["end_sec"]) and float(other["start_sec"]) < float(segment["end_sec"]):
+                    raise ValueError(f"Segment bounds overlap: {other.get('segment_id')} and {segment_id}.")
+        return _apply_manual_mutation(
+            before=session, updated=updated, mutation_type="cut_action_update", segment_id=segment_id,
+            extra={"cut_action": normalized_cut_action, "remove_mode": mode},
+        )
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 

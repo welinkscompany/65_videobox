@@ -351,6 +351,12 @@ class PyCapCutRealExportAdapter:
         for segment in editing_session.get("segments", []):
             if not isinstance(segment, dict):
                 continue
+            # 뺀 장면의 자막은 싣지 않는다. 완성본 자막(`composition_plan`의 세션 자막)도
+            # 뺀 장면을 건너뛴다 -- 여기만 싣으면 캡컷에서 뺀 장면 말이 구멍 위에 되살아나고,
+            # 당겨서 뺀 경우(`remove_mode="ripple"`)에는 당겨 들어온 장면 자막과 겹쳐
+            # 초안 만들기가 죽는다.
+            if str(segment.get("cut_action") or "keep") == "remove":
+                continue
             text = str(segment.get("caption_text") or "").strip()
             start = float(segment.get("start_sec") or 0)
             end = float(segment.get("end_sec") or 0)

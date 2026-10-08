@@ -1151,6 +1151,18 @@ describe("빈 구간 이유", () => {
     expect(gapReasonLabel("")).toBe("미디어 없음");
     expect(gapReasonLabel(undefined)).toBe("미디어 없음");
   });
+
+  it("뺀 장면 자리는 미디어 없음이 아니라 뺀 장면 자리라고 말하고, 머리 문장이 센다", () => {
+    expect(gapReasonLabel("removed_scene")).toBe("뺀 장면 자리");
+    const removedView: EditorViewModel = {
+      ...view,
+      gaps: [{ gapId: "removed:s2", segmentId: "s2", startSec: 2, endSec: 3.7, reason: "removed_scene" }],
+    };
+    render(<TimelineDock view={removedView} viewportWidthPx={400} />);
+    expect(screen.getByText(/빈 구간 1개/)).toBeInTheDocument();
+    expect(screen.getByText("빈 구간: 뺀 장면 자리")).toBeInTheDocument();
+    expect(screen.queryByText(/removed_scene/)).toBeNull();
+  });
 });
 
 describe("타임라인 상태 문구", () => {

@@ -60,6 +60,8 @@ const gapReasonLabels: Readonly<Record<string, string>> = {
   asset_gap: "미디어 없음",
   asset_required: "미디어 없음",
   "장면을 보여 줄 영상이 없어요.": "영상 없음",
+  // 장면을 빼면 뒤 장면이 그 자리에 남아 구멍이 생긴다(`editor_playback_manifest._removed_scene_gaps`).
+  removed_scene: "뺀 장면 자리",
 };
 
 export function gapReasonLabel(reason: string | null | undefined): string {
