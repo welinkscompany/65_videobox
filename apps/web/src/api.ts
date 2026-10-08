@@ -74,7 +74,7 @@ export type InfographicResult = {
 
 /** 설명 모션(2026-10-08 결정 2단계). 글자 수 한도는 `limits`에 실려 오므로 화면이 숫자를 베껴 적지 않는다. */
 export type MotionTemplate = { key: string; korean_name: string; description: string; default_duration_sec: number; min_duration_sec: number; max_duration_sec: number; limits: Record<string, number> };
-export type MotionRequest = { template: string; variables: Record<string, unknown>; duration_sec: number; layout?: "full"; title?: string | null };
+export type MotionRequest = { template: string; variables: Record<string, unknown>; duration_sec: number; layout?: "full" | "overlay"; title?: string | null };
 export type MotionResult = { library_asset_id: string | null; template: string; title: string; duration_sec: number; layout: "full" | "overlay"; format: "mp4" | "webm"; byte_size: number; elapsed_sec: number; library_error: string | null };
 export type SceneImageRequest = { prompt: string; segment_id: string; vertical?: boolean; duration_sec?: number; gap_slot_id?: string | null };
 /** 진짜 동영상(Wan). `SceneImageRequest`와 별개 경로다(owner 결정 2026-08-29 2회차,

@@ -42,6 +42,7 @@ export function MotionPanel({ projectId, sceneSeconds = null, onMade, onBusyChan
   const [suffix, setSuffix] = useState("");
   const [caption, setCaption] = useState("");
   const [steps, setSteps] = useState<string[]>(["", ""]);
+  const [layout, setLayout] = useState<"full" | "overlay">("full");
   const [seconds, setSeconds] = useState("");
   const [busy, setBusy] = useState(false);
   const [made, setMade] = useState<{ result: MotionResult; inProject: boolean } | null>(null);
@@ -114,7 +115,7 @@ export function MotionPanel({ projectId, sceneSeconds = null, onMade, onBusyChan
     try {
       // fetch가 취소를 못 알아듣고 매달려 있어도 화면은 놓여나도록 취소 신호와 겨룬다.
       const gone = new Promise<never>((_, reject) => controller.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
-      const result = await Promise.race([api.createMotion({ template: key, variables: variables(), duration_sec: duration, layout: "full" }, controller.signal), gone]);
+      const result = await Promise.race([api.createMotion({ template: key, variables: variables(), duration_sec: duration, layout }, controller.signal), gone]);
       if (controller.signal.aborted || !alive.current) return;
       let inProject = false;
       if (result.library_asset_id && projectId) {
@@ -217,6 +218,17 @@ export function MotionPanel({ projectId, sceneSeconds = null, onMade, onBusyChan
         onClick={() => setSteps([...steps, ""])}>단계 한 줄 더하기</Button>
     </div> : null}
 
+    {template ? <div className="vb-infographic__field" role="group" aria-label="모양">
+      <span>모양</span>
+      <div className="vb-infographic__styles">
+        <Button type="button" variant="ghost" className="vb-infographic__style" aria-pressed={layout === "full"} disabled={busy}
+          onClick={() => setLayout("full")}>전체 화면</Button>
+        <Button type="button" variant="ghost" className="vb-infographic__style" aria-pressed={layout === "overlay"} disabled={busy}
+          onClick={() => setLayout("overlay")}>작은 창(투명)</Button>
+      </div>
+      <span className="vb-infographic__hint">{layout === "overlay" ? "영상 위에 작게 얹어요. 바탕이 비쳐 보여요." : "화면을 가득 채워요."}</span>
+    </div> : null}
+
     {template ? <label className="vb-infographic__field">
       <span>길이(초)</span>
       <Input value={seconds} disabled={busy} inputMode="decimal" onChange={(event) => setSeconds(event.target.value)} />
@@ -236,7 +248,9 @@ export function MotionPanel({ projectId, sceneSeconds = null, onMade, onBusyChan
       <p>
         {made.result.library_asset_id
           ? made.inProject
-            ? <>다 만들었어요. 이 프로젝트 영상 목록에 넣어 뒀으니 <strong>장면을 고르고 적용</strong>을 눌러 쓰세요.</>
+            ? made.result.layout === "overlay"
+              ? <>다 만들었어요. 이 프로젝트 영상 목록에 넣어 뒀으니 장면을 고르고 <strong>화면에 얹기</strong>를 눌러 쓰세요. 크기·자리·나타나기는 오른쪽에서 고를 수 있어요.</>
+              : <>다 만들었어요. 이 프로젝트 영상 목록에 넣어 뒀으니 <strong>장면을 고르고 적용</strong>을 눌러 쓰세요.</>
             : <>다 만들었어요. 자료실 영상에 넣어 뒀으니 <strong>자료실에서 가져오기</strong>로 꺼내 쓰세요.</>
           : <>모션은 만들었지만 자료실에 넣지 못했어요. 잠시 뒤 다시 만들어 주세요.</>}
       </p>

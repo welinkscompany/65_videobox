@@ -58,6 +58,20 @@ describe("MotionPanel", () => {
     });
   });
 
+  it("작은 창(투명)을 고르면 overlay로 보내고, 결과 말에 화면에 얹기를 알려 준다", async () => {
+    const create = vi.spyOn(api, "createMotion").mockResolvedValue(made({ layout: "overlay", format: "webm" }));
+    vi.spyOn(api, "materializeLibraryAsset").mockResolvedValue({} as never);
+    render(<MotionPanel projectId="project-a" />);
+    await fillBars();
+    expect(screen.getByRole("button", { name: "전체 화면" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "작은 창(투명)" }));
+    expect(screen.getByText(/영상 위에 작게 얹어요/)).toBeTruthy();
+    make();
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create.mock.calls[0][0].layout).toBe("overlay");
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("화면에 얹기"));
+  });
+
   it("장면 길이를 기본 길이로 쓴다 — 짧으면 숫자가 처음부터 다시 돈다", async () => {
     const create = vi.spyOn(api, "createMotion").mockResolvedValue(made());
     vi.spyOn(api, "materializeLibraryAsset").mockResolvedValue({} as never);

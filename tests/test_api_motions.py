@@ -72,6 +72,14 @@ def test_a_made_motion_comes_back_with_where_it_went(client: TestClient) -> None
     assert service.calls == [{"template_key": "bar_compare", "variables": BODY["variables"], "duration_sec": 6.0, "layout": "full", "title": None}]
 
 
+def test_a_small_transparent_window_reaches_the_service_as_overlay(client: TestClient) -> None:
+    service = _Service(_made())
+    client.app.state.motion_service = service
+    reply = client.post("/api/library/motions", json={**BODY, "layout": "overlay"})
+    assert reply.status_code == 201
+    assert service.calls[0]["layout"] == "overlay"
+
+
 def test_whole_numbers_reach_the_service_as_whole_numbers(client: TestClient) -> None:
     """Task 3은 정수 칸에 1280.0을 거절한다 -- 문이 숫자를 소수로 바꾸면 안 된다."""
     service = _Service(_made())
@@ -99,7 +107,7 @@ def test_what_was_wrong_with_the_text_is_told_not_swallowed(client: TestClient) 
 
 
 @pytest.mark.parametrize("patch", [
-    {"duration_sec": 2}, {"duration_sec": 31}, {"layout": "overlay"}, {"title": "<b>x</b>"}, {"title": "x" * 61}, {"extra": 1},
+    {"duration_sec": 2}, {"duration_sec": 31}, {"layout": "mov"}, {"title": "<b>x</b>"}, {"title": "x" * 61}, {"extra": 1},
 ])
 def test_a_request_that_cannot_be_a_motion_is_refused_at_the_door(client: TestClient, patch: dict) -> None:
     service = _Service(_made())

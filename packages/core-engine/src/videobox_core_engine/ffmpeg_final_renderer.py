@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import tempfile
@@ -1649,6 +1650,8 @@ class FfmpegFinalRenderer:
         # `settb`가 프레임률을 지워 xfade가 거부한 것이었다
         # (`_transition_side_filter` 참고). 여기는 예방일 뿐이다.
         single_thread_source_indices: set[int] = set()
+        # 알파가 든 VP9 webm(투명 모션 오버레이) 입력들 -- `-c:v libvpx-vp9`로 열어야 알파가 산다.
+        vp9_alpha_source_indices: set[int] = set()
         # 되풀이(`loop`)를 켠 b-roll의 시작점이 원본 끝을 넘어선 항목들.
         # 자리(index)로 적는다 -- 갓 나눈 조각은 `clip_id`가 겹칠 수 있다.
         looped_source_starts: dict[int, CompositionItem] = {}
@@ -1670,6 +1673,8 @@ class FfmpegFinalRenderer:
                     # 미리 해 둔다. 안 해 두면 오디오 그래프가 없는 `[N:a]`를
                     # 그대로 넣어 ffmpeg가 통째로 실패한다.
                     soundless_source_clip_ids.add(item.clip_id)
+                if not is_image and self._is_vp9_with_alpha(source):
+                    vp9_alpha_source_indices.add(len(source_paths))
                 track_overlay_indices[item.clip_id] = len(source_paths)
                 source_indices[item.clip_id] = len(source_paths)
                 source_paths.append((source, is_image, False))
@@ -1852,6 +1857,8 @@ class FfmpegFinalRenderer:
             # 전환 입력은 그보다 더 묶는다. 1초 남짓만 읽는 입력에 스레드를
             # 넉넉히 주면 상한을 넘겨 렌더가 통째로 죽는다.
             command += ["-threads", "1" if source_index in single_thread_source_indices else threads]
+            if source_index in vp9_alpha_source_indices:
+                command += ["-c:v", "libvpx-vp9"]
             if should_loop:
                 command += ["-stream_loop", "-1"]
             if is_image:
@@ -1972,6 +1979,37 @@ class FfmpegFinalRenderer:
     def _has_visual_stream(self, path: Path) -> bool:
         """Accept non-image overlays only when ffprobe confirms a video stream."""
         return self._has_stream(path, selector="v:0", codec_type="video", error_label="overlay media")
+
+    def _is_vp9_with_alpha(self, path: Path) -> bool:
+        """투명 배경 VP9 webm인지 ffprobe에게 묻는다(모션 오버레이, 2026-10-08).
+
+        알파 webm은 알파 채널을 `ALPHA_MODE=1` 태그로 따로 싣는다. ffmpeg의 기본
+        디코더는 그 알파를 읽지 못해 저장된 색(보통 흰색)만 남기므로, 입력 앞에
+        `-c:v libvpx-vp9`를 지정해야 투명이 산다. 아무 webm에나 걸면 VP8 등은
+        렌더가 죽으니 코덱과 태그를 둘 다 확인한 것에만 쓴다. 실패하면 False --
+        예전 방식(`-i`만)으로 연다.
+        """
+        try:
+            result = subprocess.run(
+                [
+                    self.ffprobe_binary, "-v", "error", "-select_streams", "v:0",
+                    "-show_entries", "stream=codec_name:stream_tags=alpha_mode",
+                    "-of", "json", str(path),
+                ],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False
+        if result.returncode != 0:
+            return False
+        try:
+            streams = json.loads(result.stdout or "{}").get("streams") or []
+        except ValueError:
+            return False
+        if not streams or streams[0].get("codec_name") != "vp9":
+            return False
+        tags = streams[0].get("tags") or {}
+        return any(str(key).lower() == "alpha_mode" and str(value) == "1" for key, value in tags.items())
 
     def rendered_audio_has_sound(self, path: Path) -> bool | None:
         """이 렌더러가 쓰는 ffmpeg로 재는 편의 메서드. 판단은 모듈 함수에 있다."""

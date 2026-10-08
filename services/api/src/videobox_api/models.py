@@ -544,7 +544,7 @@ class MotionCreateRequest(BaseModel):
     """설명 모션 한 편. 템플릿 이름·숫자·글만 받는다 -- HTML·코드는 받는 칸이 없다(2026-10-08 결정).
 
     `variables`의 칸별 검사는 템플릿마다 달라서 `MotionService`가 `parse_motion_variables`로 한다.
-    `layout`은 2단계에서 `full`만 연다: 완성본 렌더러가 투명 webm의 알파를 아직 못 읽는다.
+    `layout`의 `overlay`는 투명 webm이다 -- 완성본 렌더러가 VP9 알파를 읽는다(Task 9).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -552,7 +552,7 @@ class MotionCreateRequest(BaseModel):
     template: str = Field(min_length=1, max_length=40)
     variables: dict[str, Any]
     duration_sec: float = Field(ge=MIN_MOTION_DURATION_SEC, le=MAX_MOTION_DURATION_SEC, allow_inf_nan=False)
-    layout: Literal["full"] = "full"
+    layout: Literal["full", "overlay"] = "full"
     title: str | None = Field(default=None, max_length=60)
 
     @field_validator("title")
