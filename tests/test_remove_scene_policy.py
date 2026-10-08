@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import random
 import shutil
 import subprocess
 from copy import deepcopy
@@ -266,17 +267,22 @@ def test_trim_instead_of_keep_also_reopens_the_space() -> None:
 
 # ---------------------------------------------------------------- 최소 길이 · 경계 검사
 
-def test_validate_bounds_ignores_removed_scenes_for_overlap_but_not_for_duration() -> None:
+def test_leave_gap_keeps_the_old_refusal_to_stretch_a_neighbour_into_the_hole() -> None:
     removed = update_segment_cut_action(session=_five(), segment_id="c", cut_action="remove", remove_mode="leave_gap")
-    # 이웃 b를 뺀 장면 c 자리(2.5~4.0) 안으로 늘려도 거절하지 않는다.
-    widened = set_segment_bounds(session=removed, segment_id="b", start_sec=1.0, end_sec=3.0)
-    assert widened["segments"][1]["end_sec"] == pytest.approx(3.0)
+    # 옛 규칙 그대로: 뺀 자리로 이웃을 늘리면 거절한다(되살릴 때 겹치기 때문).
+    with pytest.raises(ValueError, match="overlap"):
+        set_segment_bounds(session=removed, segment_id="b", start_sec=1.0, end_sec=3.0)
+
+
+def test_ripple_removed_scenes_are_skipped_for_overlap_but_not_for_duration() -> None:
+    removed = update_segment_cut_action(session=_five(), segment_id="e", cut_action="remove", remove_mode="ripple")
+    widened = set_segment_bounds(session=removed, segment_id="d", start_sec=4.0, end_sec=6.0)
+    assert widened["segments"][3]["end_sec"] == pytest.approx(6.0)
     # 켜 있는 장면끼리는 여전히 겹치면 거절한다.
     with pytest.raises(ValueError, match="overlap"):
-        set_segment_bounds(session=removed, segment_id="b", start_sec=1.0, end_sec=4.5)
-    # 최소 길이는 뺀 장면에도 그대로 지킨다.
+        set_segment_bounds(session=removed, segment_id="c", start_sec=2.5, end_sec=4.5)
     broken = deepcopy(removed)
-    broken["segments"][2]["end_sec"] = broken["segments"][2]["start_sec"] + 0.1
+    broken["segments"][4]["end_sec"] = broken["segments"][4]["start_sec"] + 0.1
     with pytest.raises(ValueError, match="at least"):
         set_segment_bounds(session=broken, segment_id="a", start_sec=0.0, end_sec=1.0)
 
@@ -287,11 +293,97 @@ def test_after_ripple_the_pulled_scene_can_be_trimmed_even_though_it_sits_on_the
     assert (trimmed["segments"][2]["start_sec"], trimmed["segments"][2]["end_sec"]) == (2.0, 3.0)
 
 
-def test_restore_that_would_overlap_a_scene_stretched_into_the_hole_is_refused() -> None:
-    removed = update_segment_cut_action(session=_five(), segment_id="c", cut_action="remove", remove_mode="leave_gap")
-    widened = set_segment_bounds(session=removed, segment_id="b", start_sec=1.0, end_sec=3.0)
-    with pytest.raises(ValueError, match="overlap"):
-        update_segment_cut_action(session=widened, segment_id="c", cut_action="keep")
+def _stretched_into_a_ripple_removed_slot() -> dict:
+    removed = update_segment_cut_action(session=_five(), segment_id="e", cut_action="remove", remove_mode="ripple")
+    return set_segment_bounds(session=removed, segment_id="d", start_sec=4.0, end_sec=6.0)
+
+
+def test_restore_that_would_overlap_a_stretched_neighbour_gives_a_distinct_reason_code() -> None:
+    with pytest.raises(ValueError) as caught:
+        update_segment_cut_action(session=_stretched_into_a_ripple_removed_slot(), segment_id="e", cut_action="keep")
+    assert str(caught.value) == "segment_restore_overlaps_neighbour"
+
+
+def test_yujin_restore_raises_the_same_reason_code() -> None:
+    proposal = YujinEditingProposal.model_validate({
+        "proposal_id": "p9", "base_session_revision": 1,
+        "operations": [{"intent": "set_cut_action", "segment_id": "e", "action": "restore"}],
+    })
+    with pytest.raises(ValueError) as caught:
+        apply_yujin_editing_proposal(session=_stretched_into_a_ripple_removed_slot(), proposal=proposal)
+    assert str(caught.value) == "segment_restore_overlaps_neighbour"
+
+
+def test_a_ripple_removed_scene_cannot_be_split_or_merged() -> None:
+    removed = update_segment_cut_action(session=_five(), segment_id="b", cut_action="remove", remove_mode="ripple")
+    with pytest.raises(ValueError, match="segment_split_ripple_removed"):
+        es.split_segment(session=removed, segment_id="b", split_sec=1.7)
+    with pytest.raises(ValueError):
+        es.merge_adjacent_segments(session=removed, left_segment_id="a", right_segment_id="b")
+
+
+# ---------------------------------------------------------------- 부동소수점: 같은 입력은 같은 출력
+
+def _fuzz_session(rng: random.Random) -> dict:
+    count = rng.randint(3, 8)
+    cursor_ms, segments = 0, []
+    for i in range(count):
+        duration_ms = rng.randint(200, 3000)
+        segments.append({"segment_id": f"f{i}", "caption_text": f"f{i}", "start_sec": cursor_ms / 1000, "end_sec": (cursor_ms + duration_ms) / 1000, "cut_action": "keep"})
+        cursor_ms += duration_ms
+    overrides = {}
+    for j in range(rng.randint(0, 4)):
+        start_ms = rng.randint(0, cursor_ms)
+        overrides[f"o{j}"] = {"placement_id": f"o{j}", "kind": "broll", "start_sec": start_ms / 1000, "end_sec": (start_ms + rng.randint(100, 800)) / 1000}
+    return {"session_id": "e1", "project_id": "p", "timeline_id": "t", "session_revision": 1, "history": [], "segments": segments, "timeline_placement_overrides": overrides}
+
+
+def _kept_are_contiguous(session: dict) -> bool:
+    kept = [s for s in session["segments"] if s["cut_action"] != "remove"]
+    return all(left["end_sec"] == right["start_sec"] for left, right in zip(kept, kept[1:]))  # 반올림 없이 정확히
+
+
+def test_seeded_fuzz_of_ripple_removals_and_restores_never_errors_and_never_drifts() -> None:
+    rng = random.Random(20261008)
+    operations = 0
+    for _ in range(700):
+        original = _fuzz_session(rng)
+        session = original
+        removed_ids: list[str] = []
+        for _step in range(rng.randint(1, 3)):
+            candidates = [s["segment_id"] for s in session["segments"] if s["cut_action"] != "remove"]
+            if len(candidates) < 2:
+                break
+            target = rng.choice(candidates)
+            before = _state(session)
+            session = update_segment_cut_action(session=session, segment_id=target, cut_action="remove", remove_mode="ripple")
+            operations += 1
+            removed_ids.append(target)
+            assert _kept_are_contiguous(session), (target, session["segments"])
+            assert _state(undo(session=session)) == before  # 되돌리기는 정확히
+        rng.shuffle(removed_ids)
+        for target in removed_ids:
+            session = update_segment_cut_action(session=session, segment_id=target, cut_action="keep")
+            operations += 1
+        # 되살린 뒤는 반올림 없이 처음과 같다 (5.3 -> 5.299999999999999 같은 드리프트 없음).
+        assert [(s["segment_id"], s["start_sec"], s["end_sec"], s["cut_action"]) for s in session["segments"]] == [
+            (s["segment_id"], s["start_sec"], s["end_sec"], s["cut_action"]) for s in original["segments"]
+        ]
+        assert {k: (v["start_sec"], v["end_sec"]) for k, v in session["timeline_placement_overrides"].items()} == {
+            k: (v["start_sec"], v["end_sec"]) for k, v in original["timeline_placement_overrides"].items()
+        }
+    assert operations >= 2000
+
+
+def test_the_reviewer_failing_case_removing_the_first_scene_no_longer_overlaps() -> None:
+    session = _five()
+    session.pop("timeline_placement_overrides")
+    for segment, (start, end) in zip(session["segments"], [(0.0, 1.742), (1.742, 12.996), (12.996, 14.0), (14.0, 15.0), (15.0, 16.0)]):
+        segment.update(start_sec=start, end_sec=end)
+    updated = update_segment_cut_action(session=session, segment_id="a", cut_action="remove", remove_mode="ripple")
+    assert updated["segments"][1]["start_sec"] == 0.0
+    assert updated["segments"][1]["end_sec"] == 11.254
+    assert _kept_are_contiguous(updated)
 
 
 # ---------------------------------------------------------------- 매니페스트: 빈 구간 수
@@ -358,8 +450,9 @@ def test_manifest_counts_a_removed_first_scene_and_two_separate_holes() -> None:
 
 
 def test_manifest_hole_shrinks_to_what_a_neighbour_does_not_cover() -> None:
+    # 옛 저장본처럼 이웃이 뺀 자리 앞쪽을 덮고 있는 세션(지금은 편집으로 만들 수 없다).
     session = update_segment_cut_action(session=_real_session(), segment_id="s2", cut_action="remove", remove_mode="leave_gap")
-    session = set_segment_bounds(session=session, segment_id="s1", start_sec=0.0, end_sec=2.5)
+    session["segments"][0]["end_sec"] = 2.5
     gaps = _removed_gaps(_manifest(session))
     assert [(g["start_sec"], g["end_sec"]) for g in gaps] == [(2.5, 3.7)]
 
@@ -476,3 +569,26 @@ def test_capcut_export_places_the_pulled_scene_right_after_the_previous_one(tmp_
     for name in ("voiceover", "broll"):
         starts = [(seg["target_timerange"]["start"], seg["target_timerange"]["duration"]) for seg in tracks[name]]
         assert starts == [(0, 2_000_000), (2_000_000, 2_000_000)], name
+
+
+def test_capcut_adapter_skips_removed_scene_captions_in_the_default_mode_and_keeps_kept_ones(tmp_path) -> None:
+    """ffmpeg 없이도 도는 어댑터 수준 시험. 기본(leave_gap)에서 뺀 장면 자막은 초안에 안 실린다."""
+    from videobox_capcut_export.pycapcut_adapter import PyCapCutRealExportAdapter
+    from videobox_storage.local_project_store import LocalProjectStore
+
+    class RecordingScript:
+        def __init__(self) -> None:
+            self.added: list[tuple[str, object]] = []
+
+        def add_segment(self, segment, track_name):  # noqa: ANN001
+            self.added.append((track_name, segment))
+
+    session = update_segment_cut_action(session=_session(), segment_id="s2", cut_action="remove")  # 기본 모드
+    assert _bounds(session)[2] == ("s3", 3.7, 5.0, "keep")
+    adapter = PyCapCutRealExportAdapter(store=LocalProjectStore(tmp_path), video_width=320, video_height=240)
+    script = RecordingScript()
+    adapter._add_styled_captions(script=script, editing_session=session)
+    texts = [segment.text for _track, segment in script.added]
+    assert texts == ["s1", "s3"]  # 뺀 s2 없음, 남긴 s1/s3는 있음 (양성 대조)
+    starts = [segment.target_timerange.start for _track, segment in script.added]
+    assert starts == [0, 3_700_000]

@@ -152,12 +152,13 @@ def _validate_segment_bounds(*, segments: list[dict[str, Any]]) -> None:
     for segment in segments:
         start_sec = float(segment.get("start_sec", 0.0))
         end_sec = float(segment.get("end_sec", 0.0))
-        if not isfinite(start_sec) or not isfinite(end_sec) or start_sec < 0 or end_sec - start_sec < MIN_SEGMENT_DURATION_SEC:
+        if not isfinite(start_sec) or not isfinite(end_sec) or start_sec < 0 or end_sec - start_sec < MIN_SEGMENT_DURATION_SEC - 1e-9:
             raise ValueError(f"Segment duration must be at least {MIN_SEGMENT_DURATION_SEC} seconds.")
-        # **뺀 장면은 겹침 검사에서 뺀다**(계획 H Task 12). 당겨서 뺀 장면은 뒤 장면이 그
-        # 자리에 들어오고, 남겨 둔 채 뺀 장면은 이웃이 그 자리로 늘어날 수 있다. 길이
-        # 검사는 위에서 모두에게 했다.
-        if str(segment.get("cut_action") or "keep") == "remove":
+        # **당겨서 뺀 장면만 겹침 검사에서 뺀다**(계획 H Task 12). 뒤 장면이 그 자리에
+        # 들어오기 때문이다. 남겨 둔 채 뺀 장면(`leave_gap`)은 옛 규칙 그대로 검사한다 --
+        # 이웃이 뺀 자리로 늘어나면 되살릴 때 겹치므로 처음부터 거절한다. 길이 검사는
+        # 위에서 모두에게 했다.
+        if str(segment.get("cut_action") or "keep") == "remove" and "ripple_removed_sec" in segment:
             continue
         normalized.append((start_sec, end_sec, str(segment.get("segment_id") or "")))
     ordered = sorted(normalized)
@@ -615,6 +616,9 @@ def _split_one_segment_in_place(*, segments: list[dict[str, Any]], segment_id: s
     if index is None:
         raise KeyError(f"Segment not found in editing session: {segment_id}")
     original = segments[index]
+    if "ripple_removed_sec" in original:
+        # 당겨서 뺀 장면을 나누면 "얼마만큼 당겼는지"가 두 조각에 복제되어 되살릴 때 두 번 밀린다.
+        raise ValueError("segment_split_ripple_removed")
     start_sec, end_sec = float(original["start_sec"]), float(original["end_sec"])
     split_sec = float(split_sec)
     if not isfinite(split_sec):
@@ -1612,10 +1616,24 @@ def update_segment_caption(
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 
+#: 시각을 옮긴 뒤 붙이는 격자(초). 부동소수점 한 칸(ulp) 오차가 겹침 검사와
+#: 되돌아오는 값(5.3 -> 5.299999999999999)을 흔들지 않도록, 같은 입력은 같은 출력이
+#: 되게 한다. 9자리면 프레임(1/30초)보다 훨씬 곱고, 소수 9자리 이하 값은 그대로 남는다.
+_RIPPLE_GRID_DIGITS = 9
+_RIPPLE_ANCHOR_TOLERANCE_SEC = 1e-9
+
+
+def _shifted_time(value: float, *, delta_sec: float, anchor_from: float, anchor_to: float) -> float:
+    """`value`를 `delta_sec`만큼 옮긴다. 경계(`anchor_from`)에 있던 값은 `anchor_to`로 **정확히** 간다."""
+    if abs(value - anchor_from) <= _RIPPLE_ANCHOR_TOLERANCE_SEC:
+        return anchor_to
+    return round(value + delta_sec, _RIPPLE_GRID_DIGITS)
+
+
 def _shift_placement_overrides(
-    session: dict[str, Any], *, delta_sec: float, selector: Any,
+    session: dict[str, Any], *, delta_sec: float, anchor_from: float, anchor_to: float, selector: Any,
 ) -> list[str]:
-    """`selector(placement)`가 참인 배치를 `delta_sec`만큼 옮기고 옮긴 이름표를 돌려준다."""
+    """`selector(placement)`가 참인 배치를 옮기고 옮긴 이름표를 돌려준다."""
     overrides = session.get("timeline_placement_overrides")
     if not isinstance(overrides, dict):
         return []
@@ -1623,18 +1641,20 @@ def _shift_placement_overrides(
     for key, placement in overrides.items():
         if not isinstance(placement, dict) or not selector(key, placement):
             continue
-        placement["start_sec"] = float(placement["start_sec"]) + delta_sec
+        placement["start_sec"] = _shifted_time(float(placement["start_sec"]), delta_sec=delta_sec, anchor_from=anchor_from, anchor_to=anchor_to)
         if "end_sec" in placement:
-            placement["end_sec"] = float(placement["end_sec"]) + delta_sec
+            placement["end_sec"] = _shifted_time(float(placement["end_sec"]), delta_sec=delta_sec, anchor_from=anchor_from, anchor_to=anchor_to)
         moved.append(str(key))
     return moved
 
 
-def _shift_later_segments(segments: list[dict[str, Any]], *, after_index: int, delta_sec: float) -> None:
+def _shift_later_segments(
+    segments: list[dict[str, Any]], *, after_index: int, delta_sec: float, anchor_from: float, anchor_to: float,
+) -> None:
     """목록에서 `after_index` 뒤에 있는 장면 전부를 옮긴다(리플 배속과 같은 규칙)."""
     for later in segments[after_index + 1 :]:
-        later["start_sec"] = float(later["start_sec"]) + delta_sec
-        later["end_sec"] = float(later["end_sec"]) + delta_sec
+        later["start_sec"] = _shifted_time(float(later["start_sec"]), delta_sec=delta_sec, anchor_from=anchor_from, anchor_to=anchor_to)
+        later["end_sec"] = _shifted_time(float(later["end_sec"]), delta_sec=delta_sec, anchor_from=anchor_from, anchor_to=anchor_to)
 
 
 def update_segment_cut_action(
@@ -1676,10 +1696,10 @@ def update_segment_cut_action(
         if will_remove and not was_removed and mode == "ripple":
             removed_sec = float(segment["end_sec"]) - float(segment["start_sec"])
             if removed_sec > 0:
-                removed_end = float(segment["end_sec"])
-                _shift_later_segments(segments, after_index=index, delta_sec=-removed_sec)
+                removed_start, removed_end = float(segment["start_sec"]), float(segment["end_sec"])
+                _shift_later_segments(segments, after_index=index, delta_sec=-removed_sec, anchor_from=removed_end, anchor_to=removed_start)
                 shifted = _shift_placement_overrides(
-                    updated, delta_sec=-removed_sec,
+                    updated, delta_sec=-removed_sec, anchor_from=removed_end, anchor_to=removed_start,
                     selector=lambda _key, placement: float(placement.get("start_sec", 0.0)) >= removed_end,
                 )
                 segment["ripple_removed_sec"] = removed_sec
@@ -1689,22 +1709,23 @@ def update_segment_cut_action(
             removed_sec = float(segment.pop("ripple_removed_sec", 0.0) or 0.0)
             shifted_ids = segment.pop("ripple_shifted_placement_ids", None)
             if removed_sec > 0:
-                _shift_later_segments(segments, after_index=index, delta_sec=removed_sec)
+                restored_start, restored_end = float(segment["start_sec"]), float(segment["end_sec"])
+                _shift_later_segments(segments, after_index=index, delta_sec=removed_sec, anchor_from=restored_start, anchor_to=restored_end)
                 if isinstance(shifted_ids, list):
                     moved = {str(item) for item in shifted_ids}
                     selector = lambda key, _placement: str(key) in moved  # noqa: E731
                 else:
                     # 이름표가 없는 옛 기록: 되살릴 장면 시작 이후 배치를 민다.
-                    restored_start = float(segment["start_sec"])
                     selector = lambda _key, placement: float(placement.get("start_sec", 0.0)) >= restored_start  # noqa: E731
-                _shift_placement_overrides(updated, delta_sec=removed_sec, selector=selector)
+                _shift_placement_overrides(updated, delta_sec=removed_sec, anchor_from=restored_start, anchor_to=restored_end, selector=selector)
             # 뺀 장면은 겹침 검사에서 빠져 있었으므로, 되살리면 이웃이 그 자리로 늘어나
             # 있을 수 있다. 겹친 채 켜지 않는다.
             for other in segments:
                 if other is segment or str(other.get("cut_action") or "keep") == "remove":
                     continue
                 if float(segment["start_sec"]) < float(other["end_sec"]) and float(other["start_sec"]) < float(segment["end_sec"]):
-                    raise ValueError(f"Segment bounds overlap: {other.get('segment_id')} and {segment_id}.")
+                    # 고정 코드: 화면과 유진이 같은 사유를 창작자 말로 옮긴다.
+                    raise ValueError("segment_restore_overlaps_neighbour")
         return _apply_manual_mutation(
             before=session, updated=updated, mutation_type="cut_action_update", segment_id=segment_id,
             extra={"cut_action": normalized_cut_action, "remove_mode": mode},
