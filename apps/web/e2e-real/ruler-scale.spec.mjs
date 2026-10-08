@@ -21,7 +21,7 @@ async function stretchTo120(page) {
 const measure = (page) => page.evaluate(() => {
   const majors = [...document.querySelectorAll(".vb-ruler-major")].map((el) => {
     const r = el.getBoundingClientRect();
-    return { label: el.textContent, left: r.left, right: r.right, labelWidth: el.scrollWidth };
+    return { label: el.textContent, left: r.left, right: r.right, endAligned: el.classList.contains("vb-ruler-major--end") };
   });
   const minors = document.querySelectorAll(".vb-ruler-minor").length;
   const pps = Number(document.querySelector('[data-pixels-per-second]').getAttribute("data-pixels-per-second"));
@@ -40,8 +40,18 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 800
     const m = await measure(page);
     console.log("RULER", viewport.width, JSON.stringify({ pps: m.pps, count: m.majors.length, minors: m.minors, labels: m.majors.map((x) => x.label), lefts: m.majors.map((x) => Math.round(x.left * 10) / 10) }));
     expect(m.majors.length).toBeGreaterThanOrEqual(2);
+    // 모든 글자 상자가 눈금 칸 안에 있다(마지막 `2:00`이 잘려 안 보이는 일이 없다).
+    for (const mark of m.majors) {
+      expect(mark.left, mark.label).toBeGreaterThanOrEqual(m.listLeft - 0.5);
+      expect(mark.right, mark.label).toBeLessThanOrEqual(m.listRight + 0.5);
+    }
+    expect(m.majors.at(-1).label).toBe("2:00");
+    expect(m.majors.at(-1).endAligned).toBe(true);
+    const visible = await page.evaluate(() => [...document.querySelectorAll(".vb-ruler-major")].map((el) => { const r = el.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return el === hit || el.contains(hit); }));
+    expect(visible.every(Boolean)).toBe(true);
     expect(m.majors.length).toBeLessThanOrEqual(10); // 121개가 아니다
-    const gaps = m.majors.slice(1).map((mark, i) => mark.left - m.majors[i].left);
+    const anchor = (mark) => (mark.endAligned ? mark.right : mark.left); // 시각이 있는 쪽 선
+    const gaps = m.majors.slice(1).map((mark, i) => anchor(mark) - anchor(m.majors[i]));
     console.log("GAPS", viewport.width, JSON.stringify(gaps.map((g) => Math.round(g * 10) / 10)));
     for (const gap of gaps) expect(gap).toBeGreaterThanOrEqual(MIN_GAP_PX - 1);
     // 글자 상자는 서로 겹치지 않는다(다음 눈금 선보다 오른쪽 끝이 앞에 있다).
@@ -56,7 +66,8 @@ test("처음 화면(60초가 보이는 배율)과 3.75초 고정 프로젝트도
   await openEditor(page, clean);
   const m = await measure(page);
   console.log("RULER-FIXTURE", JSON.stringify({ pps: m.pps, labels: m.majors.map((x) => x.label) }));
-  const gaps = m.majors.slice(1).map((mark, i) => mark.left - m.majors[i].left);
+  const anchor = (mark) => (mark.endAligned ? mark.right : mark.left);
+  const gaps = m.majors.slice(1).map((mark, i) => anchor(mark) - anchor(m.majors[i]));
   for (const gap of gaps) expect(gap).toBeGreaterThanOrEqual(MIN_GAP_PX - 1);
   await expect(page.getByLabel("눈금 0초")).toBeVisible();
 });

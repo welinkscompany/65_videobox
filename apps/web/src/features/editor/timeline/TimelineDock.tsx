@@ -9,7 +9,7 @@ import { findTimelineSnap, type SnapCandidate, type SnapCandidateKind, type Time
 import { snapDragProposal } from "./dragSnap";
 import { frameToSeconds, pixelsToTime, secondsToFrameHalfUp, timeToPixels } from "./time-scale";
 import { readCssPixels } from "./timelineCssMetrics";
-import { formatRulerLabel, rulerIntervals, rulerMarks as rulerMarkTimes } from "./rulerScale";
+import { formatRulerLabel, rulerIntervals, rulerLabelAlignsEnd, rulerMarks as rulerMarkTimes } from "./rulerScale";
 import { TIMELINE_LANES, type ClipRect, type TimelineLane } from "./timeline-geometry";
 import { deriveNarrationTrim, reorderNarrationLayout, type NarrationSegment, type NarrationReorderLayout } from "./narrationMutation";
 import { derivePlacementMove, derivePlacementTrim, type TimelinePlacement, type TimelinePlacementKind } from "./placementMutation";
@@ -34,6 +34,8 @@ const MUTABLE_LANES = new Set<TimelineLane>(["narration", "broll", "bgm", "sfx"]
 const SNAP_THRESHOLD_PX = 8;
 /** 눈금 글자 사이의 최소 간격(px). 실제 값은 CSS 변수 `--vb-ruler-label-min-gap`에서 마운트 뒤 읽는다. */
 const DEFAULT_RULER_LABEL_GAP_PX = 120;
+/** 칸 끝에 이만큼보다 가까운 눈금은 글자가 잘리지 않게 선 왼쪽에 얹는다. 실제 값은 `--vb-ruler-label-room`. */
+const DEFAULT_RULER_LABEL_ROOM_PX = 40;
 /** 한 번에 얼마나 늘리고 줄이는가. `navigationKeyAction`의 기본값과 같은 값이고,
  *  단추·키·전체 보기가 전부 이 한 값을 본다. */
 const ZOOM_STEP = 1.25;
@@ -268,6 +270,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   // 트랙 높이는 CSS 변수(`--vb-timeline-lane-h`)가 정한다. 첫 렌더는 기본값, 마운트 뒤 한 번 읽는다.
   const [laneHeightPx, setLaneHeightPx] = useState(DEFAULT_LANE_HEIGHT_PX);
   const [rulerLabelGapPx, setRulerLabelGapPx] = useState(DEFAULT_RULER_LABEL_GAP_PX);
+  const [rulerLabelRoomPx, setRulerLabelRoomPx] = useState(DEFAULT_RULER_LABEL_ROOM_PX);
   const zoomBounds = pixelsPerSecondBounds({ durationSec: view.output.durationSec, viewportWidthPx: trackWidthPx });
   const options = {
     durationSec: view.output.durationSec,
@@ -360,6 +363,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     const readLaneHeight = () => {
       setLaneHeightPx(readCssPixels(surfaceRef.current, "--vb-timeline-lane-h", DEFAULT_LANE_HEIGHT_PX));
       setRulerLabelGapPx(readCssPixels(surfaceRef.current, "--vb-ruler-label-min-gap", DEFAULT_RULER_LABEL_GAP_PX));
+      setRulerLabelRoomPx(readCssPixels(surfaceRef.current, "--vb-ruler-label-room", DEFAULT_RULER_LABEL_ROOM_PX));
     };
     readLaneHeight();
     const viewport = lanesViewportRef.current;
@@ -442,8 +446,9 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     const majors = rulerMarkTimes({ ...range, majorSec });
     const majorSet = new Set(majors);
     const minors = minorSec < majorSec ? rulerMarkTimes({ ...range, majorSec: minorSec }).filter((seconds) => !majorSet.has(seconds)) : [];
-    return { majorSec, majors, minors };
-  }, [rulerLabelGapPx, state.pixelsPerSecond, state.viewportStartSec, view.fps, viewportEndSec]);
+    const endAligned = new Set(majors.filter((seconds) => rulerLabelAlignsEnd({ seconds, viewportEndSec, pixelsPerSecond: state.pixelsPerSecond, labelRoomPx: rulerLabelRoomPx })));
+    return { majorSec, majors, minors, endAligned };
+  }, [rulerLabelGapPx, rulerLabelRoomPx, state.pixelsPerSecond, state.viewportStartSec, view.fps, viewportEndSec]);
   const rulerLeft = (seconds: number) => `${timeToPixels(seconds, { pixelsPerSecond: state.pixelsPerSecond, originSec: state.viewportStartSec })}px`;
 
   const handleClick = (event: MouseEvent<HTMLElement>) => {
@@ -694,41 +699,34 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   /** 끌기가 시작됐는가 -- 한 번 시작되면 다시 가까이 와도 계속 끌기다. */
   const dragMoved = (draft: Readonly<{ hasMoved: boolean; downClientX: number }>, event: PointerEvent<HTMLElement>): boolean =>
     draft.hasMoved || Math.abs(pointerClientX(event) - draft.downClientX) >= DRAG_START_THRESHOLD_PX;
-  /** 끄는 동안 붙을 후보: 옆 클립·빈 구간·자막의 시작·끝과 재생줄. 끄는 클립들 자신의 가장자리는 뺀다.
-   *  재생줄이 끄는 클립의 처음 가장자리에 있으면(클립을 고르면 재생줄이 시작으로 온다) 후보에서 뺀다 --
-   *  안 빼면 제자리로 도로 붙어서 8px 안쪽 미세 조정이 안 된다. */
-  const dragSnapCandidates = (draggedClipIds: readonly string[], originalEdgesSec: readonly number[]): readonly SnapCandidate[] => {
-    const halfFrameSec = (view.fps.den / view.fps.num) / 2;
-    const playheadIsOwnEdge = originalEdgesSec.some((edge) => Math.abs(edge - state.playheadSec) <= halfFrameSec);
-    return [
-      ...snapCandidates.filter((candidate) => !draggedClipIds.some((id) => candidate.id.startsWith(`clip:${id}:`))),
-      ...(playheadIsOwnEdge ? [] : [{ kind: "playhead" as const, id: "playhead", timeSec: state.playheadSec }]),
-    ];
-  };
+  /** 끄는 동안 붙는다: 옆 클립·빈 구간·자막의 시작·끝과 재생줄. 끄는 클립들 자신의 가장자리와
+   *  끄는 가장자리의 처음 자리는 뺀다. 규칙은 모두 `dragSnap.ts`에 있다. */
   const snapDrag = (
     mode: "move" | "start" | "end",
     proposedSec: number,
     durationSec: number,
-    draggedClipIds: readonly string[],
-    originalEdgesSec: readonly number[],
-  ) => snapDragProposal({
-    mode,
-    proposedSec,
-    durationSec,
-    candidates: dragSnapCandidates(draggedClipIds, originalEdgesSec),
-    excludeIdPrefix: draggedClipIds[0] ? `clip:${draggedClipIds[0]}:` : "",
-    scale: { pixelsPerSecond: state.pixelsPerSecond, originSec: state.viewportStartSec },
-    fps: view.fps,
-    thresholdPx: SNAP_THRESHOLD_PX,
-  });
+    originalSec: number,
+    draggedClipIds: readonly (string | undefined)[],
+  ): Readonly<{ proposedSec: number; snap: TimelineSnap | null }> => {
+    return snapDragProposal({
+      mode,
+      proposedSec,
+      durationSec,
+      originalSec,
+      draggedClipIds,
+      candidates: [...snapCandidates, { kind: "playhead" as const, id: "playhead", timeSec: state.playheadSec }],
+      scale: { pixelsPerSecond: state.pixelsPerSecond, originSec: state.viewportStartSec },
+      fps: view.fps,
+      thresholdPx: SNAP_THRESHOLD_PX,
+    });
+  };
   const trimSecondsAtPointer = (draft: Extract<PointerDraft, { kind: "trim" }>, event: PointerEvent<HTMLElement>): Readonly<{ proposedSec: number; snap: TimelineSnap | null }> => {
     const originalBoundarySec = draft.edge === "start" ? draft.clip.startSec : draft.clip.endSec;
     const deltaSec = pixelsToTime(pointerClientX(event) - draft.downClientX, {
       pixelsPerSecond: state.pixelsPerSecond,
       originSec: 0,
     });
-    const clipId = narrationClipIdOf(draft.clip.segmentId);
-    return snapDrag(draft.edge, originalBoundarySec + deltaSec, 0, clipId ? [clipId] : [], [draft.clip.startSec, draft.clip.endSec]);
+    return snapDrag(draft.edge, originalBoundarySec + deltaSec, 0, originalBoundarySec, [narrationClipIdOf(draft.clip.segmentId)]);
   };
   const startTrim = (event: PointerEvent<HTMLButtonElement>, clip: NarrationSegment, edge: "start" | "end") => {
     if (isSaving || lockedLanes.has("narration")) return;
@@ -848,18 +846,14 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     view.tracks.flatMap((track) => track.clips).find((clip) => clip.placementId === placementId)?.clipId;
   const placementBoundsAtPointer = (draft: PlacementMoveDraft | PlacementTrimDraft, event: PointerEvent<HTMLElement>) => {
     const deltaSec = pixelsToTime(pointerClientX(event) - draft.downClientX, { pixelsPerSecond: state.pixelsPerSecond, originSec: 0 });
-    // 첫 칸이 끄는 클립 본인이고(자기 후보를 뺄 접두사), 함께 옮기는 다른 선택 클립의 후보도 모두 뺀다.
-    const primaryClipId = clipIdOfPlacement(draft.placement.placementId);
-    const others = (draft.kind === "placement-move" ? draft.placements : [])
-      .map((item) => clipIdOfPlacement(item.placementId))
-      .filter((id): id is string => Boolean(id) && id !== primaryClipId);
-    const draggedClipIds = primaryClipId ? [primaryClipId, ...others] : others;
-    const originalEdges = [draft.placement.startSec, draft.placement.endSec];
+    // 끄는 클립 본인과 함께 옮기는 다른 선택 클립 모두의 후보를 뺀다.
+    const draggedClipIds = (draft.kind === "placement-move" ? draft.placements : [draft.placement]).map((item) => clipIdOfPlacement(item.placementId));
     if (draft.kind === "placement-move") {
-      const snapped = snapDrag("move", draft.placement.startSec + deltaSec, draft.placement.endSec - draft.placement.startSec, draggedClipIds, originalEdges);
+      const snapped = snapDrag("move", draft.placement.startSec + deltaSec, draft.placement.endSec - draft.placement.startSec, draft.placement.startSec, draggedClipIds);
       return { snap: snapped.snap, bounds: derivePlacementMove({ placement: draft.placement, proposedStartSec: snapped.proposedSec, durationSec: view.output.durationSec, fps: view.fps }) };
     }
-    const snapped = snapDrag(draft.edge, (draft.edge === "start" ? draft.placement.startSec : draft.placement.endSec) + deltaSec, 0, draggedClipIds, originalEdges);
+    const originalEdgeSec = draft.edge === "start" ? draft.placement.startSec : draft.placement.endSec;
+    const snapped = snapDrag(draft.edge, originalEdgeSec + deltaSec, 0, originalEdgeSec, draggedClipIds);
     return { snap: snapped.snap, bounds: derivePlacementTrim({ placement: draft.placement, edge: draft.edge, proposedSec: snapped.proposedSec, durationSec: view.output.durationSec, fps: view.fps }) };
   };
   const startPlacement = (event: PointerEvent<HTMLButtonElement>, placement: TimelinePlacement, operation: "move" | "trim", edge?: "start" | "end") => {
@@ -1123,7 +1117,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
       <div className="vb-timeline-scale">
         <div aria-label="시간 눈금" role="list" style={{ position: "relative", minHeight: "var(--vb-timeline-ruler-h, 1.5rem)", overflow: "hidden" }}>
           {rulerTicks.minors.map((seconds) => <span key={`minor-${seconds}`} aria-hidden="true" className="vb-ruler-minor" style={{ left: rulerLeft(seconds) }} />)}
-          {rulerTicks.majors.map((seconds) => <span key={seconds} aria-label={`눈금 ${formatSeconds(seconds)}초`} role="listitem" className="vb-ruler-major" style={{ left: rulerLeft(seconds) }}>{formatRulerLabel(seconds, rulerTicks.majorSec)}</span>)}
+          {rulerTicks.majors.map((seconds) => <span key={seconds} aria-label={`눈금 ${formatSeconds(seconds)}초`} role="listitem" className={rulerTicks.endAligned.has(seconds) ? "vb-ruler-major vb-ruler-major--end" : "vb-ruler-major"} style={{ left: rulerLeft(seconds) }}>{formatRulerLabel(seconds, rulerTicks.majorSec)}</span>)}
         </div>
       </div>
       <div data-timeline-track data-testid="timeline-track" onLostPointerCapture={lostPointerCapture} onPointerCancel={cancelPointerDraft} onPointerMove={movePointerDraft} onPointerUp={endPointerDraft} style={{ position: "relative", height: `${TIMELINE_LANES.length * laneHeightPx}px` }}>

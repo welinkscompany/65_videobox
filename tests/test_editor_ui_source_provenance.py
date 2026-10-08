@@ -28,6 +28,8 @@ TASK14_PURE_PATHS = (
     "apps/web/src/features/editor/timeline/timeline-geometry.ts",
     "apps/web/src/features/editor/timeline/snapping.ts",
     "apps/web/src/features/editor/timeline/hit-testing.ts",
+    "apps/web/src/features/editor/timeline/dragSnap.ts",
+    "apps/web/src/features/editor/timeline/rulerScale.ts",
 )
 TASK14_PURE_FORBIDDEN_TERMS = (
     "EditorCommandPort",

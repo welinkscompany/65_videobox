@@ -60,3 +60,13 @@ export function formatRulerLabel(seconds: number, majorSec: number): string {
   }
   return `${Math.round(seconds)}s`;
 }
+
+/**
+ * 칸 오른쪽 끝에 너무 가까워 글자가 잘릴 눈금인가. 그렇다면 글자를 선 왼쪽에 얹는다(시각은 그대로).
+ * `labelRoomPx`는 글자 하나가 차지하는 폭의 넉넉한 어림값이다.
+ */
+export function rulerLabelAlignsEnd(input: Readonly<{ seconds: number; viewportEndSec: number; pixelsPerSecond: number; labelRoomPx: number }>): boolean {
+  const { seconds, viewportEndSec, pixelsPerSecond, labelRoomPx } = input;
+  if (!(seconds > 0) || !(pixelsPerSecond > 0)) return false;
+  return (viewportEndSec - seconds) * pixelsPerSecond < labelRoomPx;
+}

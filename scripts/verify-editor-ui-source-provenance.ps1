@@ -289,7 +289,9 @@ $task14PurePaths = @(
   'apps/web/src/features/editor/timeline/time-scale.ts',
   'apps/web/src/features/editor/timeline/timeline-geometry.ts',
   'apps/web/src/features/editor/timeline/snapping.ts',
-  'apps/web/src/features/editor/timeline/hit-testing.ts'
+  'apps/web/src/features/editor/timeline/hit-testing.ts',
+  'apps/web/src/features/editor/timeline/dragSnap.ts',
+  'apps/web/src/features/editor/timeline/rulerScale.ts'
 )
 $task14PurePatterns = @(
   [pscustomobject]@{ name = 'React import'; pattern = '(?i)(?:from\s*|import\s*(?:\(\s*)?|require\(\s*)["''](?:react|react-dom)(?:/|["''])' },

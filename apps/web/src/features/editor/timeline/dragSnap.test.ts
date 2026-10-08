@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest";
 import { snapDragProposal, type DragSnapInput } from "./dragSnap";
 
 const base: Omit<DragSnapInput, "mode" | "proposedSec" | "durationSec"> = {
+  originalSec: 100, // 후보와 멀리 떨어진 처음 자리
   candidates: [
     { kind: "neighbor-end", id: "clip:a:end", timeSec: 24 },
     { kind: "neighbor-start", id: "clip:self:start", timeSec: 10 },
   ],
-  excludeIdPrefix: "clip:self:",
+  draggedClipIds: ["self"],
   scale: { pixelsPerSecond: 20, originSec: 0 },
   fps: { num: 30, den: 1 },
   thresholdPx: 8,
@@ -65,5 +66,53 @@ describe("끌기 붙기 (스파이크 H-d)", () => {
     const result = snapDragProposal({ ...base, candidates, mode: "start", proposedSec: 5.2, durationSec: 0 });
     expect(result.proposedSec).toBe(5);
     expect(result.snap?.kind).toBe("playhead");
+  });
+
+  it("재생줄이 클립 처음 시작에 있어도 끝 가장자리는 거기에 붙는다(처음 끝이 아니므로)", () => {
+    const candidates = [{ kind: "playhead" as const, id: "playhead", timeSec: 10 }];
+    const result = snapDragProposal({ ...base, candidates, mode: "end", proposedSec: 10.2, durationSec: 0, originalSec: 14 });
+    expect(result.proposedSec).toBe(10);
+    expect(result.snap?.kind).toBe("playhead");
+  });
+
+  it("옮기기도: 재생줄이 클립 처음 시작에 있으면 처음 끝이 아니므로 끝이 거기로 붙을 수 있다", () => {
+    const candidates = [{ kind: "playhead" as const, id: "playhead", timeSec: 20 }];
+    // 클립 10~14 -> 시작 16.1로 끌면 끝 20.1이 재생줄(20)에 붙는다.
+    const result = snapDragProposal({ ...base, candidates, mode: "move", proposedSec: 16.1, durationSec: 4, originalSec: 10 });
+    expect(result.proposedSec).toBeCloseTo(16, 9);
+  });
+
+  it("제자리로는 도로 붙지 않는다: 처음 시작에 있는 재생줄 8px 안쪽에서 시작 자르기가 그대로 간다", () => {
+    const candidates = [{ kind: "playhead" as const, id: "playhead", timeSec: 10 }];
+    const result = snapDragProposal({ ...base, candidates, mode: "start", proposedSec: 10.3, durationSec: 0, originalSec: 10 });
+    expect(result.proposedSec).toBe(10.3);
+    expect(result.snap).toBeNull();
+  });
+
+  it("옮기기도 처음 시작·처음 끝 자리로는 도로 붙지 않는다", () => {
+    const candidates = [
+      { kind: "neighbor-end" as const, id: "clip:a:end", timeSec: 10 },
+      { kind: "neighbor-start" as const, id: "clip:b:start", timeSec: 14 },
+    ];
+    const result = snapDragProposal({ ...base, candidates, mode: "move", proposedSec: 10.2, durationSec: 4, originalSec: 10 });
+    expect(result.proposedSec).toBe(10.2);
+    expect(result.snap).toBeNull();
+  });
+
+  it("끄는 클립이 여럿이면 모두의 접두사를 뺀다", () => {
+    const candidates = [
+      { kind: "neighbor-end" as const, id: "clip:x:end", timeSec: 30 },
+      { kind: "neighbor-end" as const, id: "clip:y:end", timeSec: 31 },
+    ];
+    const result = snapDragProposal({ ...base, candidates, draggedClipIds: ["x", "y"], mode: "end", proposedSec: 30.1, durationSec: 0 });
+    expect(result.snap).toBeNull();
+  });
+
+  it("끄는 클립을 못 찾으면(id 없음·빈 목록) 자기 가장자리를 구별할 수 없으니 붙이지 않는다", () => {
+    const candidates = [{ kind: "neighbor-end" as const, id: "clip:self:end", timeSec: 24 }];
+    for (const draggedClipIds of [[], [undefined], ["x", undefined]] as const) {
+      const result = snapDragProposal({ ...base, candidates, draggedClipIds, mode: "end", proposedSec: 24.1, durationSec: 0 });
+      expect(result).toEqual({ proposedSec: 24.1, snap: null });
+    }
   });
 });

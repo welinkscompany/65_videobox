@@ -1784,6 +1784,31 @@ describe("끌기·자르기 중 붙기 (스파이크 H-d)", () => {
     expect(onTrimNarration).toHaveBeenCalledTimes(1);
     expect(onTrimNarration.mock.calls[0][0].endSec).toBeCloseTo(6.48, 9);
   });
+  it("고른 클립의 재생줄(시작)에도 끝은 붙는다: b-2를 왼쪽으로 끌면 끝이 12초 재생줄에 붙어 시작이 10초", () => {
+    const onUpdatePlacements = vi.fn();
+    render(<TimelineDock view={twoPlacedView} viewportWidthPx={400} onUpdatePlacements={onUpdatePlacements} playbackSec={12} />);
+    selectTimelineClip("broll:b-2"); // 재생줄이 b-2 시작(12초)에 선다(화면에서는 고르면 소유자가 재생 위치를 시작으로 옮긴다)
+    const pps = timelinePixelsPerSecond();
+    const { move } = handlesOf("영상 2");
+    pointer(move, "pointerdown", 300);
+    pointer(move, "pointermove", 300 - 2 * pps - 1); // 시작 9.95 -> 끝 11.95
+    pointer(move, "pointerup", 300 - 2 * pps - 1);
+    const change = onUpdatePlacements.mock.calls[0][0].changes[0];
+    expect(change.startSec).toBe(10);
+    expect(change.endSec).toBe(12);
+  });
+
+  it("고른 클립 시작 손잡이를 5px 안쪽으로 끌어도 재생줄(처음 시작)로 도로 붙지 않는다", () => {
+    const onUpdatePlacements = vi.fn();
+    render(<TimelineDock view={twoPlacedView} viewportWidthPx={400} onUpdatePlacements={onUpdatePlacements} playbackSec={5} />);
+    selectTimelineClip("broll:b-1"); // 재생줄 5초 = 시작
+    const { start } = handlesOf("영상 1");
+    pointer(start, "pointerdown", 100);
+    pointer(start, "pointermove", 105);
+    pointer(start, "pointerup", 105);
+    expect(document.querySelector(".vb-timeline-snap-guide")).toBeNull();
+    expect(onUpdatePlacements.mock.calls[0][0].changes[0].startSec).toBeCloseTo(5.24, 2);
+  });
 });
 
 describe("눈금 간격 (스파이크 H-e)", () => {
@@ -1800,6 +1825,14 @@ describe("눈금 간격 (스파이크 H-e)", () => {
     expect(pps).toBeCloseTo(1343 / 120, 5);
     expect(parseFloat(screen.getByLabelText("눈금 15초").style.left)).toBeCloseTo(15 * pps, 2);
     expect(screen.getByLabelText("눈금 15초")).toHaveTextContent("15s");
+  });
+
+  it("칸 끝에 닿는 마지막 눈금만 글자를 선 왼쪽에 얹고, aria 이름은 그대로다", () => {
+    render(<TimelineDock view={longView} viewportWidthPx={1343} />);
+    fireEvent.click(screen.getByRole("button", { name: "타임라인 전체 보기" }));
+    expect(screen.getByRole("listitem", { name: "눈금 120초" })).toHaveClass("vb-ruler-major--end");
+    expect(screen.getByRole("listitem", { name: "눈금 105초" })).not.toHaveClass("vb-ruler-major--end");
+    expect(document.querySelectorAll(".vb-ruler-major--end")).toHaveLength(1);
   });
 
   it("잔눈금은 글자 없이 15초 사이 3초마다 그려진다", () => {

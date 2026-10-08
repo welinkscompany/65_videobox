@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatRulerLabel, rulerIntervals, rulerMarks } from "./rulerScale";
+import { formatRulerLabel, rulerIntervals, rulerLabelAlignsEnd, rulerMarks } from "./rulerScale";
 const fps30 = { num: 30, den: 1 };
 describe("눈금 간격 (2026-10-08 점검 그림 10, 스파이크 §3(라))", () => {
   it("742e1924 전체 보기 11.2px/초는 15초마다(168px), 잔눈금 3초", () => {
@@ -63,5 +63,22 @@ describe("눈금 간격 경계", () => {
     expect(formatRulerLabel(0, 15)).toBe("0s");
     expect(formatRulerLabel(1.5, 0.5)).toBe("1.5s");
     expect(formatRulerLabel(2 / 30, 2 / 30)).toBe("0.067s");
+  });
+});
+
+describe("칸 끝 눈금은 글자를 선 왼쪽에 얹는다", () => {
+  const base = { viewportEndSec: 120, pixelsPerSecond: 11.2, labelRoomPx: 40 };
+  it("영상 끝(120초)과 3초 안쪽(33.6px)은 얹고, 15초(168px) 안쪽은 그대로", () => {
+    expect(rulerLabelAlignsEnd({ ...base, seconds: 120 })).toBe(true);
+    expect(rulerLabelAlignsEnd({ ...base, seconds: 117 })).toBe(true);
+    expect(rulerLabelAlignsEnd({ ...base, seconds: 105 })).toBe(false);
+  });
+  it("0초는 왼쪽 끝이라 얹지 않고, 보이는 구간이 1초밖에 안 되어도 마찬가지다", () => {
+    expect(rulerLabelAlignsEnd({ ...base, seconds: 0 })).toBe(false);
+    expect(rulerLabelAlignsEnd({ viewportEndSec: 1, pixelsPerSecond: 20, labelRoomPx: 40, seconds: 0 })).toBe(false);
+  });
+  it("전체 보기 120초의 큰 눈금 9개 중 마지막 하나만 얹는다", () => {
+    const marks = rulerMarks({ startSec: 0, endSec: 120, majorSec: 15 });
+    expect(marks.filter((seconds) => rulerLabelAlignsEnd({ ...base, seconds }))).toEqual([120]);
   });
 });

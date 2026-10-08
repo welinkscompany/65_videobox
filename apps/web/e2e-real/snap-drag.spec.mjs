@@ -69,7 +69,7 @@ test("끝 손잡이를 장면 4 시작 5px 앞까지 끌면 그 프레임에 붙
   const geometry = await page.evaluate(() => {
     const track = document.querySelector("[data-timeline-track]").getBoundingClientRect();
     const g = document.querySelector(".vb-timeline-snap-guide").getBoundingClientRect();
-    return { guideX: g.x - track.x, guideTop: g.top - track.top, guideHeight: g.height, trackHeight: track.height };
+    return { guideX: g.x + g.width / 2 - track.x, guideW: g.width, guideTop: g.top - track.top, guideHeight: g.height, trackHeight: track.height };
   });
   console.log("GUIDE", JSON.stringify(geometry), "expected x", (Math.round(NEXT_START_SEC * FPS) / FPS) * pps);
   expect(Math.abs(geometry.guideX - (Math.round(NEXT_START_SEC * FPS) / FPS) * pps)).toBeLessThan(1.5);
@@ -105,14 +105,32 @@ test("끝 손잡이를 장면 4 시작 5px 앞까지 끌면 그 프레임에 붙
   }
 });
 
-test("끌던 중 Esc는 안내선을 걷고 저장하지 않는다 / 임계 밖에서는 안내선이 없다", async ({ page, request }) => {
+test("끌던 중 Esc는 안내선을 걷고 저장하지 않는다 / 임계 밖·처음 자리에서는 안내선이 없다", async ({ page, request }) => {
   const clean = await open(page);
-  const before = await brollOf(request, clean);
   const pps = Number(await page.getByRole("region", { name: "타임라인" }).getAttribute("data-pixels-per-second"));
+  // 처음 끝(= 장면 4 시작)으로는 도로 붙지 않는다: 4px 앞까지 끌어도 안내선이 없다.
+  const first = await center(handle(page, "끝 자르기"));
+  await page.mouse.move(first.x, first.y);
+  await page.mouse.down();
+  await page.mouse.move(first.x - 30, first.y, { steps: 4 });
+  await page.mouse.move(first.x - 4, first.y, { steps: 4 });
+  await expect(guide(page)).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+
+  // 줄여 저장해 둔 뒤(되돌리지 않는다 -- 프로젝트는 시험마다 새로 만들어진다), 4px 앞에서 안내선, Esc로 걷는다.
   const end = await center(handle(page, "끝 자르기"));
   await dragTo(page, end, -(0.6 * pps));
   await expect(guide(page)).toHaveCount(0);
-  await page.mouse.move(end.x - 4, end.y, { steps: 6 }); // 장면 4 시작 4px 앞
+  await page.mouse.up();
+  await expect.poll(async () => (await brollOf(request, clean)).end, { timeout: 5000 }).toBeLessThan(2.7);
+  await settled(page);
+  const before = await brollOf(request, clean);
+  const end2 = await center(handle(page, "끝 자르기"));
+  await page.mouse.move(end2.x, end2.y);
+  await page.mouse.down();
+  await page.mouse.move(end2.x + 0.6 * pps - 4, end2.y, { steps: 8 }); // 장면 4 시작 4px 앞
   await expect(guide(page)).toHaveCount(1);
   await page.keyboard.press("Escape");
   await expect(guide(page)).toHaveCount(0);
