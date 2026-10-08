@@ -649,3 +649,14 @@
 .vb-timeline-clip:has(.vb-trim-handle) .vb-timeline-clip__name { left: calc(var(--vb-trim-handle-w) + 1px); max-width: calc(100% - 2 * var(--vb-trim-handle-w) - 2px); }
 /* 좁은 클립의 이동 단추는 sr-only라 자기 초점 고리가 잘린다 -- 클립 테두리로 대신 보인다. */
 .vb-timeline-clip:has(.sr-only:focus-visible) { outline: 2px solid var(--vb-accent); outline-offset: -2px; }
+
+/* 끌기·자르기 중 붙은 자리를 알리는 세로 안내선(스파이크 H-d). 색은 기존 강조색 그대로. */
+.vb-timeline-snap-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--vb-accent);
+  pointer-events: none;
+  z-index: 2;
+}

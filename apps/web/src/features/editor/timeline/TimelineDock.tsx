@@ -5,7 +5,8 @@ import { clipContentLabel } from "./clipNames";
 import type { EditorViewModel } from "../editorViewModel";
 import { classifyTimelineHit } from "./hit-testing";
 import { carriesAsset, readAssetDrag } from "../assets/assetDragPayload";
-import { findTimelineSnap, type SnapCandidate, type SnapCandidateKind } from "./snapping";
+import { findTimelineSnap, type SnapCandidate, type SnapCandidateKind, type TimelineSnap } from "./snapping";
+import { snapDragProposal } from "./dragSnap";
 import { frameToSeconds, pixelsToTime, secondsToFrameHalfUp, timeToPixels } from "./time-scale";
 import { readCssPixels } from "./timelineCssMetrics";
 import { TIMELINE_LANES, type ClipRect, type TimelineLane } from "./timeline-geometry";
@@ -118,6 +119,7 @@ type PointerDraft = Readonly<{
   clip: NarrationSegment;
   edge: "start" | "end";
   bounds: TrimNarration;
+  snap?: TimelineSnap | null;
 }> | Readonly<{
   pointerId: number;
   kind: "reorder";
@@ -128,8 +130,8 @@ type PointerDraft = Readonly<{
   targetIndex: number;
   layout: NarrationReorderLayout;
 }>;
-type PlacementMoveDraft = Readonly<{ pointerId: number; kind: "placement-move"; downClientX: number; hasMoved: boolean; placement: TimelinePlacement; placements: readonly TimelinePlacement[]; bounds: Readonly<{ startSec: number; endSec: number }> }>;
-type PlacementTrimDraft = Readonly<{ pointerId: number; kind: "placement-trim"; downClientX: number; hasMoved: boolean; placement: TimelinePlacement; edge: "start" | "end"; bounds: Readonly<{ startSec: number; endSec: number }> }>;
+type PlacementMoveDraft = Readonly<{ pointerId: number; kind: "placement-move"; downClientX: number; hasMoved: boolean; placement: TimelinePlacement; placements: readonly TimelinePlacement[]; bounds: Readonly<{ startSec: number; endSec: number }>; snap?: TimelineSnap | null }>;
+type PlacementTrimDraft = Readonly<{ pointerId: number; kind: "placement-trim"; downClientX: number; hasMoved: boolean; placement: TimelinePlacement; edge: "start" | "end"; bounds: Readonly<{ startSec: number; endSec: number }>; snap?: TimelineSnap | null }>;
 type ScrubDraft = Readonly<{ pointerId: number; kind: "scrub"; downClientX: number; hasMoved: boolean; originSec: number }>;
 type TimelinePointerDraft = PointerDraft | PlacementMoveDraft | PlacementTrimDraft | ScrubDraft;
 
@@ -668,6 +670,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     }).sort((left, right) => left.y - right.y || left.x - right.x || left.clipId.localeCompare(right.clipId));
     return { boundsByClipId, rects: projectedRects };
   }, [laneHeightPx, narrationByClipId, pointerDraft, state.pixelsPerSecond, state.viewportStartSec, view, viewportEndSec]);
+  const dragSnapGuide = pointerDraft && pointerDraft.kind !== "reorder" && pointerDraft.kind !== "scrub" && pointerDraft.hasMoved ? pointerDraft.snap ?? null : null;
   const pointerTimelineX = (event: PointerEvent<HTMLElement>): number => {
     const timelineTrack = event.currentTarget.closest<HTMLElement>("[data-timeline-track]");
     const clientX = Number.isFinite(event.clientX) ? event.clientX : 0;
@@ -679,13 +682,41 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   /** 끌기가 시작됐는가 -- 한 번 시작되면 다시 가까이 와도 계속 끌기다. */
   const dragMoved = (draft: Readonly<{ hasMoved: boolean; downClientX: number }>, event: PointerEvent<HTMLElement>): boolean =>
     draft.hasMoved || Math.abs(pointerClientX(event) - draft.downClientX) >= DRAG_START_THRESHOLD_PX;
-  const trimSecondsAtPointer = (draft: Extract<PointerDraft, { kind: "trim" }>, event: PointerEvent<HTMLElement>): number => {
+  /** 끄는 동안 붙을 후보: 옆 클립·빈 구간·자막의 시작·끝과 재생줄. 끄는 클립들 자신의 가장자리는 뺀다.
+   *  재생줄이 끄는 클립의 처음 가장자리에 있으면(클립을 고르면 재생줄이 시작으로 온다) 후보에서 뺀다 --
+   *  안 빼면 제자리로 도로 붙어서 8px 안쪽 미세 조정이 안 된다. */
+  const dragSnapCandidates = (draggedClipIds: readonly string[], originalEdgesSec: readonly number[]): readonly SnapCandidate[] => {
+    const halfFrameSec = (view.fps.den / view.fps.num) / 2;
+    const playheadIsOwnEdge = originalEdgesSec.some((edge) => Math.abs(edge - state.playheadSec) <= halfFrameSec);
+    return [
+      ...snapCandidates.filter((candidate) => !draggedClipIds.some((id) => candidate.id.startsWith(`clip:${id}:`))),
+      ...(playheadIsOwnEdge ? [] : [{ kind: "playhead" as const, id: "playhead", timeSec: state.playheadSec }]),
+    ];
+  };
+  const snapDrag = (
+    mode: "move" | "start" | "end",
+    proposedSec: number,
+    durationSec: number,
+    draggedClipIds: readonly string[],
+    originalEdgesSec: readonly number[],
+  ) => snapDragProposal({
+    mode,
+    proposedSec,
+    durationSec,
+    candidates: dragSnapCandidates(draggedClipIds, originalEdgesSec),
+    excludeIdPrefix: draggedClipIds[0] ? `clip:${draggedClipIds[0]}:` : "",
+    scale: { pixelsPerSecond: state.pixelsPerSecond, originSec: state.viewportStartSec },
+    fps: view.fps,
+    thresholdPx: SNAP_THRESHOLD_PX,
+  });
+  const trimSecondsAtPointer = (draft: Extract<PointerDraft, { kind: "trim" }>, event: PointerEvent<HTMLElement>): Readonly<{ proposedSec: number; snap: TimelineSnap | null }> => {
     const originalBoundarySec = draft.edge === "start" ? draft.clip.startSec : draft.clip.endSec;
     const deltaSec = pixelsToTime(pointerClientX(event) - draft.downClientX, {
       pixelsPerSecond: state.pixelsPerSecond,
       originSec: 0,
     });
-    return originalBoundarySec + deltaSec;
+    const clipId = narrationClipIdOf(draft.clip.segmentId);
+    return snapDrag(draft.edge, originalBoundarySec + deltaSec, 0, clipId ? [clipId] : [], [draft.clip.startSec, draft.clip.endSec]);
   };
   const startTrim = (event: PointerEvent<HTMLButtonElement>, clip: NarrationSegment, edge: "start" | "end") => {
     if (isSaving || lockedLanes.has("narration")) return;
@@ -708,10 +739,11 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     if (!draft || draft.kind !== "trim" || draft.pointerId !== event.pointerId) return;
     event.preventDefault();
     if (!dragMoved(draft, event)) return;
+    const { proposedSec, snap: dragSnap } = trimSecondsAtPointer(draft, event);
     const bounds = deriveNarrationTrim({
       clip: draft.clip,
       edge: draft.edge,
-      proposedSec: trimSecondsAtPointer(draft, event),
+      proposedSec,
       narration,
       durationSec: view.output.durationSec,
       fps: view.fps,
@@ -720,6 +752,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
       ...draft,
       hasMoved: true,
       bounds: { segmentId: draft.clip.segmentId, ...bounds },
+      snap: dragSnap,
     });
   };
   const endTrim = (event: PointerEvent<HTMLElement>) => {
@@ -732,7 +765,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     const bounds = deriveNarrationTrim({
       clip: draft.clip,
       edge: draft.edge,
-      proposedSec: trimSecondsAtPointer(draft, event),
+      proposedSec: trimSecondsAtPointer(draft, event).proposedSec,
       narration,
       durationSec: view.output.durationSec,
       fps: view.fps,
@@ -799,11 +832,23 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     const result = reorderAtPointer(draft, event);
     if (result.targetIndex !== result.originalIndex) onReorderNarration?.(result.layout);
   };
+  const clipIdOfPlacement = (placementId: string): string | undefined =>
+    view.tracks.flatMap((track) => track.clips).find((clip) => clip.placementId === placementId)?.clipId;
   const placementBoundsAtPointer = (draft: PlacementMoveDraft | PlacementTrimDraft, event: PointerEvent<HTMLElement>) => {
     const deltaSec = pixelsToTime(pointerClientX(event) - draft.downClientX, { pixelsPerSecond: state.pixelsPerSecond, originSec: 0 });
-    return draft.kind === "placement-move"
-      ? derivePlacementMove({ placement: draft.placement, proposedStartSec: draft.placement.startSec + deltaSec, durationSec: view.output.durationSec, fps: view.fps })
-      : derivePlacementTrim({ placement: draft.placement, edge: draft.edge, proposedSec: (draft.edge === "start" ? draft.placement.startSec : draft.placement.endSec) + deltaSec, durationSec: view.output.durationSec, fps: view.fps });
+    // 첫 칸이 끄는 클립 본인이고(자기 후보를 뺄 접두사), 함께 옮기는 다른 선택 클립의 후보도 모두 뺀다.
+    const primaryClipId = clipIdOfPlacement(draft.placement.placementId);
+    const others = (draft.kind === "placement-move" ? draft.placements : [])
+      .map((item) => clipIdOfPlacement(item.placementId))
+      .filter((id): id is string => Boolean(id) && id !== primaryClipId);
+    const draggedClipIds = primaryClipId ? [primaryClipId, ...others] : others;
+    const originalEdges = [draft.placement.startSec, draft.placement.endSec];
+    if (draft.kind === "placement-move") {
+      const snapped = snapDrag("move", draft.placement.startSec + deltaSec, draft.placement.endSec - draft.placement.startSec, draggedClipIds, originalEdges);
+      return { snap: snapped.snap, bounds: derivePlacementMove({ placement: draft.placement, proposedStartSec: snapped.proposedSec, durationSec: view.output.durationSec, fps: view.fps }) };
+    }
+    const snapped = snapDrag(draft.edge, (draft.edge === "start" ? draft.placement.startSec : draft.placement.endSec) + deltaSec, 0, draggedClipIds, originalEdges);
+    return { snap: snapped.snap, bounds: derivePlacementTrim({ placement: draft.placement, edge: draft.edge, proposedSec: snapped.proposedSec, durationSec: view.output.durationSec, fps: view.fps }) };
   };
   const startPlacement = (event: PointerEvent<HTMLButtonElement>, placement: TimelinePlacement, operation: "move" | "trim", edge?: "start" | "end") => {
     if (isSaving || lockedLanes.has(placement.kind)) return;
@@ -823,7 +868,8 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     if (!draft || (draft.kind !== "placement-move" && draft.kind !== "placement-trim") || draft.pointerId !== event.pointerId) return;
     event.preventDefault();
     if (!dragMoved(draft, event)) return;
-    setPointerDraft({ ...draft, hasMoved: true, bounds: placementBoundsAtPointer(draft, event) });
+    const { bounds, snap: dragSnap } = placementBoundsAtPointer(draft, event);
+    setPointerDraft({ ...draft, hasMoved: true, bounds, snap: dragSnap });
   };
   const endPlacement = (event: PointerEvent<HTMLElement>) => {
     const draft = pointerDraft;
@@ -831,7 +877,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     event.preventDefault(); releasePointerCapture(event.currentTarget, event.pointerId); clearDraft(true);
     if (!dragMoved(draft, event)) { if (draft.kind === "placement-move") selectClipById(draft.placement.placementId, false); return; }
     {
-      const bounds = placementBoundsAtPointer(draft, event);
+      const { bounds } = placementBoundsAtPointer(draft, event);
       if (draft.kind === "placement-move" && draft.placements.length > 1) {
         const deltaSec = bounds.startSec - draft.placement.startSec;
         onUpdatePlacements?.({ changes: draft.placements.map((placement) => ({ ...placement, ...derivePlacementMove({ placement, proposedStartSec: placement.startSec + deltaSec, durationSec: view.output.durationSec, fps: view.fps }) })) });
@@ -1068,6 +1114,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
         </div>
       </div>
       <div data-timeline-track data-testid="timeline-track" onLostPointerCapture={lostPointerCapture} onPointerCancel={cancelPointerDraft} onPointerMove={movePointerDraft} onPointerUp={endPointerDraft} style={{ position: "relative", height: `${TIMELINE_LANES.length * laneHeightPx}px` }}>
+      {dragSnapGuide ? <div aria-hidden="true" className="vb-timeline-snap-guide" style={{ left: `${timeToPixels(dragSnapGuide.timeSec, { pixelsPerSecond: state.pixelsPerSecond, originSec: state.viewportStartSec })}px` }} /> : null}
       <div aria-label="타임라인 클립" role="group" style={{ inset: 0, position: "absolute" }}>
         {draftProjection.rects.map((rect) => {
         const ordinalInLane = laneOrdinalByClipId.get(rect.clipId) ?? 1;

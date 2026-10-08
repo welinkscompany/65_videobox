@@ -1671,3 +1671,117 @@ describe("가장자리 손잡이와 몸통 끌기", () => {
     expect(screen.queryByText("고른 항목 2개")).toBeNull();
   });
 });
+
+describe("끌기·자르기 중 붙기 (스파이크 H-d)", () => {
+  // 영상 두 개: b-1 5~9초, b-2 12~14초. 400px 폭 / 20초 = 20px/초.
+  const twoPlacedView: EditorViewModel = {
+    ...view,
+    tracks: view.tracks.map((track) => track.role === "broll"
+      ? { ...track, clips: [
+        { ...track.clips[0]!, placementId: "broll:b-1" },
+        { clipId: "b-2", segmentId: "segment-5", type: "broll" as const, assetId: null, assetUri: null, startSec: 12, endSec: 14, controls: {}, placementId: "broll:b-2" },
+      ] }
+      : track),
+  };
+  const handlesOf = (name: string) => ({
+    start: screen.getByRole("button", { name: new RegExp(`${name}.* 시작 자르기$`) }),
+    end: screen.getByRole("button", { name: new RegExp(`${name}.* 끝 자르기$`) }),
+    move: screen.getByRole("button", { name: new RegExp(`${name}.* 이동$`) }),
+  });
+
+  it("옮기기: b-2 시작이 b-1 끝(9초)에서 1px 안이면 정확히 9초에 붙고 안내선이 9초 자리에 선다", () => {
+    const onUpdatePlacements = vi.fn();
+    render(<TimelineDock view={twoPlacedView} viewportWidthPx={400} onUpdatePlacements={onUpdatePlacements} />);
+    selectTimelineClip("broll:b-2");
+    const pps = timelinePixelsPerSecond();
+    expect(pps).toBe(20);
+    const { move } = handlesOf("영상 2");
+    pointer(move, "pointerdown", 300);
+    pointer(move, "pointermove", 300 - 3 * pps + 1); // 시작 9.05초
+    const guide = document.querySelector<HTMLElement>(".vb-timeline-snap-guide");
+    expect(guide).not.toBeNull();
+    expect(guide!.style.left).toBe(`${9 * pps}px`);
+    pointer(move, "pointerup", 300 - 3 * pps + 1);
+    expect(onUpdatePlacements).toHaveBeenCalledTimes(1);
+    expect(onUpdatePlacements.mock.calls[0][0].changes[0].startSec).toBe(9);
+    expect(onUpdatePlacements.mock.calls[0][0].changes[0].endSec).toBe(11);
+    expect(document.querySelector(".vb-timeline-snap-guide")).toBeNull();
+  });
+
+  it("옮기기: 끝이 옆 클립 시작(12초)에 닿아도 붙는다 -- b-1 끝 변이 b-2 시작으로", () => {
+    const onUpdatePlacements = vi.fn();
+    render(<TimelineDock view={twoPlacedView} viewportWidthPx={400} onUpdatePlacements={onUpdatePlacements} />);
+    selectTimelineClip("broll:b-1");
+    const pps = timelinePixelsPerSecond();
+    const { move } = handlesOf("영상 1");
+    pointer(move, "pointerdown", 100);
+    pointer(move, "pointermove", 100 + 3 * pps - 1); // 끝 11.95초
+    pointer(move, "pointerup", 100 + 3 * pps - 1);
+    const change = onUpdatePlacements.mock.calls[0][0].changes[0];
+    expect(change.endSec).toBe(12);
+    expect(change.startSec).toBe(8);
+  });
+
+  it("끝 손잡이: b-1 끝이 b-2 시작(12초)에서 1px 안이면 12초에 붙는다", () => {
+    const onUpdatePlacements = vi.fn();
+    render(<TimelineDock view={twoPlacedView} viewportWidthPx={400} onUpdatePlacements={onUpdatePlacements} />);
+    selectTimelineClip("broll:b-1");
+    const pps = timelinePixelsPerSecond();
+    const { end } = handlesOf("영상 1");
+    pointer(end, "pointerdown", 180);
+    pointer(end, "pointermove", 180 + 3 * pps - 1);
+    pointer(end, "pointerup", 180 + 3 * pps - 1);
+    expect(onUpdatePlacements.mock.calls[0][0].changes[0].endSec).toBe(12);
+  });
+
+  it("임계(8px) 밖이면 붙지 않고 안내선도 없다", () => {
+    const onUpdatePlacements = vi.fn();
+    render(<TimelineDock view={twoPlacedView} viewportWidthPx={400} onUpdatePlacements={onUpdatePlacements} />);
+    selectTimelineClip("broll:b-2");
+    const pps = timelinePixelsPerSecond();
+    const { move } = handlesOf("영상 2");
+    pointer(move, "pointerdown", 300);
+    pointer(move, "pointermove", 300 - 2 * pps); // 시작 10초: 9초와 20px, 다른 후보도 8px 밖
+    expect(document.querySelector(".vb-timeline-snap-guide")).toBeNull();
+    pointer(move, "pointerup", 300 - 2 * pps);
+    expect(onUpdatePlacements.mock.calls[0][0].changes[0].startSec).toBe(10);
+  });
+
+  it("키보드 한 프레임 조작에는 붙기를 걸지 않는다", () => {
+    const onUpdatePlacements = vi.fn();
+    render(<TimelineDock view={twoPlacedView} viewportWidthPx={400} onUpdatePlacements={onUpdatePlacements} />);
+    selectTimelineClip("broll:b-1");
+    fireEvent.keyDown(handlesOf("영상 1").end, { key: "ArrowRight" });
+    expect(onUpdatePlacements.mock.calls[0][0].changes[0].endSec).toBeCloseTo(9.04, 6);
+  });
+
+  it("Esc로 버리면 안내선도 사라지고 저장하지 않는다", () => {
+    const onUpdatePlacements = vi.fn();
+    render(<TimelineDock view={twoPlacedView} viewportWidthPx={400} onUpdatePlacements={onUpdatePlacements} />);
+    selectTimelineClip("broll:b-2");
+    const pps = timelinePixelsPerSecond();
+    const { move } = handlesOf("영상 2");
+    pointer(move, "pointerdown", 300);
+    pointer(move, "pointermove", 300 - 3 * pps + 1);
+    expect(document.querySelector(".vb-timeline-snap-guide")).not.toBeNull();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(document.querySelector(".vb-timeline-snap-guide")).toBeNull();
+    pointer(move, "pointerup", 300 - 3 * pps + 1);
+    expect(onUpdatePlacements).not.toHaveBeenCalled();
+  });
+
+  it("내레이션 끝 손잡이: 재생줄(6.48초)에서 1px 안이면 6.48초에 붙는다", () => {
+    const onTrimNarration = vi.fn();
+    render(<TimelineDock view={twoNarrationView} viewportWidthPx={400} onTrimNarration={onTrimNarration} />);
+    selectTimelineClip("n-2");
+    const pps = timelinePixelsPerSecond();
+    fireEvent.click(screen.getByTestId("timeline-track"), { clientX: 6.48 * pps }); // 재생줄을 6.48초(25fps 프레임 위)로
+    const end = screen.getByRole("button", { name: /내레이션 2.* 끝 자르기$/ });
+    pointer(end, "pointerdown", 40);
+    pointer(end, "pointermove", 40 + 4.48 * pps - 1); // 끝 6.43초
+    expect(document.querySelector(".vb-timeline-snap-guide")).not.toBeNull();
+    pointer(end, "pointerup", 40 + 4.48 * pps - 1);
+    expect(onTrimNarration).toHaveBeenCalledTimes(1);
+    expect(onTrimNarration.mock.calls[0][0].endSec).toBeCloseTo(6.48, 9);
+  });
+});
