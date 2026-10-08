@@ -116,6 +116,15 @@ def main(argv: list[str] | None = None) -> int:
     from videobox_api.main import create_app
     from videobox_storage.media_library_store import MediaLibraryStore
 
+    # 시험 화면은 빈 포트에서 뜬다(러너가 정함). 운영용 허용 목록(5173·5199)에는 없어서 화면이 보내는
+    # 쓰기 요청이 전부 403 untrusted_origin이 된다. 이 시험 서버 프로세스 안에서만 그 포트를 더한다 --
+    # 소유자의 실제 서버·제품 코드는 그대로다.
+    web_port = os.environ.get("PLAYWRIGHT_WEB_PORT", "").strip()
+    if web_port.isdigit():
+        from videobox_api import csrf_guard
+
+        csrf_guard.TRUSTED_ORIGINS = frozenset({*csrf_guard.TRUSTED_ORIGINS, f"http://127.0.0.1:{web_port}"})
+
     app = create_app(
         projects_root=data_root / "projects",
         media_library_store=MediaLibraryStore(data_root / "library"),

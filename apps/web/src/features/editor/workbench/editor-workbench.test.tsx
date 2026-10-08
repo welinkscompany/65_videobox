@@ -469,6 +469,39 @@ describe("EditorWorkbench", () => {
     expect(screen.queryByText("첫 장면에는 넘어올 앞 장면이 없어요.")).not.toBeInTheDocument();
   });
 
+  it("클립을 누르면 재생기가 경계 바로 앞 시각을 알려 와도 오른쪽 편집 항목은 그 장면이다 (2026-10-08 실사용 점검 §3-1)", () => {
+    const scenes = [[0, 1.3324], [1.3324, 1.8990646], [1.8990646, 2.9281]] as const;
+    const threeSceneView = {
+      ...view,
+      output: { ...view.output, durationSec: 2.9281 },
+      playback: { auditionUrls: {}, exactPreview: { status: "current" as const, url: "/api/exact.mp4", artifactRevision: 1, timelineStartSec: 0, timelineEndSec: 2.9281 } },
+      tracks: [{ trackId: "narration", role: "narration", clips: scenes.map(([startSec, endSec], index) => ({ clipId: `n-${index + 1}`, segmentId: `segment-${index + 1}`, type: "narration", assetId: null, assetUri: null, startSec, endSec, controls: {} })) }],
+      captions: [],
+    } as const;
+    const session = {
+      projectId: "project-a", sessionId: "session-a", timelineId: "timeline-a", expectedRevision: 1,
+      undoCount: 0, redoCount: 0, updatedAt: null, captionLanguage: null, translatedLanguages: [],
+      segments: scenes.map((_, index) => ({ segmentId: `segment-${index + 1}`, cutAction: "keep", bgm: null, sfx: null, transitionIn: null, ttsReplacement: null })),
+    } as const;
+    render(<EditorWorkbench view={threeSceneView} session={session as never} />);
+    openInspector();
+
+    const player = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+    fireEvent.click(clipSelectionButton("n-3"));
+    // 재생기는 1.8990646으로 옮겨 달라는 말에 1.899064를 알려 왔다(점검 실측).
+    Object.defineProperty(player, "currentTime", { configurable: true, writable: true, value: 1.899064 });
+    fireEvent.timeUpdate(player);
+
+    const inspector = screen.getByRole("region", { name: "편집 항목" });
+    expect(within(inspector).getByText("1.90–2.93초 구간")).toBeInTheDocument();
+    expect(within(inspector).queryByText("1.33–1.90초 구간")).toBeNull();
+
+    // 재생이 흘러 누른 장면 밖(앞 장면)으로 되돌아가면 시각대로 따라간다.
+    Object.defineProperty(player, "currentTime", { configurable: true, writable: true, value: 0.5 });
+    fireEvent.timeUpdate(player);
+    expect(within(screen.getByRole("region", { name: "편집 항목" })).getByText("0.00–1.33초 구간")).toBeInTheDocument();
+  });
+
   it("전환 탭이 두 번째 장면을 고른 직후 미리보기 플레이어의 낡은 재생 위치 신호로 다시 첫 장면으로 되돌아가지 않는다 (2026-09-20 실물 재현)", () => {
     // **위 두 시험과 다른 자리다.** 위 시험들은 `exactPreview.status: "unavailable"`인
     // 공용 `view` fixture를 쓰므로 `<video>`가 아예 안 그려진다(`PreviewStage`의

@@ -15,7 +15,7 @@ import { PreviewStage, type AuditionRequest, type AuditionSource } from "../prev
 import { sceneNumbersBySegmentId } from "../sceneNames";
 import { TimelineDock } from "../timeline/TimelineDock";
 import type { TimelineZoomCommand } from "../timeline/timelineZoomShortcuts";
-import { activeSegmentIdAt, clampPlaybackSeconds } from "../transcript/playbackNavigation";
+import { clampPlaybackSeconds, frameDurationSec, resolvePlaybackSelection } from "../transcript/playbackNavigation";
 import { isVideoAssetUri } from "../assetKind";
 import { EditorWorkbenchReadOnlyAdapters } from "./editorWorkbenchReadOnlyAdapters";
 import { YujinPanel } from "./YujinPanel";
@@ -392,7 +392,9 @@ function EditorWorkbenchInstance({
   const openDrawer = (side: "left" | "right") => { lastActiveDrawer = side; writeActiveDrawer(side); setUi((current) => ({ ...current, activeDrawer: side })); };
   const closeDrawer = () => { lastActiveDrawer = null; writeActiveDrawer(null); setUi((current) => ({ ...current, activeDrawer: null })); };
   const closeAndRestore = () => { restoreFocusRef.current = ui.activeDrawer; closeDrawer(); };
-  const selectSegment = (segmentId: string) => setSelectedSegmentId(segmentId);
+  // 사람이 **직접 누른** 장면. 재생 시각으로 다시 고를 때 이 장면을 먼저 지킨다(2026-10-08 §3-1).
+  const pinnedSegmentIdRef = useRef<string | null>(null);
+  const selectSegment = (segmentId: string) => { pinnedSegmentIdRef.current = segmentId; setSelectedSegmentId(segmentId); };
   const seekPlayback = (seconds: number) => {
     const nextSeconds = clampPlaybackSeconds(seconds, view.output.durationSec);
     setPlaybackSec(nextSeconds);
@@ -405,8 +407,8 @@ function EditorWorkbenchInstance({
       .flatMap((track) => track.clips.map((clip) => ({ segmentId: clip.segmentId, startSec: clip.startSec, endSec: clip.endSec })));
     // 다만 내레이션이 **긴 통짜 하나**일 때는(원본 영상 소리로 만든 초안) 장면이
     // 하나뿐이라 아무것도 구분하지 못한다. 그때는 자막이 의미 단위다.
-    const activeSegmentId = activeSegmentIdAt(narrationSpans.length > 1 ? narrationSpans : view.captions.length ? view.captions : narrationSpans, nextSeconds);
-    setSelectedSegmentId(activeSegmentId);
+    const spans = narrationSpans.length > 1 ? narrationSpans : view.captions.length ? view.captions : narrationSpans;
+    setSelectedSegmentId(resolvePlaybackSelection(spans, nextSeconds, { pinnedSegmentId: pinnedSegmentIdRef.current, frameSec: frameDurationSec(view.fps) }));
   };
   const selectedNarration = selectedSegmentId === null
     ? null
