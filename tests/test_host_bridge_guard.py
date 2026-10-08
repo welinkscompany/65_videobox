@@ -1,6 +1,6 @@
-"""호스트 다리 셋의 문지기 (2026-10-02, 점검 후속 A2).
+"""호스트 다리 넷의 문지기 (2026-10-02, 점검 후속 A2).
 
-목소리(8199)·캡컷(8200)·그림(8201) 다리는 127.0.0.1에만 묶여 있지만, 이 컴퓨터의
+목소리(8199)·캡컷(8200)·그림(8201)·모션(8202) 다리는 127.0.0.1에만 묶여 있지만, 이 컴퓨터의
 아무 프로세스나 브라우저의 아무 웹페이지나 부를 수 있었다. owner 결정은 "공유 토큰까지"다.
 
 **소켓은 안 연다**(`tests/conftest.py`가 막는다). 판단 함수(`check_request`)를 그대로
@@ -148,10 +148,12 @@ def test_a_missing_env_file_stops_the_bridge(tmp_path: Path) -> None:
 tts = _load("videobox_host_tts_service_guard_test", "host_tts_service.py")
 capcut = _load("videobox_host_capcut_service_guard_test", "host_capcut_service.py")
 infographic = _load("videobox_host_infographic_service_guard_test", "host_infographic_service.py")
+motion = _load("videobox_host_motion_service_guard_test", "host_motion_service.py")
 
 _TTS_HANDLER = type("TtsHandler", (tts._Handler,), {"bridge_token": TOKEN, "engine_choice": tts.resolve_engine({})})
 _CAPCUT_HANDLER = type("CapCutHandler", (capcut._Handler,), {"bridge_token": TOKEN, "allowed_roots": ()})
 _INFOGRAPHIC_HANDLER = type("InfographicHandler", (infographic._Handler,), {"bridge_token": TOKEN, "browser": None})
+_MOTION_HANDLER = type("MotionHandler", (motion._Handler,), {"bridge_token": TOKEN, "settings": None})
 
 
 def _call(handler_class, *, method: str, path: str, port: int, headers: dict[str, str], body: bytes = b""):
@@ -182,6 +184,7 @@ _POSTS = [
     (_TTS_HANDLER, "/synthesize", 8199),
     (_CAPCUT_HANDLER, "/register", 8200),
     (_INFOGRAPHIC_HANDLER, "/render", 8201),
+    (_MOTION_HANDLER, "/render", 8202),
 ]
 
 
@@ -253,3 +256,14 @@ def test_the_sender_and_the_receiver_use_the_same_names() -> None:
 
     assert host_bridge_auth.TOKEN_HEADER == guard.TOKEN_HEADER
     assert host_bridge_auth.TOKEN_ENV == guard.TOKEN_ENV
+
+
+def test_the_motion_bridge_needs_the_token_even_to_say_how_it_is() -> None:
+    status, payload = _call(_MOTION_HANDLER, method="GET", path="/diagnostics", port=8202, headers={"Host": "127.0.0.1:8202"})
+    assert (status, payload) == (401, {"error": "bridge_token_required"})
+    status, payload = _call(
+        _MOTION_HANDLER, method="GET", path="/diagnostics", port=8202,
+        headers={"Host": "host.docker.internal:8202", guard.TOKEN_HEADER: TOKEN},
+    )
+    assert status == 200
+    assert payload["status"] == "engine_not_installed"

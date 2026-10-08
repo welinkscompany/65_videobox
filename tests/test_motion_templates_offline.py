@@ -97,3 +97,41 @@ def test_the_motion_tools_stay_out_of_the_container_image() -> None:
         if line.strip() and not line.strip().startswith("#")
     ]
     assert "scripts/motion-bridge" in patterns
+
+
+def test_the_engine_install_runs_without_install_scripts() -> None:
+    """esbuild에 postinstall이 있다. 설치는 스크립트를 돌리지 않는다(`.npmrc`와 `prepare-motion.ps1` 둘 다)."""
+    npmrc = (BRIDGE_ROOT / ".npmrc").read_text(encoding="utf-8")
+    assert "ignore-scripts=true" in npmrc.replace(" ", "").splitlines()
+    prepare = (ROOT / "scripts" / "prepare-motion.ps1").read_text(encoding="utf-8-sig")
+    assert "'ci', '--ignore-scripts'" in prepare
+
+
+_STRICT_BANS = (
+    'url(//', "url('//", 'url("//', 'src="//', "src='//", 'href="//', "href='//",
+    'createElement("script")', "createElement('script')", "new WebSocket", "Worker(", "importScripts", "srcdoc",
+)
+
+
+def test_templates_have_no_sneaky_ways_out() -> None:
+    """스킴 없는 주소(`//host`)·스크립트 만들기·소켓·워커·iframe srcdoc도 막는다."""
+    for path in _template_files():
+        text = path.read_text(encoding="utf-8")
+        for banned in _STRICT_BANS:
+            assert banned not in text, f"{path.relative_to(ROOT)}에 {banned!r}가 있다"
+
+
+def test_the_only_css_url_is_the_one_local_font() -> None:
+    for path in _template_files():
+        text = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"url\(([^)]*)\)", text):
+            assert match.group(1) == '"assets/NotoSansKR-Variable.ttf"', f"{path.relative_to(ROOT)}: {match.group(0)}"
+    assert sum(
+        len(re.findall(r"url\(", (TEMPLATES / key / "index.html").read_text(encoding="utf-8"))) for key in KEYS
+    ) == len(KEYS)
+
+
+def test_the_strict_ban_list_actually_catches_each_form() -> None:
+    sample = 'a{b:url(//x)} <script src="//x"> <a href="//x"> createElement("script") new WebSocket Worker( importScripts srcdoc'
+    for banned in ('url(//', 'src="//', 'href="//', 'createElement("script")', "new WebSocket", "Worker(", "importScripts", "srcdoc"):
+        assert banned in sample and banned in _STRICT_BANS
