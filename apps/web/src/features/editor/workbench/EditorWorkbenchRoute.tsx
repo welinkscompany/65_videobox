@@ -483,11 +483,15 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     });
     return () => { active = false; };
   }, [projectId, requestKey, sessionId, refreshToken, variantRefresh]);
+  // 세션을 다 읽은 뒤의 판수. 세션을 읽기 전(`undefined`)에 한 번, 읽은 뒤에 같은 판수로
+  // 또 한 번 추천을 물어 첫 화면에서 같은 요청이 두 번 나갔다(2026-10-02 운영 빌드 실측).
+  const loadedSessionRevision = state.key === requestKey ? state.session?.expectedRevision : undefined;
   useEffect(() => {
     if (!sessionId) {
       setTransitionSuggestions({ key: requestKey, items: [] });
       return;
     }
+    if (loadedSessionRevision === undefined) return;
     let active = true;
     // `session_revision`을 의존값으로 쓴다 -- `refreshToken`은 짧은 영상의
     // 정확 미리보기가 성공했을 때만 조건부로 올라가서(위 코드 참고), 그것에
@@ -500,7 +504,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       if (active) setTransitionSuggestions({ key: requestKey, items: [] });
     });
     return () => { active = false; };
-  }, [projectId, requestKey, sessionId, state.session?.expectedRevision]);
+  }, [projectId, requestKey, sessionId, loadedSessionRevision]);
   useEffect(() => {
     const currentView = state.key === requestKey ? state.view : null;
     const currentVariants = variants.key === requestKey ? variants.items : [];

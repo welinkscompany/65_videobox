@@ -488,6 +488,19 @@ describe("EditorWorkbenchRoute", () => {
     vi.useRealTimers();
   });
 
+  it("asks for transition suggestions once on first open, not again when the session arrives", async () => {
+    // 2026-10-02 운영 빌드 실측: 첫 화면에서 transition-suggestions가 두 번(886ms·1140ms)
+    // 나갔다. 세션을 읽기 전에 한 번, 읽은 뒤에 같은 판수로 또 한 번이었다.
+    const suggestions = vi.spyOn(api, "getSceneTransitionSuggestions").mockResolvedValue({ suggestions: [] });
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+
+    expect(suggestions).toHaveBeenCalledTimes(1);
+    expect(suggestions).toHaveBeenCalledWith("project-a", "session-a");
+  });
+
   it("accepts a local-first exchange as a memory source", async () => {
     // The editor screen chats through the local route, which produces no
     // hermes_run_id.  Requiring one left the owner unable to save a memory
