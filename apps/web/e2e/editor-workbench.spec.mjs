@@ -106,7 +106,7 @@ async function ensureYujinOpen(page) {
 test.beforeEach(async ({ page }) => {
   await installFixedClock(page);
   await page.route(
-    "**/api/projects/local-draft/editing-sessions/editor-workbench-e2e",
+    "**/api/projects/local-draft/editing-sessions/editor-workbench-e2e*",
     (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(editingSession) }),
   );
   await page.route(
@@ -354,7 +354,7 @@ test("Yujin applies one persisted caption only after explicit selection and pres
     body: JSON.stringify(activeManifest),
   }));
   await page.route(
-    "**/api/projects/local-draft/editing-sessions/editor-workbench-e2e",
+    "**/api/projects/local-draft/editing-sessions/editor-workbench-e2e*",
     (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(activeSession) }),
   );
   await page.route("**/api/projects/local-draft/director/sessions/editor-workbench-e2e/reload", (route) => route.fulfill({
@@ -540,7 +540,7 @@ test("owned conversational-editing fixture keeps explicit AI speed apply reversi
   await page.addInitScript(() => localStorage.removeItem("videobox.editor-workbench.ui"));
   await page.route("**/api/projects", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ projects: [{ project_id: projectId, name: "소유 대화형 편집 검증", status: "active", root_storage_uri: "local://owned-conversational-editing-fixture" }] }) }));
   await page.route(`**/api/projects/${projectId}/editing-sessions/${sessionId}/playback-manifest`, (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(activeManifest) }));
-  await page.route(`**/api/projects/${projectId}/editing-sessions/${sessionId}`, (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(activeSession) }));
+  await page.route(`**/api/projects/${projectId}/editing-sessions/${sessionId}*`, (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(activeSession) }));
   await page.route(`**/api/projects/${projectId}/director/conversations`, async (route) => {
     if (route.request().method() !== "POST") return route.fallback();
     await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ conversation_id: "owned-ai-conversation", project_id: projectId, session_id: sessionId }) });

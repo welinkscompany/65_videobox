@@ -36,7 +36,7 @@ async function openWorkbench(page) {
   await page.route("**/api/projects", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ projects: [project] }) }));
   await page.route("**/playback-manifest", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(manifest) }));
   await page.route(
-    "**/api/projects/local-draft/editing-sessions/release-gates-e2e",
+    "**/api/projects/local-draft/editing-sessions/release-gates-e2e*",
     (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(editingSession) }),
   );
   await page.setViewportSize({ width: 1920, height: 1080 });

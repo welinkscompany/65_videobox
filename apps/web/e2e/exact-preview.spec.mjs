@@ -70,7 +70,8 @@ async function installEditorRoutes(page, state) {
   await page.route("**/api/projects", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ projects: [project] }) }));
   await page.route("**/playback-manifest", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(state.current) }));
   await page.route(
-    "**/api/projects/local-draft/editing-sessions/exact-preview-e2e",
+    // 화면은 `?include_history=false`를 붙여 읽는다 -- 끝의 `*`가 그 쿼리를 받는다.
+    "**/api/projects/local-draft/editing-sessions/exact-preview-e2e*",
     (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(editingSession(state.current)) }),
   );
   await page.route("**/exact-preview", async (route) => {
@@ -78,6 +79,11 @@ async function installEditorRoutes(page, state) {
     state.current = state.afterRetry ?? state.current;
     await route.fulfill({ contentType: "application/json", status: 202, body: JSON.stringify({ status: "pending", generation_id: "generation-8", timeline_start_sec: 2, timeline_end_sec: 8, artifact_revision: state.current.session_revision, fingerprint: "e2e" }) });
   });
+  // 기다리는 동안 화면이 묻는 가벼운 상태 길. 시험이 `state.status`로 답을 정한다(기본: 아직 만드는 중).
+  await page.route(/\/exact-previews\/[^/]+$/, (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ status: "running", generation_id: "generation-8", timeline_start_sec: 2, timeline_end_sec: 8, artifact_revision: 8, fingerprint: "e2e", ...(state.status ?? {}) }),
+  }));
   await page.route("**/content", async (route) => {
     const range = await route.request().headerValue("range");
     if (range) (state.rangeRequests ??= []).push(range);
