@@ -11,6 +11,27 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const current = { expectedRevision: 4, exactPreview: { status: "succeeded" as const, url: "/api/exact.mp4", artifactRevision: 4, timelineStartSec: 0, timelineEndSec: 12 }, captions: [{ text: "첫 번째 안내 자막", startSec: 0, endSec: 3 }, { text: "두 번째 안내 자막", startSec: 3, endSec: 8 }], sources: [{ id: "clip-a", label: "B-roll A", url: "/api/assets/a/content", mediaKind: "video" as const, timelineRange: { startSec: 3, endSec: 8 } }] };
 
 describe("PreviewStage", () => {
+  it("편집 뒤 재생기가 사라지는 동안 바뀌기 전 마지막 장면을 그림으로 남기고, 새 미리보기가 오면 버린다", () => {
+    const video = (width: number) => Object.defineProperty(HTMLVideoElement.prototype, "videoWidth", { configurable: true, get: () => width });
+    video(1280);
+    Object.defineProperty(HTMLVideoElement.prototype, "videoHeight", { configurable: true, get: () => 720 });
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D);
+    vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue("data:image/jpeg;base64,STILL");
+    const { container, rerender } = render(<PreviewStage {...current} />);
+    fireEvent.pause(screen.getByLabelText("편집본 미리보기"));
+
+    rerender(<PreviewStage {...current} exactPreview={{ status: "running" }} />);
+    const still = container.querySelector("img.vb-preview-stage__still");
+    expect(still).not.toBeNull();
+    expect(still).toHaveAttribute("src", "data:image/jpeg;base64,STILL");
+    expect(screen.getByText("새 미리보기를 만드는 중이에요 · 바뀌기 전 화면")).toBeVisible();
+
+    rerender(<PreviewStage {...current} />);
+    expect(container.querySelector("img.vb-preview-stage__still")).toBeNull();
+    delete (HTMLVideoElement.prototype as unknown as Record<string, unknown>).videoWidth;
+    delete (HTMLVideoElement.prototype as unknown as Record<string, unknown>).videoHeight;
+  });
+
   it("mounts a single exact video with burned-caption guidance and no duplicate visual caption", () => {
     const { container } = render(<PreviewStage {...current} />);
     expect(screen.getByLabelText("편집본 미리보기")).toHaveAttribute("src", "/api/exact.mp4");

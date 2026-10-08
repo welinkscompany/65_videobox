@@ -3,6 +3,7 @@ import { type FocusEvent, type KeyboardEvent, type RefObject, useEffect, useLayo
 import { toExactPreviewState, type ExactPreviewInput } from "./exact-preview-state";
 import { PreviewCoordinator, type AuditionMedia, type PreviewMode, type TimelineRange } from "./preview-coordinator";
 import { isAllowedLocalUrl } from "../../../lib/network-guard";
+import { capturePreviewStill } from "./previewStill";
 
 export type AuditionSource = AuditionMedia & Readonly<{ label: string }>;
 export type AuditionRequest = Readonly<{ requestId: number; source: AuditionSource }>;
@@ -36,6 +37,13 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
   const localSources = sources.filter((source) => isAllowedLocalUrl(source.url));
   const coordinatorRef = useRef(new PreviewCoordinator());
   const mediaRef = useRef<MediaNode>(null);
+  // 새 미리보기가 만들어지는 동안 재생기가 사라진다 -- 바뀌기 전 마지막 장면을 그림으로 남긴다.
+  const stillRef = useRef<string | null>(null);
+  const rememberStill = (video: HTMLVideoElement) => {
+    // 현재 미리보기가 아닐 때(정리하느라 처음으로 되감는 중)는 잡지 않는다 -- 0초 장면이 남는다.
+    if (exact.kind !== "current") return;
+    stillRef.current = capturePreviewStill(video) ?? stillRef.current;
+  };
   // **재생 위치가 바뀌어 재생기를 다른 자리로 옮기라고 할 때(2026-09-20
   // 실물 재현), 옮기기 직전 자리를 잠깐 들고 있는다** -- "지금 옮겨 가는
   // 중인 옛 자리"다. 렌더 도중(커밋 전) 채운다 -- `useEffect`에서 채우면
@@ -103,10 +111,14 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
 
   useEffect(() => {
     if (exact.kind !== "current") {
+      // 되감기 전에, 아직 붙어 있는 재생기에서 지금 장면을 잡아 둔다.
+      const media = mediaRef.current;
+      if (media instanceof HTMLVideoElement) stillRef.current = capturePreviewStill(media) ?? stillRef.current;
       stopActiveMedia();
       setMode(coordinatorRef.current.stop());
       return;
     }
+    stillRef.current = null;
     if (mode.kind !== "audition" && (mode.kind !== "exact" || mode.media.url !== exact.url)) showExact();
     // Deliberately keep a user-selected audition active while the manifest refreshes unchanged.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -290,7 +302,7 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
         // 못해 소리 끌 방법이 통째로 사라졌었다**(2026-08-28 코드리뷰로
         // 발견) -- `muted` state와 아래 음소거 단추로 되살렸다.
         ? <audio ref={mediaRef as RefObject<HTMLAudioElement>} aria-label={mediaLabel} src={currentMedia.url} preload="metadata" muted={muted} onTimeUpdate={(event) => updateTimeline(event.currentTarget)} onSeeking={(event) => updateTimeline(event.currentTarget)} onSeeked={(event) => updateTimeline(event.currentTarget)} />
-        : <video ref={mediaRef as RefObject<HTMLVideoElement>} aria-label={mediaLabel} src={currentMedia.url} preload="metadata" playsInline muted={muted} onLoadedMetadata={(event) => checkAuditionVideo(event.currentTarget)} onTimeUpdate={(event) => updateTimeline(event.currentTarget)} onSeeking={(event) => updateTimeline(event.currentTarget)} onSeeked={(event) => updateTimeline(event.currentTarget)} />)}
+        : <video ref={mediaRef as RefObject<HTMLVideoElement>} aria-label={mediaLabel} src={currentMedia.url} preload="metadata" playsInline muted={muted} onLoadedMetadata={(event) => checkAuditionVideo(event.currentTarget)} onLoadedData={(event) => rememberStill(event.currentTarget)} onPause={(event) => rememberStill(event.currentTarget)} onTimeUpdate={(event) => updateTimeline(event.currentTarget)} onSeeking={(event) => updateTimeline(event.currentTarget)} onSeeked={(event) => { updateTimeline(event.currentTarget); rememberStill(event.currentTarget); }} />)}
       {/* **아직 아무것도 안 넣었으면 실패라고 말하지 않는다(2026-09-04).**
           owner가 제일 먼저 막힌 자리다 -- "처음에 뭘 어떤걸 눌러야할지도
           모르겠고". 갓 만든 프로젝트를 열면 첫 화면이 "미리보기를 만들지
@@ -300,7 +312,14 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
           진짜 실패는 그대로 실패라고 말한다 -- 안내가 고장까지 덮으면 안 된다. */}
       {!currentMedia && (projectIsEmpty
         ? <div className="vb-preview-stage__empty"><strong>여기에 영상이 나와요</strong><p>왼쪽 <b>미디어</b>에서 파일을 더하면 이 자리에 보여요.</p></div>
-        : <div className="vb-preview-stage__empty"><strong>{exact.label}</strong><p>{exact.copy}</p><button data-native-control="refresh-exact" type="button" onClick={() => void refresh()} disabled={!onRefresh || refreshing}>{refreshing ? "미리보기 만드는 중" : "미리보기 새로 만들기"}</button>{refreshError && <p role="alert">{refreshError}</p>}</div>)}
+        : (() => {
+          const still = exact.kind === "pending" || exact.kind === "running" || exact.kind === "stale" ? stillRef.current : null;
+          const waiting = exact.kind === "pending" || exact.kind === "running";
+          const empty = <div className="vb-preview-stage__empty"><strong>{exact.label}</strong><p>{exact.copy}</p>{still && waiting && <p role="status">새 미리보기를 만드는 중이에요 · 바뀌기 전 화면</p>}<button data-native-control="refresh-exact" type="button" onClick={() => void refresh()} disabled={!onRefresh || refreshing}>{refreshing ? "미리보기 만드는 중" : "미리보기 새로 만들기"}</button>{refreshError && <p role="alert">{refreshError}</p>}</div>;
+          return still
+            ? <div className="vb-preview-stage__waiting"><img className="vb-preview-stage__still" src={still} alt="" />{empty}</div>
+            : empty;
+        })())}
     </div>
     {/* **재생줄은 사라지지 않는다(2026-09-04).** owner: "스페이스바를 누르면
         멈춰야 되는데 그것도 안되고". 기능은 원래 있었는데(전역 핸들러) 재생할

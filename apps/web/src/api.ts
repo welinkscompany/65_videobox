@@ -2495,8 +2495,9 @@ export const api = {
     request<ReviewSnapshot>(`/api/projects/${projectId}/review-snapshots/${jobId}`),
   getReviewApproval: (projectId: string, timelineId: string) =>
     request<ReviewApproval>(`/api/projects/${projectId}/review-approvals/timelines/${timelineId}`),
+  /** 화면은 되돌리기 기록(`history`)을 읽지 않는다 -- 0907에서는 세션 830KB 중 817KB가 그 기록이라 뺀다. */
   getEditingSession: (projectId: string, sessionId: string) =>
-    request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}`),
+    request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}?include_history=false`),
   /** 기획을 통과하지 않고 편집기를 여는 길(캡컷의 빈 편집판). */
   createBlankEditingSession: (projectId: string) =>
     request<EditingSession>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/blank`, { method: "POST" }),
@@ -2573,7 +2574,7 @@ export const api = {
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
     ),
   getLatestEditingSession: async (projectId: string): Promise<EditingSession | null> => {
-    const response = await fetch(`/api/projects/${projectId}/editing-sessions/latest`, undefined);
+    const response = await fetch(`/api/projects/${projectId}/editing-sessions/latest?include_history=false`, undefined);
     if (response.status === 404) {
       return null;
     }
@@ -2593,6 +2594,9 @@ export const api = {
     request<EditorPlaybackManifest>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/playback-manifest`),
   getSceneTransitionSuggestions: (projectId: string, sessionId: string) =>
     request<{ suggestions: SceneTransitionSuggestion[] }>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/transition-suggestions`),
+  /** 미리보기를 기다리는 동안 묻는 가벼운 길 -- 세션·매니페스트는 끝난 뒤 한 번만 다시 읽는다. */
+  getExactPreviewStatus: (projectId: string, generationId: string) =>
+    request<ExactPreviewResponse>(`/api/projects/${encodeURIComponent(projectId)}/exact-previews/${encodeURIComponent(generationId)}`),
   startExactPreview: (projectId: string, sessionId: string, payload: { expected_revision: number; start_sec?: number; end_sec?: number }) =>
     request<ExactPreviewResponse>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/exact-preview`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),

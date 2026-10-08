@@ -468,6 +468,26 @@ describe("EditorWorkbenchRoute", () => {
     vi.spyOn(api, "createYujinEditingProposal").mockResolvedValue({ status: "clarification", reply_text: "", proposal: null });
   });
 
+  it("미리보기를 기다리는 동안 무거운 세션은 다시 안 읽고, 끝나면 한 번만 읽는다 (2026-10-08 §3-2)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const session = vi.spyOn(api, "getEditingSession");
+    vi.spyOn(api, "startExactPreview").mockResolvedValue({ status: "running", generation_id: "g-2", timeline_start_sec: 0, timeline_end_sec: 1, artifact_revision: 1, fingerprint: "f" });
+    const status = vi.spyOn(api, "getExactPreviewStatus")
+      .mockResolvedValueOnce({ status: "running", generation_id: "g-2", timeline_start_sec: 0, timeline_end_sec: 1, artifact_revision: 1, fingerprint: "f" })
+      .mockResolvedValueOnce({ status: "running", generation_id: "g-2", timeline_start_sec: 0, timeline_end_sec: 1, artifact_revision: 1, fingerprint: "f" })
+      .mockResolvedValue({ status: "succeeded", generation_id: "g-2", timeline_start_sec: 0, timeline_end_sec: 1, artifact_revision: 1, fingerprint: "f", content_url: "/x.mp4" });
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    const afterOpen = session.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+
+    expect(status).toHaveBeenCalledTimes(3);
+    expect(status).toHaveBeenCalledWith("project-a", "g-2");
+    expect(session.mock.calls.length - afterOpen).toBe(1);
+    vi.useRealTimers();
+  });
+
   it("accepts a local-first exchange as a memory source", async () => {
     // The editor screen chats through the local route, which produces no
     // hermes_run_id.  Requiring one left the owner unable to save a memory
@@ -2373,7 +2393,10 @@ describe("EditorWorkbenchRoute", () => {
       .mockResolvedValueOnce(narrationManifest(1) as never)
       .mockResolvedValueOnce(narrationManifest(2) as never);
     mockEditingSessionRevisions(1, 3);
-    vi.spyOn(api, "startExactPreview").mockResolvedValue({} as never);
+    // 서버는 생성분 번호를 주고, 그 상태가 끝나면 화면이 세션·매니페스트를 한 번 다시 읽는다.
+    const started = { status: "running" as const, generation_id: "g-3", timeline_start_sec: 0, timeline_end_sec: 5, artifact_revision: 1, fingerprint: "f" };
+    vi.spyOn(api, "startExactPreview").mockResolvedValue(started);
+    vi.spyOn(api, "getExactPreviewStatus").mockResolvedValue({ ...started, status: "succeeded", content_url: "/x.mp4" });
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
@@ -2382,7 +2405,7 @@ describe("EditorWorkbenchRoute", () => {
     vi.mocked(api.startExactPreview).mockClear();
     fireEvent.click(screen.getByRole("button", { name: "미리보기 새로 만들기" }));
 
-    expect(await screen.findByText("편집 내용이 맞지 않아요. 다시 열어 주세요.")).toBeVisible();
+    expect(await screen.findByText("편집 내용이 맞지 않아요. 다시 열어 주세요.", {}, { timeout: 5_000 })).toBeVisible();
     expect(screen.queryByRole("region", { name: "편집 작업판" })).toBeNull();
   });
 
@@ -3722,7 +3745,7 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(10);
   });
 
-  it("keeps polling while an exact preview remains pending across more than one refresh", async () => {
+  it("keeps watching (status only) while an exact preview remains pending, then re-reads once", async () => {
     const pending = {
       ...narrationManifest(1),
       exact_preview: {
@@ -3747,8 +3770,12 @@ describe("EditorWorkbenchRoute", () => {
     const load = vi.mocked(api.getEditorPlaybackManifest);
     load.mockReset();
     load.mockResolvedValueOnce(pending as never);
-    load.mockResolvedValueOnce(pending as never);
     load.mockResolvedValueOnce(succeeded as never);
+    // 기다리는 동안은 가벼운 상태 길만 묻는다(세션·매니페스트는 끝난 뒤 한 번).
+    const statusBody = { generation_id: "generation-1", timeline_start_sec: 0, timeline_end_sec: 5, artifact_revision: 1, fingerprint: "f" };
+    const status = vi.spyOn(api, "getExactPreviewStatus")
+      .mockResolvedValueOnce({ ...statusBody, status: "running" })
+      .mockResolvedValue({ ...statusBody, status: "succeeded", content_url: "/api/projects/project-a/exact-previews/generation-1/content" });
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
 
@@ -3757,7 +3784,8 @@ describe("EditorWorkbenchRoute", () => {
       "src",
       "/api/projects/project-a/exact-previews/generation-1/content",
     );
-    expect(load).toHaveBeenCalledTimes(3);
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(status).toHaveBeenCalledTimes(2);
   });
 
   it("adapts the recovered Eugene conversation into the dock, keeps manual edit available when blocked, and auditions a candidate through the sole PreviewStage", async () => {

@@ -33,16 +33,19 @@ export async function pollJobUntilTerminal<TResult>(
      * 유효성부터 확인하고 곧바로 물은 뒤, 아직 안 끝났을 때만 다음 시도 전에 기다린다. */
     delayFirst?: boolean;
     isStillRelevant?: () => boolean;
+    /** 있으면 시도마다 간격이 `intervalMs × factor^n`으로 늘고 `maxMs`에서 멈춘다. 없으면 늘 `intervalMs`. */
+    backoff?: Readonly<{ factor: number; maxMs: number }>;
   },
 ): Promise<PollOutcome<TResult>> {
-  const { intervalMs, maxAttempts, delayFirst = false, isStillRelevant } = options;
+  const { intervalMs, maxAttempts, delayFirst = false, isStillRelevant, backoff } = options;
+  const nextDelay = (attempt: number) => (backoff ? Math.min(backoff.maxMs, intervalMs * backoff.factor ** attempt) : intervalMs);
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    if (delayFirst) await delay(intervalMs);
+    if (delayFirst) await delay(nextDelay(attempt));
     if (isStillRelevant && !isStillRelevant()) return { kind: "cancelled" };
     const current = await fetchStatus();
     if (current.status === "succeeded" && current.result) return { kind: "succeeded", result: current.result };
     if (current.status === "failed") return { kind: "failed", error_detail: current.error_detail };
-    if (!delayFirst) await delay(intervalMs);
+    if (!delayFirst) await delay(nextDelay(attempt));
   }
   return { kind: "timed_out" };
 }

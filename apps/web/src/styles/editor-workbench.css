@@ -273,6 +273,11 @@
 .vb-preview-stage__media-shell img { display: block; width: min(100%, 35rem); max-width: 100%; max-height: 28rem; object-fit: contain; }
 .vb-preview-stage__empty { max-width: 28rem; padding: var(--vb-space-7); text-align: center; color: var(--muted-foreground); }
 /* 여기도 어두운 미리보기 판 위다. `--foreground`는 밝은 바탕용이라 대비가 1.04였다. */
+/* 새 미리보기를 만드는 동안 바뀌기 전 마지막 장면을 흐리게 깔고, 안내 글을 그 위에 얹는다. */
+.vb-preview-stage__waiting { display: grid; width: 100%; height: 100%; min-height: 0; place-items: center; }
+.vb-preview-stage__waiting > * { grid-area: 1 / 1; }
+.vb-preview-stage__media-shell img.vb-preview-stage__still { width: 100%; height: 100%; max-width: 100%; max-height: 100%; opacity: 0.45; }
+.vb-preview-stage__waiting > .vb-preview-stage__empty { position: relative; z-index: 1; }
 .vb-preview-stage__empty strong { display: block; color: var(--vb-preview-text, #F4F4F5); }
 /* 재생 버튼 5개(`__transport`)는 안 줄어든다(`flex: 0 0 auto`, 아래). 좁은
    화면에서 그 옆의 "타임라인 0.0 / 8.0초" 글자가 밀려날 자리가 없으면, 기본

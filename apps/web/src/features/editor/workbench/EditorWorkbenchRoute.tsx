@@ -12,6 +12,7 @@ import { runPartialRegenerationWithProgress, type PartialRegenerationOutcome } f
 import { longWaitNotice, useWaitElapsedSeconds } from "../waitingNotice";
 import { Button } from "../../../components/ui/button";
 import { findLatestSucceededJob } from "../../../lib/formatters";
+import { EXACT_PREVIEW_UNREACHABLE, EXACT_PREVIEW_WATCH_ERROR_COPY, watchExactPreview } from "../preview/exactPreviewWatch";
 import { resolveWorkspaceLocation } from "../../../app/routeManifest";
 import { creationBriefStorageKey, pastedScriptSummary } from "../../creation/pastedScriptSummary";
 import { projectEditorAssets, type EditorAssetCard } from "../assets/editorAssetProjection";
@@ -296,6 +297,11 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
 }) {
   const requestKey = `${projectId}:${sessionId ?? "missing"}`;
   const [refreshToken, setRefreshToken] = useState(0);
+  // 방금 시킨 편집본 미리보기. 이 동안은 **가벼운 상태 길만** 묻는다(점검 §3-2).
+  // `settled`는 기다림이 끝나 세션·매니페스트를 다시 읽는 중이라는 뜻 -- 읽기가 끝나야 지운다.
+  const [watchedPreview, setWatchedPreview] = useState<{ key: string; generationId: string; settled: boolean } | null>(null);
+  // 끝까지 못 지켜본(못 읽음·시간 초과) 생성분. 같은 것을 다시 감시하지 않는다.
+  const [abandonedGeneration, setAbandonedGeneration] = useState<string | null>(null);
   const [state, setState] = useState<Readonly<{ key: string; view: EditorViewModel | null; session: EditorSessionSnapshot | null; error: string | null }>>({ key: requestKey, view: null, session: null, error: sessionId ? null : "편집 세션을 찾을 수 없어요. 다시 열어 주세요." });
   const [variants, setVariants] = useState<VariantState>({ key: requestKey, items: [], message: null, busy: false });
   // 유진이 숏폼 장면을 바꾸면 서버에서 그 모양의 버전이 올라가는데, 목록 effect가
@@ -322,7 +328,6 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const manifestOperationId = useRef(0);
   const mutationOperationId = useRef(0);
   const previewOperationId = useRef(0);
-  const pollOperationId = useRef(0);
   /** 편집안 후보 결과 미리보기. 저장 편집본 미리보기(`previewOperationId`)와 **따로**
    *  센다 -- 두 경로가 같은 번호를 쓰면 한쪽이 다른 쪽 응답을 버린다. */
   const proposalPreviewOperationId = useRef(0);
@@ -447,8 +452,10 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       const next = joinEditorSnapshot(manifest, editingSession);
       if (next.view.projectId !== projectId || next.view.sessionId !== sessionId) throw new Error("editor_snapshot_identity_mismatch");
       setState({ key: requestKey, view: next.view, session: next.session, error: null });
+      setWatchedPreview((current) => current?.settled ? null : current);
     }).catch((error: unknown) => {
       if (!isCurrent()) return;
+      setWatchedPreview((current) => current?.settled ? null : current);
       const message = error instanceof Error && error.message === "editor_snapshot_identity_mismatch"
           ? "편집 내용이 맞지 않아요. 다시 열어 주세요."
           : "재생 내용을 불러오지 못했어요. 새로고침 후 다시 확인해 주세요.";
@@ -721,7 +728,17 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   // 길이 경계는 mutation 쪽과 **같은 것**을 쓴다. 120초를 넘는 영상은 여전히
   // 사람이 눌러야 한다 -- 열기만 해도 몇 분짜리 FFmpeg가 도는 것은 고친 게 아니다.
   const autoPreviewStartedFor = useRef<string | null>(null);
-  const [autoPreviewWaiting, setAutoPreviewWaiting] = useState(false);
+  /** 편집본 미리보기를 시키고, 그 생성분을 지켜보기 시작한다. 시키는 네 자리(자동·새로 만들기·
+   *  선택 구간·편집 뒤)가 모두 이 하나를 거친다 -- 기다리는 방식이 둘로 갈라지지 않게. */
+  const requestExactPreview = (payload: Parameters<typeof api.startExactPreview>[2], isCurrent: () => boolean = () => true) => {
+    const epoch = routeEpoch.current.value;
+    return api.startExactPreview(projectId, sessionId!, payload).then((started) => {
+      if (routeEpoch.current.value !== epoch || !isCurrent()) return started;
+      // 서버는 늘 생성분 번호를 준다. 없으면 지켜볼 대상이 없으니 아무것도 하지 않는다.
+      if (started?.generation_id) setWatchedPreview({ key: requestKey, generationId: started.generation_id, settled: false });
+      return started;
+    });
+  };
   useEffect(() => {
     const view = state.view;
     if (!sessionId || !view) return;
@@ -729,27 +746,39 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     if (view.output.durationSec > 120) return;
     if (autoPreviewStartedFor.current === sessionId) return;
     autoPreviewStartedFor.current = sessionId;
-    const epoch = routeEpoch.current.value;
-    void api.startExactPreview(projectId, sessionId, { expected_revision: view.expectedRevision })
-      .then(() => { if (routeEpoch.current.value === epoch) setAutoPreviewWaiting(true); })
-      // 조용히 실패한다. `미리보기 새로 만들기` 단추가 그대로 남는다.
-      .catch(() => {});
+    // 조용히 실패한다. `미리보기 새로 만들기` 단추가 그대로 남는다.
+    void requestExactPreview({ expected_revision: view.expectedRevision }).catch(() => {});
   }, [projectId, sessionId, state.view?.playback.exactPreview.status, state.view?.output.durationSec]);
 
+  // 기다리는 동안 **가벼운 상태 길(`exact-previews/{id}`)만** 묻는다. 응답을 받은 뒤에만
+  // 다음을 묻고(겹침 0), 간격이 1초에서 5초까지 늘고, 끝나면 세션·매니페스트를 **한 번만**
+  // 다시 읽는다. 예전에는 1.2초마다 세션 830KB를 겹쳐 불러 서버가 78%까지 바빠졌다.
+  const viewPreviewStatus = state.view?.playback.exactPreview.status;
+  const viewPreviewGeneration = state.view?.playback.exactPreview.generationId ?? null;
+  const watchedGeneration = watchedPreview?.key === requestKey && !watchedPreview.settled
+    ? watchedPreview.generationId
+    : (viewPreviewStatus === "pending" || viewPreviewStatus === "running") && !(watchedPreview?.key === requestKey && watchedPreview.settled)
+      ? viewPreviewGeneration
+      : null;
+  const generationToWatch = watchedGeneration && watchedGeneration !== abandonedGeneration ? watchedGeneration : null;
   useEffect(() => {
-    const status = state.view?.playback.exactPreview.status;
-    // 방금 우리가 시킨 것도 기다린다. 아직 편집본에는 `unavailable`로 남아 있다.
-    if (status !== "pending" && status !== "running" && !(status === "unavailable" && autoPreviewWaiting)) return;
-    const epoch = routeEpoch.current.value;
-    const operationId = pollOperationId.current + 1;
-    pollOperationId.current = operationId;
-    const poll = window.setTimeout(() => {
-      if (routeEpoch.current.value === epoch && pollOperationId.current === operationId) {
-        setRefreshToken((current) => current + 1);
+    if (!generationToWatch) return;
+    let active = true;
+    void watchExactPreview({
+      fetchStatus: (id) => api.getExactPreviewStatus(projectId, id),
+      generationId: generationToWatch,
+      isActive: () => active,
+    }).then((outcome) => {
+      if (!active) return;
+      if (outcome.kind === "timed_out" || (outcome.kind === "failed" && outcome.error_detail === EXACT_PREVIEW_UNREACHABLE)) {
+        setAbandonedGeneration(generationToWatch);
+        if (!mutationInFlight.current) setMutation({ isSaving: false, message: EXACT_PREVIEW_WATCH_ERROR_COPY });
       }
-    }, 1200);
-    return () => window.clearTimeout(poll);
-  }, [autoPreviewWaiting, refreshToken, requestKey, state.view?.playback.exactPreview.status, state.view?.playback.exactPreview.generationId]);
+      setWatchedPreview((current) => current?.key === requestKey ? { ...current, generationId: generationToWatch, settled: true } : current);
+      setRefreshToken((current) => current + 1);
+    });
+    return () => { active = false; };
+  }, [projectId, requestKey, generationToWatch]);
 
   // 후보 결과 미리보기가 끝날 때까지 기다린다. **상태만 물어본다** -- 이 경로는
   // 저장된 편집본을 바꾸는 호출을 하나도 하지 않는다. 기다리는 간격은 편집본
@@ -791,15 +820,16 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const mutationWaitNotice = mutation.isSaving ? longWaitNotice(mutationElapsedSec) : null;
   if (state.key !== requestKey) return <section aria-live="polite"><p>편집 내용을 불러오는 중이에요.</p></section>;
   if (!state.view) return <section aria-live="polite"><p>{state.error ?? "편집 내용을 불러오는 중이에요."}</p></section>;
+  // 지켜보는 동안에는 편집 직후의 `stale` 문구("새로 만들어 주세요") 대신 "만드는 중"으로 보인다.
+  const stageView = generationToWatch && !["current", "succeeded", "pending", "running"].includes(state.view.playback.exactPreview.status)
+    ? { ...state.view, playback: { ...state.view.playback, exactPreview: { ...state.view.playback.exactPreview, status: "running" as const, url: null } } }
+    : state.view;
   const refreshPreview = async () => {
     if (!sessionId || !state.view) return;
     const epoch = routeEpoch.current.value;
     const operationId = previewOperationId.current + 1;
     previewOperationId.current = operationId;
-    await api.startExactPreview(projectId, sessionId, { expected_revision: state.view.expectedRevision });
-    if (routeEpoch.current.value === epoch && previewOperationId.current === operationId) {
-      setRefreshToken((current) => current + 1);
-    }
+    await requestExactPreview({ expected_revision: state.view.expectedRevision }, () => previewOperationId.current === operationId);
   };
   const previewSelectedRange = async ({ startSec, endSec }: { segmentId: string; startSec: number; endSec: number }) => {
     if (!sessionId || !state.view) return;
@@ -809,14 +839,11 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     try {
       await api.previewEditingSessionSelectedRange(projectId, sessionId, { start_sec: startSec, end_sec: endSec });
       if (routeEpoch.current.value !== epoch || previewOperationId.current !== operationId) return;
-      await api.startExactPreview(projectId, sessionId, {
+      await requestExactPreview({
         expected_revision: state.view.expectedRevision,
         start_sec: startSec,
         end_sec: endSec,
-      });
-      if (routeEpoch.current.value === epoch && previewOperationId.current === operationId) {
-        setRefreshToken((current) => current + 1);
-      }
+      }, () => previewOperationId.current === operationId);
     } catch {
       if (routeEpoch.current.value === epoch && previewOperationId.current === operationId && !mutationInFlight.current && !captionPreflightInFlight.current) {
         setMutation({ isSaving: false, message: "선택 구간 미리보기를 만들지 못했어요. 최신 편집본을 확인해 주세요." });
@@ -932,8 +959,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         // undo, or placement edits cannot queue overlapping multi-minute
         // FFmpeg jobs. The manual refresh control remains available.
         if (mutationSucceeded && next.view.output.durationSec <= 120) {
-          void api.startExactPreview(projectId, sessionId, { expected_revision: next.view.expectedRevision })
-            .then(() => { if (isCurrentRefresh()) setRefreshToken((current) => current + 1); })
+          void requestExactPreview({ expected_revision: next.view.expectedRevision }, isCurrentRefresh)
             .catch(() => {});
         }
       }
@@ -2628,7 +2654,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     onVariantRemakeShortForm={makeShortForm}
     onVariantUnfoldShortForm={unfoldShortForm}
     variantBusy={variants.key === requestKey && variants.busy}
-    view={state.view}
+    view={stageView}
     zoomCommand={timelineZoomCommand}
     />
   </>;

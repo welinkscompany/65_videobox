@@ -134,15 +134,17 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
         return EditingSessionResponse(**result)
 
     @router.get("/api/projects/{project_id}/editing-sessions/latest")
-    def get_latest_editing_session(project_id: str) -> EditingSessionResponse:
+    def get_latest_editing_session(project_id: str, include_history: bool = True) -> EditingSessionResponse:
         try:
             result = orchestrator.get_latest_editing_session(project_id=project_id)
         except Exception as exc:
             raise _http_error(exc) from exc
+        if not include_history:
+            result = {**result, "history": []}
         return EditingSessionResponse(**result)
 
     @router.get("/api/projects/{project_id}/editing-sessions/{session_id}")
-    def get_editing_session(project_id: str, session_id: str) -> EditingSessionResponse:
+    def get_editing_session(project_id: str, session_id: str, include_history: bool = True) -> EditingSessionResponse:
         try:
             result = orchestrator.get_editing_session(
                 project_id=project_id,
@@ -150,6 +152,8 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
             )
         except Exception as exc:
             raise _http_error(exc) from exc
+        if not include_history:
+            result = {**result, "history": []}
         return EditingSessionResponse(**result)
 
     @router.get("/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest", response_model_exclude_none=True)
