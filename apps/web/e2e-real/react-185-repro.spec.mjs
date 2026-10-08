@@ -9,7 +9,8 @@ for (const key of ["clean", "duplicatedOverlays"]) {
     page.on("console", (message) => { if (message.type() === "error") messages.push(`console: ${message.text()}`); });
     page.on("pageerror", (error) => messages.push(`pageerror: ${error.message}`));
     await openEditor(page, readFixture()[key]);
-    const clips = page.getByRole("button", { name: /^영상 \d+번째 장면(?!.*이동$)/ });
+    // 고른 클립에는 `시작 자르기`·`끝 자르기` 손잡이도 같은 접두어로 붙으므로, 고르기 단추만 집도록 이름 끝까지 맞춘다.
+    const clips = page.getByRole("button", { name: /^영상 \d+번째 장면, \d+초부터$/ });
     const clipCount = await clips.count();
     expect(clipCount).toBeGreaterThan(0);
     for (let step = 0; step < 12; step += 1) {
@@ -29,7 +30,7 @@ for (const key of ["clean", "duplicatedOverlays"]) {
     const select = page.getByRole("combobox", { name: "편집 대상" });
     if (await select.count()) {
       const values = await select.locator("option").evaluateAll((options) => options.map((option) => option.value));
-      expect(values.length).toBeLessThanOrEqual(new Set(values).size);
+      expect(values.length).toBe(new Set(values).size);
     }
   });
 }
