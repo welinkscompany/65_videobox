@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
+import path from "node:path";
 
 import { expect } from "@playwright/test";
 
-const fixtureFile = process.env.VIDEOBOX_E2E_FIXTURE_FILE ?? "test-results/real-flow-fixture.json";
+const fixtureFile = path.resolve(process.env.VIDEOBOX_E2E_FIXTURE_FILE ?? "test-results/real-flow-fixture.json");
 
 /** @returns {{ clean: Fixture, duplicatedOverlays: Fixture }} Fixture = { projectId, sessionId, timelineId } */
 export function readFixture() {
