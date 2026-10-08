@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.e2e_real_editor_api import _assert_not_real_root, _clean_old_runs, build_child_env
+from scripts.e2e_real_editor_api import _assert_not_real_root, _clean_old_runs, _trust_web_port_origin, build_child_env
 
 
 def test_child_env_drops_every_videobox_name_and_secret_but_keeps_the_basics() -> None:
@@ -49,3 +49,15 @@ def test_cleanup_only_touches_old_folders_inside_real_flow_data(tmp_path: Path) 
     _clean_old_runs(root)
     _clean_old_runs(tmp_path / "not-it")
     assert not old.exists() and fresh.exists() and other.exists()
+
+
+def test_web_port_origin_only_adds_that_loopback_origin(monkeypatch: pytest.MonkeyPatch) -> None:
+    from videobox_api import csrf_guard
+
+    original = csrf_guard.TRUSTED_ORIGINS
+    monkeypatch.setattr(csrf_guard, "TRUSTED_ORIGINS", original)
+    for bad in ["", "abc", "0", "65536", "-1", "80; x", "１２３", " "]:
+        assert _trust_web_port_origin(bad) is None
+        assert csrf_guard.TRUSTED_ORIGINS == original
+    assert _trust_web_port_origin("56872") == "http://127.0.0.1:56872"
+    assert csrf_guard.TRUSTED_ORIGINS == original | {"http://127.0.0.1:56872"}

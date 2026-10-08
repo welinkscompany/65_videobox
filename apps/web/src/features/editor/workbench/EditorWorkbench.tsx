@@ -15,7 +15,7 @@ import { PreviewStage, type AuditionRequest, type AuditionSource } from "../prev
 import { sceneNumbersBySegmentId } from "../sceneNames";
 import { TimelineDock } from "../timeline/TimelineDock";
 import type { TimelineZoomCommand } from "../timeline/timelineZoomShortcuts";
-import { clampPlaybackSeconds, frameDurationSec, resolvePlaybackSelection } from "../transcript/playbackNavigation";
+import { clampPlaybackSeconds, resolvePlaybackSelection, safeFrameDurationSec } from "../transcript/playbackNavigation";
 import { isVideoAssetUri } from "../assetKind";
 import { EditorWorkbenchReadOnlyAdapters } from "./editorWorkbenchReadOnlyAdapters";
 import { YujinPanel } from "./YujinPanel";
@@ -408,7 +408,13 @@ function EditorWorkbenchInstance({
     // 다만 내레이션이 **긴 통짜 하나**일 때는(원본 영상 소리로 만든 초안) 장면이
     // 하나뿐이라 아무것도 구분하지 못한다. 그때는 자막이 의미 단위다.
     const spans = narrationSpans.length > 1 ? narrationSpans : view.captions.length ? view.captions : narrationSpans;
-    setSelectedSegmentId(resolvePlaybackSelection(spans, nextSeconds, { pinnedSegmentId: pinnedSegmentIdRef.current, frameSec: frameDurationSec(view.fps) }));
+    // 누른 자국은 **지금 고른 장면과 같을 때만** 지킨다. 세션 초기화·id 정리·requestedNarration 같은
+    // 다른 경로가 선택을 바꿨는데 낡은 자국이 남아 이기는 일을 막는다.
+    const pinned = pinnedSegmentIdRef.current !== null && pinnedSegmentIdRef.current === selectedSegmentId ? pinnedSegmentIdRef.current : null;
+    const frameSec = safeFrameDurationSec(view.fps); // 잘못된 fps여도 클릭 처리기에서 던지지 않는다
+    const resolved = resolvePlaybackSelection(spans, nextSeconds, { pinnedSegmentId: pinned, frameSec });
+    if (resolved !== pinnedSegmentIdRef.current) pinnedSegmentIdRef.current = null;
+    setSelectedSegmentId(resolved);
   };
   const selectedNarration = selectedSegmentId === null
     ? null

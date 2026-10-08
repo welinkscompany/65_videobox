@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from
 
 import { Button } from "../../../components/ui/button";
 import { Textarea } from "../../../components/ui/textarea";
-import { activeSegmentIdAt } from "./playbackNavigation";
+import { resolvePlaybackSelection } from "./playbackNavigation";
 import { visibleTranscriptWindow, type TranscriptEntry } from "./transcriptProjection";
 
 const MAX_MOUNTED_ROWS = 120;
@@ -18,6 +18,7 @@ export function TranscriptPanel({
   onSaveCaption,
   onDeleteSegment,
   isSaving = false,
+  frameSec = 1 / 30,
   autoCaption,
 }: Readonly<{
   entries: readonly TranscriptEntry[];
@@ -32,11 +33,14 @@ export function TranscriptPanel({
    *  간다 -- 같은 편집이 두 경로를 갖지 않게 한다. */
   onDeleteSegment?: (segmentId: string) => void | Promise<void>;
   isSaving?: boolean;
+  /** 한 프레임(초). 작업대와 같은 장면 고르기 규칙(`resolvePlaybackSelection`)에 쓴다. */
+  frameSec?: number;
   /** 캡컷 `자동 캡션` 카드. 프로젝트·세션을 아는 위층이 만들어 넘긴다 --
    *  이 판은 캡션 목록만 알면 되고 프로젝트 배관은 몰라도 된다. */
   autoCaption?: ReactNode;
 }>) {
-  const activeSegmentId = activeSegmentIdAt(entries, playbackSec);
+  // 작업대(오른쪽 편집 항목)와 **같은 규칙**으로 현재 장면을 고른다 -- 경계에서 두 판이 서로 다른 장면을 가리키지 않게.
+  const activeSegmentId = resolvePlaybackSelection(entries, playbackSec, { pinnedSegmentId: selectedSegmentId, frameSec });
   const currentSegmentId = selectedSegmentId ?? activeSegmentId;
   const selectedEntry = entries.find((entry) => entry.segmentId === currentSegmentId) ?? null;
   const [draft, setDraft] = useState(selectedEntry?.text ?? "");

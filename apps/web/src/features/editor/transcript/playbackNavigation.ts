@@ -21,6 +21,11 @@ export function frameDurationSec(fps: Readonly<{ num: number; den: number }>): n
   return fps.den / fps.num;
 }
 
+/** 화면 클릭 처리기용: 잘못된 fps여도 던지지 않고 30fps 한 프레임으로 본다. */
+export function safeFrameDurationSec(fps: Readonly<{ num: number; den: number }>, fallbackSec = 1 / 30): number {
+  try { return frameDurationSec(fps); } catch { return fallbackSec; }
+}
+
 /**
  * 재생 시각에서 고를 장면. **방금 누른 장면이 먼저다**(2026-10-08 점검 §3-1).
  * 재생기는 장면 시작으로 옮겨도 그보다 아주 조금 작은 시각(백만분의 1초·프레임 버림)을

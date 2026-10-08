@@ -502,6 +502,82 @@ describe("EditorWorkbench", () => {
     expect(within(screen.getByRole("region", { name: "편집 항목" })).getByText("0.00–1.33초 구간")).toBeInTheDocument();
   });
 
+  describe("누른 장면 고정 -- 한 규칙으로 모든 판이 같은 장면을 가리킨다 (2026-10-08 수정 1차)", () => {
+    const BOUNDS = [[0, 1.3324], [1.3324, 1.8990646], [1.8990646, 2.9281]] as const;
+    const style = { fontFamily: "Pretendard", fontSizePx: 28, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 1, backgroundColor: "#00000000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0, bold: false, italic: false, letterSpacingPx: 0 } as const;
+    const makeView = (count = 3, extra: Record<string, unknown> = {}) => ({
+      ...view,
+      output: { ...view.output, durationSec: 2.9281 },
+      playback: { auditionUrls: {}, exactPreview: { status: "current" as const, url: "/api/exact.mp4", artifactRevision: 1, timelineStartSec: 0, timelineEndSec: 2.9281 } },
+      tracks: [{ trackId: "narration", role: "narration", clips: BOUNDS.slice(0, count).map(([startSec, endSec], index) => ({ clipId: `n-${index + 1}`, segmentId: `segment-${index + 1}`, type: "narration", assetId: null, assetUri: null, startSec, endSec, controls: {} })) }],
+      captions: BOUNDS.slice(0, count).map(([startSec, endSec], index) => ({ segmentId: `segment-${index + 1}`, text: `자막 ${index + 1}`, startSec, endSec, style })),
+      ...extra,
+    }) as never;
+    const report = (seconds: number) => {
+      const player = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+      Object.defineProperty(player, "currentTime", { configurable: true, writable: true, value: seconds });
+      fireEvent.timeUpdate(player);
+    };
+    const inspectorText = () => within(screen.getByRole("region", { name: "편집 항목" })).queryByText(/초 구간$/)?.textContent;
+
+    it("경계 값에서 캡션 목록·오른쪽 편집 항목이 모두 셋째 장면이다", () => {
+      render(<EditorWorkbench view={makeView()} />);
+      openMaterialDock();
+      fireEvent.click(screen.getByRole("tab", { name: "캡션" }));
+      fireEvent.click(clipSelectionButton("n-3"));
+      report(1.899064);
+      expect(screen.getByRole("button", { name: "자막 3 캡션 선택" })).toHaveAttribute("aria-current", "true");
+      expect(screen.getByRole("button", { name: "자막 2 캡션 선택" })).not.toHaveAttribute("aria-current");
+      openInspector();
+      expect(inspectorText()).toBe("1.90–2.93초 구간");
+    });
+
+    // 프레임을 0.2초로 키워 둔다(5fps). 재생기는 방금 옮긴 자리 0.05초 안의 신호를 낡은 것으로 버리므로,
+    // "누른 장면 시작 한 프레임 앞(0.15초 앞)"을 쓰려면 한 프레임이 그보다 길어야 시험이 닿는다.
+    // 이 자리에서 누른 장면이 살아 있으면 셋째, 죽었으면 둘째(반 프레임=0.1초 여유 밖).
+    const SLOW = { fps: { num: 5, den: 1 } };
+    const BEFORE_SCENE_3 = 1.8990646 - 0.15;
+
+    it("누름이 살아 있으면 같은 자리에서 셋째 장면이다 -- 시험 장치 확인", () => {
+      render(<EditorWorkbench view={makeView(3, SLOW)} />);
+      openInspector();
+      fireEvent.click(clipSelectionButton("n-3"));
+      report(BEFORE_SCENE_3);
+      expect(inspectorText()).toBe("1.90–2.93초 구간");
+    });
+
+    it("다른 경로가 선택을 바꾸면 낡은 누름이 남아 이기지 않는다 -- 세션 바뀜", () => {
+      const rendered = render(<EditorWorkbench view={makeView(3, SLOW)} />);
+      openInspector();
+      fireEvent.click(clipSelectionButton("n-3"));
+      rendered.rerender(<EditorWorkbench view={makeView(3, { ...SLOW, sessionId: "session-b", local: { selectedSegmentId: "segment-1", seekSec: 0 } })} />);
+      openInspector();
+      report(BEFORE_SCENE_3);
+      expect(inspectorText()).toBe("1.33–1.90초 구간");
+    });
+
+    it("다른 경로가 선택을 바꾸면 낡은 누름이 남아 이기지 않는다 -- 장면 정리 뒤 되돌아옴", () => {
+      const rendered = render(<EditorWorkbench view={makeView(3, SLOW)} />);
+      openInspector();
+      fireEvent.click(clipSelectionButton("n-3"));
+      rendered.rerender(<EditorWorkbench view={makeView(2, SLOW)} />);
+      rendered.rerender(<EditorWorkbench view={makeView(3, SLOW)} />);
+      openInspector();
+      report(BEFORE_SCENE_3);
+      expect(inspectorText()).toBe("1.33–1.90초 구간");
+    });
+
+    it("다른 경로가 선택을 바꾸면 낡은 누름이 남아 이기지 않는다 -- requestedNarration", () => {
+      const rendered = render(<EditorWorkbench view={makeView(3, SLOW)} />);
+      openInspector();
+      fireEvent.click(clipSelectionButton("n-3"));
+      rendered.rerender(<EditorWorkbench view={makeView(3, SLOW)} requestedSegmentId="segment-1" />);
+      openInspector();
+      report(BEFORE_SCENE_3);
+      expect(inspectorText()).toBe("1.33–1.90초 구간");
+    });
+  });
+
   it("전환 탭이 두 번째 장면을 고른 직후 미리보기 플레이어의 낡은 재생 위치 신호로 다시 첫 장면으로 되돌아가지 않는다 (2026-09-20 실물 재현)", () => {
     // **위 두 시험과 다른 자리다.** 위 시험들은 `exactPreview.status: "unavailable"`인
     // 공용 `view` fixture를 쓰므로 `<video>`가 아예 안 그려진다(`PreviewStage`의

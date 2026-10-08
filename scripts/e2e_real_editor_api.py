@@ -76,6 +76,18 @@ def _clean_old_runs(real_flow_data: Path, max_age_sec: float = 86400.0) -> None:
             shutil.rmtree(child, ignore_errors=True)
 
 
+def _trust_web_port_origin(raw_port: str) -> str | None:
+    """시험 화면 포트의 loopback origin 하나만 신뢰 목록에 더한다. 숫자가 아니거나 1~65535 밖이면 아무것도 더하지 않는다."""
+    port = raw_port.strip()
+    if not (port.isascii() and port.isdigit() and 1 <= int(port) <= 65535):
+        return None
+    from videobox_api import csrf_guard
+
+    origin = f"http://127.0.0.1:{int(port)}"
+    csrf_guard.TRUSTED_ORIGINS = frozenset({*csrf_guard.TRUSTED_ORIGINS, origin})
+    return origin
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, required=True)
@@ -119,11 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     # 시험 화면은 빈 포트에서 뜬다(러너가 정함). 운영용 허용 목록(5173·5199)에는 없어서 화면이 보내는
     # 쓰기 요청이 전부 403 untrusted_origin이 된다. 이 시험 서버 프로세스 안에서만 그 포트를 더한다 --
     # 소유자의 실제 서버·제품 코드는 그대로다.
-    web_port = os.environ.get("PLAYWRIGHT_WEB_PORT", "").strip()
-    if web_port.isdigit():
-        from videobox_api import csrf_guard
-
-        csrf_guard.TRUSTED_ORIGINS = frozenset({*csrf_guard.TRUSTED_ORIGINS, f"http://127.0.0.1:{web_port}"})
+    _trust_web_port_origin(os.environ.get("PLAYWRIGHT_WEB_PORT", ""))
 
     app = create_app(
         projects_root=data_root / "projects",

@@ -122,4 +122,14 @@ describe("TranscriptPanel", () => {
     expect(screen.getByRole("button", { name: "첫 자막 캡션 선택" })).not.toHaveAttribute("aria-current");
     expect(screen.getByRole("button", { name: "둘째 자막 캡션 선택" })).not.toHaveAttribute("aria-current");
   });
+  it("경계에서 누른 장면이 현재 장면이다 -- 작업대와 같은 규칙 (2026-10-08)", () => {
+    const three = [
+      { segmentId: "scene-1", startSec: 0, endSec: 1.3324, text: "하나" },
+      { segmentId: "scene-2", startSec: 1.3324, endSec: 1.8990646, text: "둘" },
+      { segmentId: "scene-3", startSec: 1.8990646, endSec: 2.9281, text: "셋" },
+    ];
+    render(<TranscriptPanel entries={three} playbackSec={1.899064} selectedSegmentId="scene-3" onSelectSegment={vi.fn()} onSeek={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "셋 캡션 선택" })).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("button", { name: "둘 캡션 선택" })).not.toHaveAttribute("aria-current");
+  });
 });

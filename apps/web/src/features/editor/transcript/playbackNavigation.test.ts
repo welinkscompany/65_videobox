@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeSegmentIdAt, clampPlaybackSeconds, frameDurationSec, resolvePlaybackSelection } from "./playbackNavigation";
+import { activeSegmentIdAt, clampPlaybackSeconds, frameDurationSec, resolvePlaybackSelection, safeFrameDurationSec } from "./playbackNavigation";
 
 const entries = [{ segmentId: "s-1", startSec: 0, endSec: 2 }, { segmentId: "s-2", startSec: 2, endSec: 4 }];
 
@@ -63,5 +63,19 @@ describe("재생 시각으로 장면 고르기 -- 누른 장면이 먼저 (2026-
     expect(resolvePlaybackSelection(scenes0907, 2.0, { pinnedSegmentId: "nope", frameSec: frame })).toBe("scene-3");
     expect(frameDurationSec({ num: 30000, den: 1001 })).toBeCloseTo(1001 / 30000, 9);
     expect(() => frameDurationSec({ num: 0, den: 1 })).toThrow(RangeError);
+  });
+  it("누른 장면 끝을 막 지난 시각은 고정이 풀리고 다음 장면이다", () => {
+    expect(resolvePlaybackSelection(scenes0907, 2.9281, { pinnedSegmentId: "scene-3", frameSec: frame })).toBe("scene-4");
+    expect(resolvePlaybackSelection(scenes0907, 2.9281 + 1e-9, { pinnedSegmentId: "scene-3", frameSec: frame })).toBe("scene-4");
+  });
+  it("같은 id가 둘이어도 던지지 않고 첫 항목 기준으로 고른다", () => {
+    const dup = [...scenes0907, { segmentId: "scene-3", startSec: 5, endSec: 6 }];
+    expect(resolvePlaybackSelection(dup, playerReported, { pinnedSegmentId: "scene-3", frameSec: frame })).toBe("scene-3");
+    expect(resolvePlaybackSelection(dup, 5.5, { pinnedSegmentId: null, frameSec: frame })).toBe("scene-3");
+  });
+  it("safeFrameDurationSec는 잘못된 fps에서 던지지 않고 1/30을 낸다", () => {
+    expect(safeFrameDurationSec({ num: 0, den: 1 })).toBeCloseTo(1 / 30, 12);
+    expect(safeFrameDurationSec({ num: Number.NaN, den: 1 })).toBeCloseTo(1 / 30, 12);
+    expect(safeFrameDurationSec({ num: 24, den: 1 })).toBeCloseTo(1 / 24, 12);
   });
 });
