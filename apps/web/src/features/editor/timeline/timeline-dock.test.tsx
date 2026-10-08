@@ -716,6 +716,18 @@ describe("TimelineDock", () => {
     expect(timelineClipSelection("b-cut-1")).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("머리 칸의 이름·빈자리·눈금 여백을 눌러도 재생 위치가 움직이지 않는다", () => {
+    render(<TimelineDock view={view} viewportWidthPx={400} playbackSec={5} />);
+    const playhead = screen.getByTestId("timeline-playhead");
+    expect(playhead.getAttribute("data-seconds")).toBe("5");
+    const headers = screen.getByRole("list", { name: "고정 트랙" });
+    // 머리 칸은 클립 칸 왼쪽 밖이라 거기서 잰 x는 음수다 -- 그 클릭은 seek가 아니다.
+    fireEvent.click(screen.getByText("영상"));
+    fireEvent.click(headers.children[0] as HTMLElement);
+    fireEvent.click(headers.parentElement!.querySelector(".vb-timeline-lane-headers__ruler-spacer") as HTMLElement);
+    expect(playhead.getAttribute("data-seconds")).toBe("5");
+  });
+
   it("재생줄과 클립은 같은 원점(클립 칸 왼쪽)에 놓인다", () => {
     render(<TimelineDock view={view} viewportWidthPx={400} playbackSec={5} />);
     const playhead = screen.getByTestId("timeline-playhead");
@@ -796,7 +808,8 @@ describe("TimelineDock", () => {
     render(<TimelineDock view={view} viewportWidthPx={WIDTH_FOR_100_PX_PER_SECOND} />);
 
     const timeline = screen.getByRole("region", { name: "타임라인" });
-    fireEvent.click(screen.getByRole("listitem", { name: "내레이션" }), { clientX: 200 });
+    // 클립 칸(머리 칸 밖)의 빈 자리를 누르면 그 시각으로 간다.
+    fireEvent.click(screen.getByRole("group", { name: "타임라인 클립" }), { clientX: 200 });
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "2");
     expect(screen.getByText("스냅 없음")).toBeInTheDocument();
     fireEvent.keyDown(timeline, { key: "ArrowRight" });

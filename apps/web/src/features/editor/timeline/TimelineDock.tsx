@@ -337,12 +337,15 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   // 마운트 뒤 CSS 변수에서 트랙 높이를 한 번 읽고, 클립 칸 폭을 잰다. 둘 다 jsdom에서는
   // 기본값/받은 폭으로 남는다(관찰 콜백이 없다).
   useEffect(() => {
-    setLaneHeightPx(readCssPixels(surfaceRef.current, "--vb-timeline-lane-h", DEFAULT_LANE_HEIGHT_PX));
+    const readLaneHeight = () => setLaneHeightPx(readCssPixels(surfaceRef.current, "--vb-timeline-lane-h", DEFAULT_LANE_HEIGHT_PX));
+    readLaneHeight();
     const viewport = lanesViewportRef.current;
     if (!viewport || typeof ResizeObserver === "undefined") return undefined;
     const observer = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect.width ?? 0;
       if (width > 0) setMeasuredTrackWidthPx(Math.floor(width));
+      // 나중에 밀도를 바꿔 줄 높이 변수가 달라져도(높이가 바뀌면 이 관찰도 울린다) 클립과 머리가 어긋나지 않게 다시 읽는다.
+      readLaneHeight();
     });
     observer.observe(viewport);
     return () => observer.disconnect();
@@ -417,6 +420,8 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
 
   const handleClick = (event: MouseEvent<HTMLElement>) => {
     if (event.target instanceof Element && event.target.closest("button")) return;
+    // 머리 칸(이름·빈자리·눈금 여백)은 클립 칸 왼쪽 밖이라 거기서 잰 x는 음수다 -- seek가 아니다.
+    if (event.target instanceof Element && event.target.closest(".vb-timeline-lane-headers")) return;
     // 클립·재생 머리와 **같은 좌표계**(트랙 원점)로 잰다. 섹션 원점으로 재면
     // 섹션 안쪽 여백만큼 옆으로 어긋난 자리로 seek한다.
     const track = event.currentTarget.querySelector<HTMLElement>("[data-timeline-track]");
@@ -997,7 +1002,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
       </div>
       <div className="vb-timeline-lanes-viewport" ref={lanesViewportRef}>
       <div className="vb-timeline-scale">
-        <div aria-label="시간 눈금" role="list" style={{ display: "flex", minHeight: "1.5rem", overflow: "hidden" }}>
+        <div aria-label="시간 눈금" role="list" style={{ display: "flex", minHeight: "var(--vb-timeline-ruler-h, 1.5rem)", overflow: "hidden" }}>
           {rulerMarks.map((seconds) => <span key={seconds} aria-label={`눈금 ${seconds}초`} role="listitem" style={{ minWidth: `${state.pixelsPerSecond}px` }}>{seconds}s</span>)}
         </div>
       </div>

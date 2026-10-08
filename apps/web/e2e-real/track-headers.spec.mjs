@@ -76,7 +76,7 @@ test("머리 칸은 클립 칸과 세로로 맞고 가로로 안 넘친다", asy
       const clips = [...document.querySelectorAll('[data-testid="timeline-clip"]')].map((c) => c.getBoundingClientRect());
       const headerBox = document.querySelector(".vb-timeline-lane-headers").getBoundingClientRect();
       return {
-        overflow: section.scrollWidth - section.clientWidth, headers, trackTop: track.top, trackLeft: track.left,
+        overflow: section.scrollWidth - section.clientWidth, headers, trackTop: track.top, trackHeight: track.height, trackLeft: track.left,
         headerRight: headerBox.right, minClipLeft: Math.min(...clips.map((c) => c.left)), bodyW: body.width,
         pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
       };
@@ -84,7 +84,10 @@ test("머리 칸은 클립 칸과 세로로 맞고 가로로 안 넘친다", asy
     console.log("LAYOUT", viewport.width, JSON.stringify(m));
     expect(m.overflow).toBeLessThanOrEqual(1);
     expect(m.minClipLeft).toBeGreaterThanOrEqual(m.headerRight - 1);
-    m.headers.forEach((top, i) => expect(Math.abs(top - (m.trackTop + i * 32))).toBeLessThanOrEqual(1.5));
+    // 줄 높이는 CSS 변수가 정한다 -- 머리 줄 사이 간격(측정값)을 쓰고, 클립 칸 높이/6과도 맞아야 한다.
+    const pitch = m.headers[1] - m.headers[0];
+    expect(Math.abs(pitch * m.headers.length - m.trackHeight)).toBeLessThanOrEqual(1.5);
+    m.headers.forEach((top, i) => expect(Math.abs(top - (m.trackTop + i * pitch))).toBeLessThanOrEqual(1.5));
     await page.getByRole("region", { name: "타임라인" }).screenshot({ path: path.join(SHOT_DIR, `timeline-${viewport.width}.png`) });
     await page.screenshot({ path: path.join(SHOT_DIR, `full-${viewport.width}.png`) });
   }

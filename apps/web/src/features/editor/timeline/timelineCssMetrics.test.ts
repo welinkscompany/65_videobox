@@ -17,7 +17,7 @@ describe("readCssPixels", () => {
   it("숫자가 아니거나 비었거나 0 이하면 fallback이다", () => {
     const el = document.createElement("div");
     const spy = vi.spyOn(window, "getComputedStyle");
-    for (const raw of ["abc", "", "0px", "-4px"]) {
+    for (const raw of ["abc", "", "0px", "-4px", "2rem", "calc(1px + 2px)", "50%"]) {
       spy.mockReturnValue({ getPropertyValue: () => raw } as never);
       expect(readCssPixels(el, "--x", 32)).toBe(32);
     }
