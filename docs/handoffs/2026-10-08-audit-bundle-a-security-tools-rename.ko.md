@@ -1,3 +1,5 @@
+**대체됨:** docs/handoffs/2026-10-08-motion-graphics-step2.ko.md
+
 # 점검 후속 묶음 A — 다리 토큰·도구 패치·인포그래픽 거절·이름 바꾸기 (2026-10-08)
 
 **이어받는 문서:** `2026-10-01-full-audit-security-copy-wiring.ko.md`

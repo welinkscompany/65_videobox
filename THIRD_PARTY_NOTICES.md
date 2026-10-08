@@ -83,6 +83,14 @@ the direct upstream LICENSE and NOTICE links, and the required attribution to
 | Supabase | Apache-2.0; reference only | https://github.com/supabase/supabase/blob/1c827c5cbb29cacc6e9052adff2e1659e3cb05fb/LICENSE |
 | Pretendard v1.3.9 | SIL OFL-1.1 | https://github.com/orioncactus/pretendard/blob/5c41199ea0024a9e0b2cb31735265056e5472d76/LICENSE |
 
+## 설명 모션 엔진 (호스트 전용, 배포하지 않음)
+
+`scripts/motion-bridge/package.json`이 npm `hyperframes` **0.8.140**(Apache-2.0, HeyGen)을
+이 컴퓨터에만 설치한다. 컨테이너 이미지에는 들어가지 않고(`.dockerignore`), 소스를 고치거나
+옮겨 싣지 않는다. 그릴 때 쓰는 브라우저(chrome-headless-shell)는 하이퍼프레임이 사용자 캐시
+(`~/.cache/hyperframes`)에 받는다. 템플릿 셋(`scripts/motion-bridge/templates/`)은 VideoBox가
+직접 쓴 것이다. 라이선스: https://github.com/heygen-com/hyperframes/blob/main/LICENSE
+
 ## 자막 글꼴 (컨테이너에 함께 배포)
 
 owner가 2026-08-20에 스타터 팩의 라이선스 범위를 CC0 전용에서 **OFL/ISC 계열까지**

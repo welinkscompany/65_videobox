@@ -15,6 +15,8 @@
 | 2 | `2026-10-02-audit-bf-yujin-capabilities.ko.md` | 23 (+조건부 23) · 약 22~35시간 | 가장 크다. `YujinPanel`·`OutputsPage`를 G보다 먼저 바꾼다 |
 | 3 | `2026-10-02-audit-g-screen-improvements.ko.md` | 18 (0~17) · 약 8~9시간 | 같은 두 파일을 마지막에 다듬는다. 앵커를 **문자열로** 찾게 쓰여 있어 앞 계획 뒤에도 따라간다 |
 
+> 2026-10-08: 설명 모션 2단계(`2026-10-08-motion-graphics-step2.ko.md`)가 B–F보다 먼저 들어왔다. `api.ts`(타입 셋·메서드 둘), `owner-ready.ps1`(모션 다리 블록), `models.py`(모션 모델 넷), `main.py`(모션 서비스·라우터)가 바뀌었다 — 앵커는 문자열로 찾는다.
+
 **계획서끼리 병렬로 돌리지 않는다.** 아래 파일을 여럿이 같이 고친다:
 `apps/web/src/features/editor/workbench/YujinPanel.tsx`(B–F·G), `apps/web/src/app/OutputsPage.tsx`(B–F·G),
 `services/api/src/videobox_api/routers/library_assets.py`(A·B–F), `apps/web/src/api.ts`(A·B–F),
