@@ -890,3 +890,21 @@ describe("편집기에서 프로젝트 미디어 빼기", () => {
     expect(trash).not.toHaveBeenCalled();
   });
 });
+
+/** 설명 모션(2026-10-08 결정 2단계). 편집기를 떠나지 않고 연다. */
+describe("편집기에서 모션 만들기 열기", () => {
+  it("편집기를 떠나지 않고 모션 만들기를 연다", async () => {
+    vi.spyOn(apiModule.api, "listMotionTemplates").mockResolvedValue({ templates: [] } as never);
+    render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "모션" }));
+
+    expect(await screen.findByRole("dialog", { name: "모션 만들기" })).toBeVisible();
+  });
+
+  it("프로젝트를 모르면 모션 만들기를 열지 않는다", () => {
+    render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: "모션" })).toBeNull();
+  });
+});

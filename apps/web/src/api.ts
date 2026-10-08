@@ -72,6 +72,10 @@ export type InfographicResult = {
   library_error: string | null;
 };
 
+/** 설명 모션(2026-10-08 결정 2단계). 글자 수 한도는 `limits`에 실려 오므로 화면이 숫자를 베껴 적지 않는다. */
+export type MotionTemplate = { key: string; korean_name: string; description: string; default_duration_sec: number; min_duration_sec: number; max_duration_sec: number; limits: Record<string, number> };
+export type MotionRequest = { template: string; variables: Record<string, unknown>; duration_sec: number; layout?: "full"; title?: string | null };
+export type MotionResult = { library_asset_id: string | null; template: string; title: string; duration_sec: number; layout: "full" | "overlay"; format: "mp4" | "webm"; byte_size: number; elapsed_sec: number; library_error: string | null };
 export type SceneImageRequest = { prompt: string; segment_id: string; vertical?: boolean; duration_sec?: number; gap_slot_id?: string | null };
 /** 진짜 동영상(Wan). `SceneImageRequest`와 별개 경로다(owner 결정 2026-08-29 2회차,
  *  "원래 만든거외에 별도로 만들자") -- 정지 이미지+zoompan은 그대로 두고 이 자리가
@@ -2162,6 +2166,10 @@ export const api = {
   /** 인포그래픽 한 장. **한 판에 1~2분 걸린다**(2026-09-07 실측) -- 부르는 쪽이
    *  기다리는 동안 화면에 상태를 말하고 두 번 눌리지 않게 막아야 한다. */
   createInfographic: (payload: InfographicRequest) => request<InfographicResult>("/api/library/infographics", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  /** 고를 수 있는 설명 모션 종류. 화면이 이름·글자 수 한도를 베껴 적지 않으려고 서버에서 받는다. */
+  listMotionTemplates: () => request<{ templates: MotionTemplate[] }>("/api/library/motion-templates"),
+  /** 설명 모션 한 편. 6초짜리가 15초쯤, 30초짜리가 1분 안쪽으로 걸려서 부르는 쪽이 기다림을 화면에 말해야 한다. */
+  createMotion: (payload: MotionRequest) => request<MotionResult>("/api/library/motions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   createSceneImage: (projectId: string, payload: SceneImageRequest) => request<SceneImage>(`/api/projects/${encodeURIComponent(projectId)}/scene-images`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   startSceneVideo: (projectId: string, payload: SceneVideoRequest) => request<SceneVideoStart>(`/api/projects/${encodeURIComponent(projectId)}/scene-videos`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   getSceneVideoStatus: (projectId: string, jobId: string) => request<SceneVideoStatus>(`/api/projects/${encodeURIComponent(projectId)}/scene-videos/${encodeURIComponent(jobId)}`),

@@ -12,6 +12,7 @@ import { ingestFilesIntoProject, ingestOutcomeMessage } from "../../media/ingest
 import { VoiceMaterialPanel } from "../../media/VoiceMaterialPanel";
 import { ImportFromFootageInbox } from "../../media/ImportFromFootageInbox";
 import { InfographicPanel } from "./InfographicPanel";
+import { MotionPanel } from "./MotionPanel";
 import { LibraryPickerDialog } from "./LibraryPickerDialog";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../../components/ui/dialog";
 import { DEFAULT_SCENE_TRANSITION_DURATION_SEC, SCENE_TRANSITION_CHOICES } from "../inspector/sceneTransitions";
@@ -235,6 +236,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
   const [shown, setShown] = useState(FIRST_PAGE);
   const [narrationOpen, setNarrationOpen] = useState(false);
   const [infographicOpen, setInfographicOpen] = useState(false);
+  const [motionOpen, setMotionOpen] = useState(false);
   const [footageOpen, setFootageOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const visibleCards = matchingCards.slice(0, shown);
@@ -338,6 +340,9 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
             내레이션과 같은 이유로 팝업이다: 숫자를 여러 줄 적어야 해서 220~400px
             도크에 밀어 넣으면 답답하다. */}
         <Button type="button" variant="outline" className="vb-editor-assets__infographic" onClick={() => setInfographicOpen(true)}>인포그래픽</Button>
+        {/* **설명 모션(2026-10-08 결정 2단계).** 결과가 영상 한 편이라 인포그래픽(그림 한 장)
+            옆자리다. 고를 칸이 여러 줄이라 도크에 밀어 넣지 않고 팝업으로 연다. */}
+        <Button type="button" variant="outline" className="vb-editor-assets__motion" onClick={() => setMotionOpen(true)}>모션</Button>
         {/* **라이브러리에서 가져오기(owner 승인, 재설계안 §1.3).**
             여러 프로젝트가 함께 쓰는 `/library`는 지금 편집 중인 프로젝트에
             속하지 않는다 -- 그래서 편집기 안으로 통째로 접지 않고, "고르기"
@@ -362,6 +367,15 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
               <DialogDescription>숫자를 적으면 그림 한 장으로 만들어 자료실에 넣어요.</DialogDescription>
             </DialogHeader>
             <InfographicPanel onMade={onMediaAdded} />
+          </DialogContent>
+        </Dialog>
+        <Dialog open={motionOpen} onOpenChange={setMotionOpen}>
+          <DialogContent className="vb-dialog-content">
+            <DialogHeader>
+              <DialogTitle>모션 만들기</DialogTitle>
+              <DialogDescription>숫자와 글을 적으면 움직이는 설명 영상으로 만들어 이 프로젝트에 넣어요.</DialogDescription>
+            </DialogHeader>
+            <MotionPanel projectId={projectId} sceneSeconds={target ? target.endSec - target.startSec : null} onMade={onMediaAdded} />
           </DialogContent>
         </Dialog>
         <Dialog open={narrationOpen} onOpenChange={setNarrationOpen}>
