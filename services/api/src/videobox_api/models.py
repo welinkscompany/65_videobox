@@ -562,6 +562,8 @@ class MotionCreateRequest(BaseModel):
 
 
 class MotionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     library_asset_id: str | None = None
     template: str
     title: str
@@ -575,6 +577,8 @@ class MotionResponse(BaseModel):
 
 
 class MotionTemplateResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     key: str
     korean_name: str
     description: str
@@ -585,6 +589,8 @@ class MotionTemplateResponse(BaseModel):
 
 
 class MotionTemplateListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     templates: list[MotionTemplateResponse]
 
 
