@@ -7,6 +7,7 @@ import { classifyTimelineHit } from "./hit-testing";
 import { carriesAsset, readAssetDrag } from "../assets/assetDragPayload";
 import { findTimelineSnap, type SnapCandidate, type SnapCandidateKind } from "./snapping";
 import { frameToSeconds, pixelsToTime, secondsToFrameHalfUp, timeToPixels } from "./time-scale";
+import { readCssPixels } from "./timelineCssMetrics";
 import { TIMELINE_LANES, type ClipRect, type TimelineLane } from "./timeline-geometry";
 import { deriveNarrationTrim, reorderNarrationLayout, type NarrationSegment, type NarrationReorderLayout } from "./narrationMutation";
 import { derivePlacementMove, derivePlacementTrim, type TimelinePlacement, type TimelinePlacementKind } from "./placementMutation";
@@ -22,19 +23,12 @@ import { fitPixelsPerSecond, initialPixelsPerSecond, pixelsPerSecondBounds } fro
 import { timelineZoomShortcutFor, type TimelineZoomCommand } from "./timelineZoomShortcuts";
 import { timelineWheelGestureFor } from "./timelineWheelGesture";
 
-const LANE_HEIGHT_PX = 32;
+/** 트랙 한 줄 높이의 기본값. 실제 값은 CSS 변수 `--vb-timeline-lane-h`에서 마운트 뒤 읽는다. */
+const DEFAULT_LANE_HEIGHT_PX = 32;
 /** 눈·음소거를 그릴 트랙. 서버(`track_states.py`)가 받는 것과 같은 갈래이고,
  *  두 벌이 어긋나면 눌러도 422로 거절되는 단추가 생긴다. */
 const HIDEABLE_LANES = new Set<TimelineLane>(["broll", "overlay", "caption"]);
 const MUTABLE_LANES = new Set<TimelineLane>(["narration", "broll", "bgm", "sfx"]);
-/** 트랙 이름표·잠금·눈·음소거 뭉치가 실제로 차지하는 가로 폭의 넉넉한 상한이다
- *  (실측: 내레이션 108px, 영상 최대 170px -- 2026-09-18 실물 재현). 컷 편집을 하면
- *  0초 근처에 이 폭보다 짧은 클립이 남을 수 있다 -- 그러면 이 뭉치가 트랙 이름·
- *  잠금·음소거 위에 **떠 있어야 한다**는 2026-09-03 원칙과, 그 클립을 실제로
- *  고를 수 있어야 한다는 원칙이 같은 자리에서 부딪힌다. 그 자리에 걸린 클립이
- *  없을 때만 뭉치가 클릭을 받고, 걸려 있으면 그 트랙만 양보한다(아래
- *  `laneNeedsClipAccess`) -- 키보드 접근은 그대로 둔다, 마우스 클릭만 넘긴다. */
-const LANE_HEADER_DEAD_ZONE_PX = 180;
 const SNAP_THRESHOLD_PX = 8;
 /** 한 번에 얼마나 늘리고 줄이는가. `navigationKeyAction`의 기본값과 같은 값이고,
  *  단추·키·전체 보기가 전부 이 한 값을 본다. */
@@ -257,10 +251,16 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   // 늘리기·줄이기의 한계는 **영상 길이와 화면 폭에서 나온다.** 줄이기는 영상
   // 전체가 한 화면에 들어온 자리에서 멈추고, 늘리기는 프레임이 보이는 자리에서
   // 멈춘다(`timelineZoomScale.ts`).
-  const zoomBounds = pixelsPerSecondBounds({ durationSec: view.output.durationSec, viewportWidthPx });
+  // 클립 칸(`.vb-timeline-lanes-viewport`)의 실제 폭. 머리 칸이 따로 있어 화면 폭과
+  // 다르다. jsdom은 관찰 콜백이 없어 0으로 남고, 그러면 받은 폭을 그대로 쓴다.
+  const [measuredTrackWidthPx, setMeasuredTrackWidthPx] = useState(0);
+  const trackWidthPx = measuredTrackWidthPx > 0 ? measuredTrackWidthPx : viewportWidthPx;
+  // 트랙 높이는 CSS 변수(`--vb-timeline-lane-h`)가 정한다. 첫 렌더는 기본값, 마운트 뒤 한 번 읽는다.
+  const [laneHeightPx, setLaneHeightPx] = useState(DEFAULT_LANE_HEIGHT_PX);
+  const zoomBounds = pixelsPerSecondBounds({ durationSec: view.output.durationSec, viewportWidthPx: trackWidthPx });
   const options = {
     durationSec: view.output.durationSec,
-    viewportWidthPx,
+    viewportWidthPx: trackWidthPx,
     fps: view.fps,
     minPixelsPerSecond: zoomBounds.min,
     maxPixelsPerSecond: zoomBounds.max,
@@ -333,6 +333,20 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   };
   // 바퀴 listener를 직접 달 자리이자, 늘릴 때 기준점을 재는 자리다(아래 `handleWheel`).
   const surfaceRef = useRef<HTMLElement | null>(null);
+  const lanesViewportRef = useRef<HTMLDivElement | null>(null);
+  // 마운트 뒤 CSS 변수에서 트랙 높이를 한 번 읽고, 클립 칸 폭을 잰다. 둘 다 jsdom에서는
+  // 기본값/받은 폭으로 남는다(관찰 콜백이 없다).
+  useEffect(() => {
+    setLaneHeightPx(readCssPixels(surfaceRef.current, "--vb-timeline-lane-h", DEFAULT_LANE_HEIGHT_PX));
+    const viewport = lanesViewportRef.current;
+    if (!viewport || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? 0;
+      if (width > 0) setMeasuredTrackWidthPx(Math.floor(width));
+    });
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
   const previousSelectionResetKey = useRef(selectionResetKey);
   const onPlaybackSeekRef = useRef(onPlaybackSeek);
   useEffect(() => { onPlaybackSeekRef.current = onPlaybackSeek; }, [onPlaybackSeek]);
@@ -366,19 +380,19 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   // deps는 **재생 위치 하나뿐**이다. viewportStartSec까지 넣으면 편집자가 다른
   // 구간을 보려고 옆으로 밀어 둔 뷰포트를 재생 위치가 도로 끌어당긴다.
   useEffect(() => {
-    const followEndSec = resolveViewportEnd(state, view.output.durationSec, viewportWidthPx);
+    const followEndSec = resolveViewportEnd(state, view.output.durationSec, trackWidthPx);
     if (state.playheadSec >= state.viewportStartSec && state.playheadSec <= followEndSec) return;
     dispatch({ type: "scroll", seconds: state.playheadSec });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.playheadSec]);
-  const viewportEndSec = resolveViewportEnd(state, view.output.durationSec, viewportWidthPx);
+  const viewportEndSec = resolveViewportEnd(state, view.output.durationSec, trackWidthPx);
   const rects = useMemo(() => projectVisibleTimelineClips({
     clips: clipSources(view),
-    viewport: { startSec: state.viewportStartSec, endSec: viewportEndSec, topPx: 0, heightPx: TIMELINE_LANES.length * LANE_HEIGHT_PX },
+    viewport: { startSec: state.viewportStartSec, endSec: viewportEndSec, topPx: 0, heightPx: TIMELINE_LANES.length * laneHeightPx },
     pixelsPerSecond: state.pixelsPerSecond,
     originSec: state.viewportStartSec,
-    laneHeightPx: LANE_HEIGHT_PX,
-  }), [state.pixelsPerSecond, state.viewportStartSec, view, viewportEndSec]);
+    laneHeightPx,
+  }), [laneHeightPx, state.pixelsPerSecond, state.viewportStartSec, view, viewportEndSec]);
   const visibleGaps = view.gaps.filter((gap) => gap.startSec < viewportEndSec && gap.endSec > state.viewportStartSec);
   const caption = view.captions.find((item) => state.playheadSec >= item.startSec && state.playheadSec < item.endSec) ?? null;
   const snapCandidates = useMemo(() => sourceSnapCandidates(view), [view]);
@@ -420,7 +434,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   //
   // 전체 보기가 가는 자리는 **줄이기의 바닥과 같은 값**이다(`zoomBounds.min`).
   // 그래서 줄이기를 계속 누른 자리와 전체 보기를 누른 자리가 정확히 겹친다.
-  const fitTarget = fitPixelsPerSecond({ durationSec: view.output.durationSec, viewportWidthPx }) === null
+  const fitTarget = fitPixelsPerSecond({ durationSec: view.output.durationSec, viewportWidthPx: trackWidthPx }) === null
     ? null
     : zoomBounds.min;
   // `anchorPx`를 안 주면 reducer가 **재생 머리**를 기준으로 잡는다(단추와 키가
@@ -627,13 +641,13 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     });
     const projectedRects = projectVisibleTimelineClips({
       clips: sources,
-      viewport: { startSec: state.viewportStartSec, endSec: viewportEndSec, topPx: 0, heightPx: TIMELINE_LANES.length * LANE_HEIGHT_PX },
+      viewport: { startSec: state.viewportStartSec, endSec: viewportEndSec, topPx: 0, heightPx: TIMELINE_LANES.length * laneHeightPx },
       pixelsPerSecond: state.pixelsPerSecond,
       originSec: state.viewportStartSec,
-      laneHeightPx: LANE_HEIGHT_PX,
+      laneHeightPx,
     }).sort((left, right) => left.y - right.y || left.x - right.x || left.clipId.localeCompare(right.clipId));
     return { boundsByClipId, rects: projectedRects };
-  }, [narrationByClipId, pointerDraft, state.pixelsPerSecond, state.viewportStartSec, view, viewportEndSec]);
+  }, [laneHeightPx, narrationByClipId, pointerDraft, state.pixelsPerSecond, state.viewportStartSec, view, viewportEndSec]);
   const pointerTimelineX = (event: PointerEvent<HTMLElement>): number => {
     const timelineTrack = event.currentTarget.closest<HTMLElement>("[data-timeline-track]");
     const clientX = Number.isFinite(event.clientX) ? event.clientX : 0;
@@ -931,82 +945,63 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     </div>
     {/* 캡컷처럼 눈금과 트랙을 한 좌표계에 놓고, 그 위에 재생 위치 선을 관통시킨다.
         예전에는 맨 아래 숫자뿐이라 어디서 나뉘는지 눈으로 찾을 수 없었다. */}
-    <div className="vb-timeline-scale" style={{ position: "relative" }}>
-      <div aria-label="시간 눈금" role="list" style={{ display: "flex", minHeight: "1.5rem", overflow: "hidden" }}>
-        {rulerMarks.map((seconds) => <span key={seconds} aria-label={`눈금 ${seconds}초`} role="listitem" style={{ minWidth: `${state.pixelsPerSecond}px` }}>{seconds}s</span>)}
+    <div className="vb-timeline-body">
+      <div className="vb-timeline-lane-headers">
+        <div aria-hidden="true" className="vb-timeline-lane-headers__ruler-spacer" />
+        <div aria-label="고정 트랙" role="list">
+          {/* 2026-10-08: 머리를 클립 층 밖의 별도 칸으로 빼서(점검 §3-4, 스파이크 §3(가)) 클립과 겹치지
+              않는다. 예전의 "클립 위에 띄우고 걸린 트랙만 클릭을 양보" 규칙은 필요 없어서 지웠다. */}
+          {TIMELINE_LANES.map((lane) => {
+            return <div key={lane} aria-label={laneLabel[lane]} role="listitem" >
+            <span>{laneLabel[lane]}</span>
+            {/* **잠금 · 눈 · 음소거**(`capcut-observed` 기록 §2: "트랙마다 왼쪽에
+                잠금 · 눈 · 음소거 · `···`"). 셋의 성격이 다르다 --
+                **잠금**은 화면 안에서만 쓰는 것이라 여기 상태로 끝나고(새로고침하면
+                풀린다), **눈·음소거는 결과물이 달라지는 편집**이라 세션에 남고
+                렌더까지 간다(`track_states.py`). `···`는 기록에 메뉴 내용이
+                없어 만들지 않는다 -- 만들면 지어내는 것이다. */}
+            <button
+              type="button"
+              data-native-control="timeline-lane-lock"
+              aria-label={`${laneLabel[lane]} 트랙 잠금`}
+              aria-pressed={lockedLanes.has(lane)}
+              onClick={() => toggleLaneLock(lane)}
+            >
+              {lockedLanes.has(lane) ? <Lock aria-hidden="true" size={14} /> : <Unlock aria-hidden="true" size={14} />}
+            </button>
+            {/* 트랙마다 **뜻이 있는 것만** 그린다. 자막 트랙 음소거처럼 눌러도
+                아무 일도 안 일어날 단추는 두지 않는다(기록 §4). */}
+            {HIDEABLE_LANES.has(lane) ? <button
+              type="button"
+              data-native-control="timeline-lane-hidden"
+              aria-label={`${laneLabel[lane]} 트랙 숨기기`}
+              aria-pressed={hiddenLanes.has(lane)}
+              disabled={!onUpdateTrackStates || isSaving}
+              onClick={() => toggleTrackState(lane, "hidden")}
+            >
+              {hiddenLanes.has(lane) ? <EyeOff aria-hidden="true" size={14} /> : <Eye aria-hidden="true" size={14} />}
+            </button> : null}
+            {MUTABLE_LANES.has(lane) ? <button
+              type="button"
+              data-native-control="timeline-lane-muted"
+              aria-label={`${laneLabel[lane]} 트랙 음소거`}
+              aria-pressed={mutedLanes.has(lane)}
+              disabled={!onUpdateTrackStates || isSaving}
+              onClick={() => toggleTrackState(lane, "muted")}
+            >
+              {mutedLanes.has(lane) ? <VolumeX aria-hidden="true" size={14} /> : <Volume2 aria-hidden="true" size={14} />}
+            </button> : null}
+          </div>;
+          })}
+        </div>
       </div>
-      <div data-timeline-track data-testid="timeline-track" onPointerCancel={cancelPointerDraft} onPointerMove={movePointerDraft} onPointerUp={endPointerDraft} style={{ position: "relative" }}>
-      <div aria-label="고정 트랙" role="list">
-        {/* **클립 위에 떠 있어야 한다.** 클립 층은 트랙 전체를 `inset: 0`으로
-            덮는데(아래 `타임라인 클립`), 이 줄이 그 아래 깔려 있어서 0초에서
-            시작하는 클립이 있으면 트랙 이름과 잠금·눈·음소거가 **통째로
-            가려졌다** -- 보이지도 않고 눌리지도 않았다(2026-09-03 실측: 트랙
-            버튼 13개 전부, 누르면 클립이 대신 선택됐다).
-
-            빈 자리는 그대로 통과시킨다. 안 그러면 이 줄이 트랙 폭 전체를
-            차지해서 이번엔 클립을 못 누른다. 이 파일이 클립 안 손잡이에
-            쓰는 방식과 같다.
-
-            **재생 위치 선(`z-index: 3`)보다도 위여야 한다.** 재생 위치가
-            0초일 때 그 선이 트랙 이름 글자의 왼쪽 몇 픽셀과 정확히 겹쳐서
-            "영상"이 "경상"처럼 보이는 식으로 글자가 뭉개졌다(2026-09-17
-            화면 점검 실측 -- 폭이 좁아서가 아니라 두 층이 겹쳐서였다, DOM은
-            글자 전체를 이미 담고 있었다). */}
-        {TIMELINE_LANES.map((lane) => {
-          // **컷 편집으로 이 뭉치 폭보다 짧은 클립이 0초 근처에 남으면 뭉치가
-          // 양보한다**(2026-09-18 실물 재현: "내레이션 1번째 장면, 0초부터"의
-          // 중심점을 눌러도 클립이 아니라 "내레이션 트랙 음소거"가 대신 눌렸다).
-          // 이 트랙에 걸린 클립이 없으면 그대로 위에 뜬다 -- 2026-09-03 원칙은
-          // 유지한다.
-          const laneNeedsClipAccess = draftProjection.rects.some((rect) => rect.lane === lane && rect.x < LANE_HEADER_DEAD_ZONE_PX);
-          const clusterPointerEvents: "auto" | "none" = laneNeedsClipAccess ? "none" : "auto";
-          return <div key={lane} aria-label={laneLabel[lane]} role="listitem" style={{ height: `${LANE_HEIGHT_PX}px`, borderTop: "1px solid currentColor", position: "relative", zIndex: 4, pointerEvents: "none" }}>
-          {/* 이름표는 누를 곳이 아니다 -- 핸들러가 없다. `pointerEvents:"auto"`를
-              얹으면 읽는 것 말고 아무 일도 안 하면서 클립 클릭만 가로챈다. */}
-          <span>{laneLabel[lane]}</span>
-          {/* **잠금 · 눈 · 음소거**(`capcut-observed` 기록 §2: "트랙마다 왼쪽에
-              잠금 · 눈 · 음소거 · `···`"). 셋의 성격이 다르다 --
-              **잠금**은 화면 안에서만 쓰는 것이라 여기 상태로 끝나고(새로고침하면
-              풀린다), **눈·음소거는 결과물이 달라지는 편집**이라 세션에 남고
-              렌더까지 간다(`track_states.py`). `···`는 기록에 메뉴 내용이
-              없어 만들지 않는다 -- 만들면 지어내는 것이다. */}
-          <button
-            type="button"
-            data-native-control="timeline-lane-lock"
-            style={{ pointerEvents: clusterPointerEvents }}
-            aria-label={`${laneLabel[lane]} 트랙 잠금`}
-            aria-pressed={lockedLanes.has(lane)}
-            onClick={() => toggleLaneLock(lane)}
-          >
-            {lockedLanes.has(lane) ? <Lock aria-hidden="true" size={14} /> : <Unlock aria-hidden="true" size={14} />}
-          </button>
-          {/* 트랙마다 **뜻이 있는 것만** 그린다. 자막 트랙 음소거처럼 눌러도
-              아무 일도 안 일어날 단추는 두지 않는다(기록 §4). */}
-          {HIDEABLE_LANES.has(lane) ? <button
-            type="button"
-            data-native-control="timeline-lane-hidden"
-            style={{ pointerEvents: clusterPointerEvents }}
-            aria-label={`${laneLabel[lane]} 트랙 숨기기`}
-            aria-pressed={hiddenLanes.has(lane)}
-            disabled={!onUpdateTrackStates || isSaving}
-            onClick={() => toggleTrackState(lane, "hidden")}
-          >
-            {hiddenLanes.has(lane) ? <EyeOff aria-hidden="true" size={14} /> : <Eye aria-hidden="true" size={14} />}
-          </button> : null}
-          {MUTABLE_LANES.has(lane) ? <button
-            type="button"
-            data-native-control="timeline-lane-muted"
-            style={{ pointerEvents: clusterPointerEvents }}
-            aria-label={`${laneLabel[lane]} 트랙 음소거`}
-            aria-pressed={mutedLanes.has(lane)}
-            disabled={!onUpdateTrackStates || isSaving}
-            onClick={() => toggleTrackState(lane, "muted")}
-          >
-            {mutedLanes.has(lane) ? <VolumeX aria-hidden="true" size={14} /> : <Volume2 aria-hidden="true" size={14} />}
-          </button> : null}
-        </div>;
-        })}
+      <div className="vb-timeline-lanes-viewport" ref={lanesViewportRef}>
+      <div className="vb-timeline-scale">
+        <div aria-label="시간 눈금" role="list" style={{ display: "flex", minHeight: "1.5rem", overflow: "hidden" }}>
+          {rulerMarks.map((seconds) => <span key={seconds} aria-label={`눈금 ${seconds}초`} role="listitem" style={{ minWidth: `${state.pixelsPerSecond}px` }}>{seconds}s</span>)}
+        </div>
       </div>
+      <div data-timeline-track data-testid="timeline-track" onPointerCancel={cancelPointerDraft} onPointerMove={movePointerDraft} onPointerUp={endPointerDraft} style={{ position: "relative", height: `${TIMELINE_LANES.length * laneHeightPx}px` }}>
       <div aria-label="타임라인 클립" role="group" style={{ inset: 0, position: "absolute" }}>
         {draftProjection.rects.map((rect) => {
         const ordinalInLane = laneOrdinalByClipId.get(rect.clipId) ?? 1;
@@ -1122,6 +1117,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
         title="끌어서 재생 위치를 훑고, 왼쪽·오른쪽 화살표로 한 프레임씩"
         type="button"
       /></div>
+      </div>
     </div>
     {/* 아래 상태 줄들도 같은 이유로 한 줄에 모은다. 하나하나는 짧은 조각인데
         한 줄씩 차지하면 눈금과 트랙이 밀려 스크롤 안으로 들어간다. */}
