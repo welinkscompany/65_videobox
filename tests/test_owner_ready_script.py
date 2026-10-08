@@ -896,6 +896,68 @@ def test_start_brings_up_the_voice_bridge_without_leaving_a_window_open(tmp_path
     assert "창" not in json.dumps(voice, ensure_ascii=False), "창을 열어 두라고 하면 안 된다"
 
 
+def test_start_reports_the_motion_bridge_without_waiting_for_its_first_preparation(tmp_path: Path) -> None:
+    """2026-10-08 결정: 처음 준비(약 400MB)는 몇 분 걸린다. VideoBox 켜기를 그동안 붙잡으면 안 된다.
+
+    준비는 숨은 창에서 따로 돌고(`prepare-motion.ps1`), 여기서는 결과 한 줄만 남긴다.
+    """
+    fixture = _fixture_repository(tmp_path)
+    with _health_server() as video_uri:
+        result = _run(fixture, mode="Start", video_uri=video_uri)
+
+    assert result.returncode == 0, _why_it_failed(result)
+    motion = next((row for row in _payload(result)["checks"] if row["id"] == "motion_bridge"), None)
+    assert motion is not None, "모션 다리 결과가 없다"
+    assert motion["status"] == "pass"
+    assert motion["evidence"]["port"] == 8202
+
+    source = fixture["script"].read_text(encoding="utf-8-sig")
+    block = source[source.index('-Id "infographic_bridge"'):source.index('-Id "motion_bridge"')]
+    assert "prepare-motion.ps1" in block
+    assert "-WindowStyle Hidden" in block
+    assert "& $motionPrepareScript" not in block, "준비를 앞에서 기다리면 켜기가 몇 분 멈춘다"
+
+
+def test_start_returns_while_the_first_motion_preparation_is_still_running_in_the_background(tmp_path: Path) -> None:
+    """Task 5 이월 점검(d): 준비가 안 된 컴퓨터에서 Start는 준비를 기다리지 않는다.
+
+    가짜 `prepare-motion.ps1`이 일부러 오래 돈다. Start가 돌려준 시점에 그 일은 아직 안 끝나 있어야 하고,
+    결과 행은 쉬운 말로 "처음 준비하고 있다"고 알려야 한다(내부 말 없이).
+    """
+    fixture = _fixture_repository(tmp_path)
+    scripts = fixture["script"].parent
+    started_marker = tmp_path / "prepare-started.txt"
+    finished_marker = tmp_path / "prepare-finished.txt"
+    release_marker = tmp_path / "prepare-release.txt"  # 시험이 끝나면 만들어 가짜 준비를 마친다
+    (scripts / "prepare-motion.ps1").write_text(
+        "param([string]$LogPath)\n"
+        f"Set-Content -LiteralPath '{started_marker}' -Value 'started'\n"
+        f"for ($i = 0; $i -lt 240 -and -not (Test-Path -LiteralPath '{release_marker}'); $i++) {{ Start-Sleep -Milliseconds 500 }}\n"
+        f"Set-Content -LiteralPath '{finished_marker}' -Value 'finished'\n",
+        encoding="utf-8-sig",
+    )
+    (scripts / "start-motion.ps1").write_text("exit 0\n", encoding="utf-8-sig")
+    with _health_server() as video_uri:
+        result = _run(fixture, mode="Start", video_uri=video_uri)
+
+    assert result.returncode == 0, _why_it_failed(result)
+    motion = next(row for row in _payload(result)["checks"] if row["id"] == "motion_bridge")
+    assert motion["status"] == "pass"
+    assert motion["evidence"]["preparing"] is True
+    assert "prepare_log" in motion["evidence"]
+    assert "처음 한 번 준비" in motion["summary"]
+    for internal in ("provider", "runtime", "pipeline", "job"):
+        assert internal not in motion["summary"].lower()
+    try:
+        assert not finished_marker.exists(), "Start가 준비가 끝나기를 기다렸다"
+        deadline = time.monotonic() + 20
+        while not started_marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.2)
+        assert started_marker.exists(), "숨은 창에서 준비가 시작되지 않았다"
+    finally:
+        release_marker.write_text("go", encoding="utf-8")  # 가짜 준비가 남아 돌지 않게 마친다
+
+
 def test_start_waits_through_the_gateway_502s_that_precede_a_ready_app(tmp_path: Path) -> None:
     """실측(2026-08-17): 재시작 직후 1~3초는 nginx가 502를 돌려주고 4초부터 200이다.
 

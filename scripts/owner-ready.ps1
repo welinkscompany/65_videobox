@@ -1311,6 +1311,81 @@ if ($Mode -ceq "Start") {
     $checks += New-OwnerReadyResult -Id "infographic_bridge" -Status $infographicStatus `
         -Summary $infographicSummary -Action $infographicAction -Evidence $infographicEvidence
 
+    # **모션 다리도 같이 켠다**(2026-10-08 결정, 설명 모션). 하이퍼프레임(Node)과 그
+    # 브라우저는 이 컴퓨터에만 있다. 그림 다리(8201)와 같은 이유·같은 방식이고 8202다.
+    #
+    # **처음 한 번은 준비가 필요하다**(약 120MB 설치 + 약 270MB 브라우저). 여기서 기다리지
+    # 않는다 -- 준비는 숨은 창에서 따로 돌고(`prepare-motion.ps1`, 단계마다 시간 상한),
+    # 그동안 다리는 "준비 중"(503)이라고 답한다. VideoBox 켜기를 몇 분씩 붙잡지 않는다.
+    #
+    # 모션이 없어도 VideoBox는 다 쓸 수 있다. 그래서 blocked를 내지 않는다.
+    $motionStatus = "pass"
+    $motionSummary = "모션 다리를 켜지 못했습니다. 모션 만들기만 쉬어 갑니다."
+    $motionAction = "모션을 만들려면 로그를 확인한 뒤 다시 실행하세요."
+    $motionEvidence = @{ port = 8202; started = $false; preparing = $false }
+    $motionEnginePackage = Join-Path $PSScriptRoot "motion-bridge\node_modules\hyperframes\package.json"
+    $motionEngineReady = $false
+    try {
+        if (Test-Path $motionEnginePackage) {
+            $motionEngineReady = ((Get-Content -LiteralPath $motionEnginePackage -Raw | ConvertFrom-Json).version -eq "0.8.140")
+        }
+    } catch { $motionEngineReady = $false }
+    $motionBrowserReady = $false
+    try {
+        $motionBrowserRoot = Join-Path $env:USERPROFILE ".cache\hyperframes\chrome\chrome-headless-shell"
+        $motionBrowserReady = [bool](Get-ChildItem -Path $motionBrowserRoot -Filter "chrome-headless-shell.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)
+    } catch { $motionBrowserReady = $false }
+    $motionPreparing = $false
+    $motionPrepareScript = Join-Path $PSScriptRoot "prepare-motion.ps1"
+    $motionPrepareLog = Join-Path ([System.IO.Path]::GetTempPath()) "videobox-motion-prepare.log"
+    if (-not ($motionEngineReady -and $motionBrowserReady) -and (Test-Path $motionPrepareScript)) {
+        try {
+            # **출력 리다이렉트를 쓰지 않는다** -- 리다이렉트하면 이 창을 부른 쪽의 파이프가
+            # 준비 창에 상속돼, 호출자가 준비가 끝나기를 (몇 분) 기다리게 된다(2026-10-08 실측).
+            # 로그는 준비 스크립트가 `-LogPath`로 스스로 남긴다.
+            Start-Process -FilePath "powershell" `
+                -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ('"' + $motionPrepareScript + '"'), "-LogPath", ('"' + $motionPrepareLog + '"')) `
+                -WindowStyle Hidden | Out-Null
+            $motionPreparing = $true
+        } catch { $motionPreparing = $false }
+    }
+    $motionAlreadyUp = $false
+    try {
+        $probe = [System.Net.Sockets.TcpClient]::new()
+        $probe.Connect("127.0.0.1", 8202)
+        $motionAlreadyUp = $probe.Connected
+        $probe.Close()
+    } catch { $motionAlreadyUp = $false }
+    if ($motionAlreadyUp) {
+        $motionSummary = "모션 다리가 이미 준비돼 있습니다."
+        $motionAction = "추가 조치가 없습니다."
+        $motionEvidence = @{ port = 8202; started = $true; already_running = $true; preparing = $motionPreparing }
+    } else {
+        $motionScript = Join-Path $PSScriptRoot "start-motion.ps1"
+        $motionLog = Join-Path ([System.IO.Path]::GetTempPath()) "videobox-motion-bridge.log"
+        if (Test-Path $motionScript) {
+            try {
+                Start-Process -FilePath "powershell" `
+                    -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $motionScript) `
+                    -WindowStyle Hidden `
+                    -RedirectStandardOutput $motionLog `
+                    -RedirectStandardError ($motionLog + ".err") | Out-Null
+                $motionSummary = "모션 다리를 백그라운드로 켰습니다."
+                $motionAction = "추가 조치가 없습니다."
+                $motionEvidence = @{ port = 8202; started = $true; already_running = $false; log = $motionLog; preparing = $motionPreparing }
+            } catch {
+                $motionEvidence = @{ port = 8202; started = $false; log = $motionLog; preparing = $motionPreparing }
+            }
+        }
+    }
+    if ($motionPreparing) {
+        $motionSummary = "모션 도구를 처음 한 번 준비하고 있습니다(약 400MB 받기, 몇 분). 끝나면 모션 만들기를 쓸 수 있습니다."
+        $motionAction = "기다리면 됩니다. 오래 걸리면 준비 로그를 확인하세요."
+        $motionEvidence.prepare_log = $motionPrepareLog
+    }
+    $checks += New-OwnerReadyResult -Id "motion_bridge" -Status $motionStatus `
+        -Summary $motionSummary -Action $motionAction -Evidence $motionEvidence
+
     if ($WithYujinMemory) {
         # 게이트웨이가 유진 에이전트에 의존한다. 기억은 이제 게이트웨이를
         # 거치지 않고 API 서비스가 로컬 Postgres에 직접 저장한다.
