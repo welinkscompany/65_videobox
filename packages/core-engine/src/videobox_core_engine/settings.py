@@ -337,10 +337,10 @@ def resolve_video_generation_config() -> "VideoGenerationConfig":
     )
 
 
-#: 인포그래픽 한 판을 기다려 줄 시간. 실측 63~115초라 100초로는 아슬아슬하다.
-#: 위로는 `InfographicService.TOTAL_BUDGET_SECONDS`(300초)와 nginx 330초가 있다 --
+#: 인포그래픽 한 판을 기다려 줄 시간. 실측 63~115초였으나 2026-10-08에 140초를 넘겨 504가 두 번 났다(생각 모델이 느린 날). 240초로 올렸다.
+#: 위로는 `InfographicService.TOTAL_BUDGET_SECONDS`(500초)와 nginx 600초가 있다 --
 #: **두 판이 이 상한에 다 닿아도** 예산 안에 들어와야 하므로 그 절반이 천장이다.
-DEFAULT_INFOGRAPHIC_TIMEOUT_SECONDS = 140
+DEFAULT_INFOGRAPHIC_TIMEOUT_SECONDS = 240
 
 
 def resolve_infographic_timeout_seconds() -> int:

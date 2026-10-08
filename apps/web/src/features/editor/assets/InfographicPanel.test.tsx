@@ -108,7 +108,7 @@ describe("InfographicPanel", () => {
 
     const busy = await screen.findByRole("button", { name: /그리는 중/ });
     expect(busy).toHaveProperty("disabled", true);
-    expect(busy.textContent).toContain("1~2분");
+    expect(busy.textContent).toContain("몇 분");
     release(madeResult());
     await screen.findByRole("status");
   });

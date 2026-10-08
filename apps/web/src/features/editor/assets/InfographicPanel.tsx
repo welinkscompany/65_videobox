@@ -116,7 +116,7 @@ export function InfographicPanel({ onMade }: { onMade?: () => void }) {
     </div> : null}
 
     <Button type="button" disabled={!ready} onClick={make} className="vb-infographic__make">
-      {busy ? "그리는 중… 1~2분 걸려요" : "인포그래픽 만들기"}
+      {busy ? "그리는 중… 몇 분 걸릴 수 있어요" : "인포그래픽 만들기"}
     </Button>
 
     {failed ? <p className="vb-infographic__failed" role="alert">{failed}</p> : null}

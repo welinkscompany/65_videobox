@@ -69,7 +69,7 @@ INFOGRAPHIC_RESPONSE_SCHEMA = {
 #: 두 번까지만 시킨다. 세 번째는 대개 같은 실수를 되풀이하고, 그동안 owner는 기다린다.
 MAXIMUM_ATTEMPTS = 2
 
-#: **전체 시간 예산.** nginx가 330초에서 끊는다(`docker/workspace-nginx.conf`).
+#: **전체 시간 예산.** nginx가 600초에서 끊는다(`docker/workspace-nginx.conf`, 2026-10-08에 330→600).
 #: 거기서 잘리면 화면은 우리가 쓴 한국어 대신 프록시의 504 HTML을 받는다 --
 #: owner에게는 제품이 고장 난 것으로 보인다. 그림 만들기와 **정확히 같은 자리**다
 #: (`tests/test_compose_contract.py`).
@@ -77,10 +77,10 @@ MAXIMUM_ATTEMPTS = 2
 #: 한 판이 63~115초다(2026-09-07 실측). 두 판이면 230초쯤이라 대개 들어가지만,
 #: 모델이 느린 날에는 안 들어간다. 그래서 시계를 보고 판단한다.
 #:
-#: **한 판 상한(`VIDEOBOX_INFOGRAPHIC_TIMEOUT_SECONDS`, 140초)의 두 배가 여기
+#: **한 판 상한(`VIDEOBOX_INFOGRAPHIC_TIMEOUT_SECONDS`, 240초)의 두 배가 여기
 #: 들어와야 한다.** 안 그러면 두 판째가 애초에 못 돌아 되돌이가 문서에만 있는
 #: 것이 된다 -- `tests/test_compose_contract.py`가 세 값을 함께 잡는다.
-TOTAL_BUDGET_SECONDS = 300
+TOTAL_BUDGET_SECONDS = 500
 
 
 class InfographicUnavailable(RuntimeError):
