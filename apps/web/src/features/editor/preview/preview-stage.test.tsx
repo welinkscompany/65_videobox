@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { PreviewStage } from "./preview-stage";
 import { createPlaybackClock } from "./playbackClock";
 import { playbackShortcutFor } from "./playbackShortcuts";
+import { EDITOR_SHORTCUTS } from "../editorShortcuts";
 import { PLAYBACK_RATE_HINT_STORAGE_KEY, PLAYBACK_RATE_STORAGE_KEY } from "./playbackRate";
 
 beforeEach(() => { vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined); });
@@ -921,7 +922,7 @@ describe("재생 빠르기와 J·K·L·화살표 (2026-10-09 계획 P Task 4)", 
 describe("재생줄의 단축키 안내 (2026-10-09 계획 P Task 5)", () => {
   beforeEach(() => { try { window.localStorage.removeItem(PLAYBACK_RATE_STORAGE_KEY); } catch { /* ignore */ } });
   const shortcutButton = () => screen.getByRole("button", { name: "단축키" });
-  const note = () => screen.queryByRole("note", { name: "재생 단축키" });
+  const note = () => screen.queryByRole("note", { name: "편집 단축키" });
   const withPlayer = () => {
     const view = render(<PreviewStage {...current} fps={{ num: 30, den: 1 }} />);
     const media = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
@@ -941,6 +942,7 @@ describe("재생줄의 단축키 안내 (2026-10-09 계획 P Task 5)", () => {
     const opened = note() as HTMLElement;
     expect(opened.id).toBe("vb-playback-shortcuts");
     for (const text of ["스페이스바", "J 키", "K 키", "L 키", "보는 속도"]) expect(opened.textContent).toContain(text);
+    expect(opened.getAttribute("aria-label")).toBe("편집 단축키");
     expect(shortcutButton().getAttribute("aria-expanded")).toBe("true");
     fireEvent.click(shortcutButton());
     expect(note()).toBeNull();
@@ -982,7 +984,43 @@ describe("재생줄의 단축키 안내 (2026-10-09 계획 P Task 5)", () => {
       const result = playbackShortcutFor({ key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, repeat: false, isComposing: false, defaultPrevented: false, target: document.body });
       expect(result?.type).toBe(command);
     }
-    // 적힌 줄 수 = 시험한 줄 수 + 안내 한 줄. 새 줄을 적으면 여기서 걸린다.
-    expect((note() as HTMLElement).querySelectorAll("li").length).toBe(5);
+    // 안내에 재생기 줄 여섯이 모두 있다(나머지 줄은 아래 "표에서 그린다" 시험이 맡는다).
+    expect(listed.length).toBe(EDITOR_SHORTCUTS.filter((row) => row.owner === "preview").length);
+  });
+
+  describe("안내는 단축키 표에서 그린다", () => {
+    const open = () => { render(<PreviewStage {...current} />); fireEvent.click(shortcutButton()); return note() as HTMLElement; };
+    const lineOf = (root: HTMLElement, keys: string) => Array.from(root.querySelectorAll("li")).find((li) => (li.textContent ?? "").startsWith(keys)) as HTMLElement;
+    it("표의 모든 줄이 키와 이름 그대로 나온다(손으로 적은 목록이면 갈라질 때 걸린다)", () => {
+      const root = open();
+      expect(root.querySelectorAll("li").length).toBe(EDITOR_SHORTCUTS.length);
+      for (const row of EDITOR_SHORTCUTS) {
+        const text = root.textContent ?? "";
+        expect(text).toContain(row.keys);
+        expect(text).toContain(row.label);
+        if (row.note) expect(text).toContain(row.note);
+        const line = lineOf(root, row.keys);
+        expect(line.textContent).toContain(row.capcut === "same" ? "캡컷과 같아요" : "캡컷과 달라요");
+        expect(line.textContent).not.toContain(row.capcut === "same" ? "캡컷과 달라요" : "캡컷과 같아요");
+      }
+    });
+    it("묶음 이름이 재생·이동·자르기·되돌리기·타임라인 보기 순이다", () => {
+      const root = open();
+      const heads = Array.from(root.querySelectorAll("h3")).map((h) => h.textContent);
+      expect(heads).toEqual(["재생", "이동", "자르기", "되돌리기", "타임라인 보기"]);
+    });
+    it("Q 키는 캡컷과 같고 J 키는 캡컷과 달라서 이유가 붙는다", () => {
+      const root = open();
+      expect(lineOf(root, "Q 키").textContent).toContain("캡컷과 같아요");
+      const j = lineOf(root, "J 키").textContent ?? "";
+      expect(j).toContain("캡컷과 달라요");
+      expect(j).toContain("거꾸로");
+    });
+    it("맨 아래에 보는 속도·빈자리 안내와, 캡컷 공식 목록이 아니라는 솔직한 말이 있다", () => {
+      const text = open().textContent ?? "";
+      expect(text).toContain("빠르기는 보는 속도예요. 영상은 바뀌지 않아요.");
+      expect(text).toContain("빈자리는 그대로 둬요. 되돌리기로 원래대로 돌아와요.");
+      expect(text).toContain("캡컷 공식 목록이 아니라 여러 사용자 목록으로 맞춘 키예요");
+    });
   });
 });

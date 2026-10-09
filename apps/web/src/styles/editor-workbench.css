@@ -539,7 +539,11 @@
 .vb-preview-stage__rate-hint { position: absolute; right: 0; bottom: 100%; z-index: 1; padding: var(--vb-space-1) var(--vb-space-2); border: 1px solid var(--border); border-radius: var(--vb-radius-sm); background: var(--background); color: var(--vb-muted); font-size: var(--vb-text-sm); white-space: nowrap; pointer-events: none; }
 .vb-preview-stage__rate select { width: auto; height: 1.5rem; min-height: 0; padding: 0 var(--vb-space-2); border-radius: var(--vb-radius-sm); font-size: var(--vb-text-sm); line-height: 1.4; }
 /* 단축키 안내: 대화 상자가 아니라 재생줄 바로 아래에 펼쳐지는 작은 쪽지. 메뉴처럼 보이지 않게 단추 모양을 주지 않는다. */
-.vb-preview-stage__shortcuts { flex: 1 0 100%; padding: var(--vb-space-2) var(--vb-space-3); border: 1px solid var(--border); border-radius: var(--vb-radius-sm); font-size: var(--vb-text-sm); }
+.vb-preview-stage__shortcuts { flex: 1 0 100%; padding: var(--vb-space-2) var(--vb-space-3); border: 1px solid var(--border); border-radius: var(--vb-radius-sm); font-size: var(--vb-text-sm); max-height: min(60vh, 28rem); overflow-y: auto; }
+.vb-preview-stage__shortcuts h3 { margin: var(--vb-space-2) 0 var(--vb-space-1); font-size: var(--vb-text-sm); font-weight: 600; }
+.vb-preview-stage__shortcuts h3:first-child { margin-top: 0; }
+.vb-preview-stage__shortcut-tag { color: var(--vb-muted); white-space: nowrap; }
+.vb-preview-stage__shortcuts li { overflow-wrap: anywhere; }
 .vb-preview-stage__shortcuts ul { margin: 0; padding: 0; list-style: none; }
 .vb-preview-stage__shortcuts p { margin: var(--vb-space-1) 0 0; color: var(--vb-muted); }
 .vb-preview-stage__transport > button[aria-pressed="true"] { border-color: var(--vb-accent); background: var(--vb-accent-bg); }

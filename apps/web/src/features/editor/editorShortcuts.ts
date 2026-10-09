@@ -36,9 +36,9 @@ export type EditorShortcut = Readonly<{
 
 export const EDITOR_SHORTCUTS: readonly EditorShortcut[] = [
   { id: "toggle-play", owner: "preview", group: "재생", keys: "스페이스바", label: "재생 / 일시정지", capcut: "same", samples: [{ key: " " }] },
-  { id: "pause", owner: "preview", group: "재생", keys: "K 키", label: "멈춤", capcut: "differs", samples: [{ key: "k" }, { key: "K", shiftKey: true }] },
-  { id: "faster", owner: "preview", group: "재생", keys: "L 키", label: "재생, 누를수록 빠르게", capcut: "differs", samples: [{ key: "l" }] },
-  { id: "slower", owner: "preview", group: "재생", keys: "J 키", label: "느리게", capcut: "differs", samples: [{ key: "j" }] },
+  { id: "pause", owner: "preview", group: "재생", keys: "K 키", label: "멈춤", capcut: "same", samples: [{ key: "k" }, { key: "K", shiftKey: true }] },
+  { id: "faster", owner: "preview", group: "재생", keys: "L 키", label: "재생, 누를수록 빠르게", capcut: "same", samples: [{ key: "l" }] },
+  { id: "slower", owner: "preview", group: "재생", keys: "J 키", label: "느리게", capcut: "differs", note: "캡컷은 거꾸로 재생이에요", samples: [{ key: "j" }] },
   { id: "frame-back", owner: "preview", group: "이동", keys: "←", label: "한 프레임 뒤로", capcut: "same", samples: [{ key: "ArrowLeft" }] },
   { id: "frame-forward", owner: "preview", group: "이동", keys: "→", label: "한 프레임 앞으로", capcut: "same", samples: [{ key: "ArrowRight" }] },
   { id: "split", owner: "workbench", group: "자르기", keys: "Ctrl + B", label: "재생 위치에서 나누기", capcut: "same", samples: [{ key: "b", ctrlKey: true }, { key: "B", metaKey: true, shiftKey: true }] },
