@@ -1,0 +1,283 @@
+{
+  "schema": "harness-policy/v1",
+  "project": "videobox",
+  "note": "공용 훅 본문(_reference/harness/hooks)이 읽는 이 프로젝트의 값. 훅 로직은 거기, 값은 여기서만 고친다. VideoBox의 유진은 AK 직원 08 장유진과 다른 이름이다 — 섞지 않는다.",
+  "shell": {
+    "owned_compose_projects": [
+      "65_videobox"
+    ],
+    "owned_containers": [
+      "65_videobox-videobox-workspace-1",
+      "65_videobox-*",
+      "videobox-hermes-yujin"
+    ],
+    "note": "compose.yaml 의 name: 65_videobox, compose.hermes-yujin.yaml 의 container_name: videobox-hermes-yujin (2026-10-09 docker ps -a 로 대조). Docker 데몬은 ak-system-*, louis-personal-*, openmic-*, welinker_*, 86_global-blog-20wp-* 와 같이 쓴다 — 그 컨테이너는 막는다. 소유 목록 안이어도 컨테이너를 직접 멈추지 말고 scripts/owner-ready.ps1 로 다룬다(CLAUDE.md §3)."
+  },
+  "model": {
+    "allowed_models": [
+      "opus",
+      "sonnet",
+      "haiku"
+    ],
+    "exempt_subagent_types": [
+      "fork",
+      "Explore",
+      "Plan",
+      "claude-code-guide",
+      "statusline-setup"
+    ],
+    "agents_dir": ".claude/agents",
+    "guidance": "opus: 깊은 설계·돈/보안 검토·막힌 원인 찾기 / sonnet: 구현·일반 검토·조사 / haiku: 단순 읽기·기계적 반복 편집"
+  },
+  "finish_first": {
+    "lane_glob": ".claude/worktrees/*",
+    "max_open_lanes": 3,
+    "stale_after_hours": 72,
+    "bundle_marker": "묶음:",
+    "read_only_agent_types": [
+      "Explore",
+      "Plan",
+      "claude-code-guide",
+      "statusline-setup"
+    ],
+    "parked": [
+      {
+        "id": "hopeful-pasteur-64b08e",
+        "reason_ko": "2026-10-09 기준 detached HEAD 로 남은 옛 갈래. 대표님이 정리 여부를 정할 때까지 세지 않는다."
+      }
+    ],
+    "note": "CLAUDE.md §3: 작업은 main 에서 직접 하고, 병렬이 필요할 때만 .claude/worktrees/ 에 격리 갈래를 만들어 끝나면 병합 후 지운다. 갈래는 3개까지, 72시간 멈추면 새 작업을 막는다(§10.21 main과 개발선을 다시 벌리지 마라)."
+  },
+  "answer_style": {
+    "first_reply_chars": 200,
+    "opinion_long_message_over_chars": 400,
+    "opinion_long_message_tail_chars": 200,
+    "flattery_starts": [
+      "좋은 질문",
+      "훌륭한",
+      "정말 좋은",
+      "아주 좋은",
+      "탁월한",
+      "완벽합니다",
+      "완벽해요",
+      "완벽한",
+      "대단하십니다",
+      "great question",
+      "good question",
+      "excellent question",
+      "great idea",
+      "you're absolutely right",
+      "you are absolutely right",
+      "you're right",
+      "you are right",
+      "absolutely right"
+    ],
+    "agreement_starts": [
+      "말씀이 맞습니다",
+      "말씀이 맞아요",
+      "말씀하신 대로입니다",
+      "맞습니다",
+      "맞아요",
+      "네, 맞습니다",
+      "네 맞습니다",
+      "네, 맞아요",
+      "그렇습니다",
+      "동의합니다",
+      "that's right",
+      "that is right",
+      "i agree"
+    ],
+    "reason_markers": [
+      "이유",
+      "때문",
+      "왜냐하면",
+      "근거",
+      "실측",
+      "측정",
+      "확인했",
+      "재 봤",
+      "재봤",
+      "돌려 보니",
+      "봤더니",
+      "하므로",
+      "해서입니다",
+      "라서",
+      "because",
+      "since ",
+      "measured"
+    ],
+    "opinion_patterns": [
+      "어때",
+      "어떨까",
+      "어떻게 생각",
+      "필요없나",
+      "필요 없나",
+      "할까",
+      "하는 게 나아",
+      "하는게 나아",
+      "맞아?",
+      "맞나",
+      "괜찮아?",
+      "괜찮을까",
+      "좋을까",
+      "제안",
+      "추천",
+      "의견",
+      "what do you think",
+      "should we",
+      "should i"
+    ],
+    "recommendation_markers": [
+      "추천",
+      "제 판단",
+      "내 판단",
+      "결론",
+      "권합니다",
+      "권해",
+      "제안드",
+      "제안합니다",
+      "하는 편이 낫",
+      "하는 게 낫",
+      "하는 것이 낫",
+      "i recommend",
+      "recommend",
+      "my judgment",
+      "conclusion"
+    ],
+    "counter_markers": [
+      "반대",
+      "단점",
+      "위험",
+      "리스크",
+      "대신",
+      "대안",
+      "비용",
+      "반면",
+      "다만",
+      "한계",
+      "downside",
+      "alternative",
+      "trade-off",
+      "tradeoff",
+      "cost",
+      "risk"
+    ],
+    "reasons": {
+      "flattery": "답이 칭찬이나 무조건 동의로 시작했습니다(CLAUDE.md §1 핵심 태도 1: 무조건 동의하지 않는다). 칭찬·인사 없이 결론부터, 이유 한 줄과 함께 다시 답해 주세요. 루이스 대표님께는 존댓말로, 동의라면 왜 맞는지, 아니라면 무엇이 문제인지를 근거와 함께 쓰세요.",
+      "agreement_no_reason": "답이 이유 없는 동의로 시작했습니다(CLAUDE.md §1 핵심 태도 1·2: 정확성을 동의보다 우선, 확인된 사실·가정·추정을 구분). 결론을 앞에 두고 왜 맞는지 근거를 같은 문장 근처에 붙여 다시 답해 주세요.",
+      "opinion_shape": "루이스 대표님 질문이 의견·제안·결정을 묻는데 답에 추천과 반대 논리가 보이지 않습니다(CLAUDE.md §1 핵심 태도 3·7: 단점·리스크·대안을 같이 내고 반대 논리도 검토). 결론, 근거, 반대 논리 하나, 대안과 그 비용, 재는 법 순서로 다시 답해 주세요."
+    }
+  },
+  "merge": {
+    "lane_branch_prefixes": [
+      "harness-",
+      "claude/",
+      "agent-",
+      "worktree-"
+    ],
+    "rules": [
+      {
+        "label": "이음매 가드 전체 (바뀐 파일에 걸린 것만 배차)",
+        "path_globs": [
+          "**"
+        ],
+        "commands": [
+          ".venv/Scripts/python.exe scripts/guard_router.py --changed --speed all"
+        ]
+      },
+      {
+        "label": "백엔드 (core-engine·api·mcp·gateway 등)",
+        "path_globs": [
+          "packages/**/*.py",
+          "services/**/*.py",
+          "tests/**/*.py",
+          "scripts/**/*.py",
+          "pyproject.toml"
+        ],
+        "commands": [
+          ".venv/Scripts/python.exe -m pytest -q -p no:cacheprovider --ignore=tests/test_mcp_server.py <바뀐 파일에 걸린 tests/...>",
+          "합칠 단위가 닫히면 전체: .venv/Scripts/python.exe -m pytest -q -p no:cacheprovider --ignore=tests/test_mcp_server.py tests  (약 40분, 혼자 돌린다 — bare pytest·시스템 Python 결과는 근거가 아니다)"
+        ]
+      },
+      {
+        "label": "웹 화면 (타입·단위)",
+        "path_globs": [
+          "apps/web/**/*.ts",
+          "apps/web/**/*.tsx",
+          "apps/web/**/*.css",
+          "apps/web/package.json",
+          "apps/web/vite.config.*",
+          "apps/web/tsconfig*.json"
+        ],
+        "commands": [
+          "cd apps/web && npx tsc --noEmit",
+          "cd apps/web && npx vitest run"
+        ]
+      },
+      {
+        "label": "웹 화면 (가짜 API e2e·실물 흐름)",
+        "path_globs": [
+          "apps/web/src/**",
+          "apps/web/e2e/**",
+          "apps/web/e2e-real/**",
+          "apps/web/playwright*.mjs"
+        ],
+        "commands": [
+          "cd apps/web && npm run test:e2e  (혼자 돌린다. 4173 포트 점거부터 확인 — fast-path §10.18)",
+          "cd apps/web && npm run test:e2e:real-flow -- <바뀐 화면에 맞는 e2e-real/*.spec.mjs>",
+          "그리고 화면에서 직접 밟는다 — CLAUDE.md §4 완료의 정의"
+        ]
+      },
+      {
+        "label": "편집기 화면 반입 출처 해시",
+        "path_globs": [
+          "apps/web/src/app/**",
+          "apps/web/src/features/editor/**",
+          "apps/web/src/components/ui/**",
+          "docs/oss/editor-ui-source-map.json"
+        ],
+        "commands": [
+          ".venv/Scripts/python.exe -m pytest -q -p no:cacheprovider tests/test_editor_ui_source_provenance.py"
+        ]
+      },
+      {
+        "label": "지침·인계·범위 문서",
+        "path_globs": [
+          "CLAUDE.md",
+          ".claude/rules/**",
+          "docs/handoffs/**",
+          "docs/development-fast-path.ko.md",
+          "docs/implementation-plan.ko.md",
+          "docs/decisions/**"
+        ],
+        "commands": [
+          ".venv/Scripts/python.exe -m pytest -q -p no:cacheprovider tests/test_handoff_entry_point.py tests/test_documentation_contract.py tests/test_handoff_freshness_guard.py"
+        ]
+      },
+      {
+        "label": "훅·가드 표",
+        "path_globs": [
+          ".claude/settings.json",
+          ".claude/harness-policy.json",
+          "scripts/guard_router.py"
+        ],
+        "commands": [
+          ".venv/Scripts/python.exe -m pytest -q -p no:cacheprovider tests/test_guard_router_table.py",
+          "python D:/AI_Workspace_louis_office_50/10_workspace/_reference/harness/tests/wiring_check.py .claude/settings.json ."
+        ]
+      },
+      {
+        "label": "컨테이너 설정 (켜고 끄지 말 것 — 계약 테스트만)",
+        "path_globs": [
+          "compose*.yaml",
+          "docker/**",
+          "scripts/owner-ready.ps1"
+        ],
+        "commands": [
+          ".venv/Scripts/python.exe -m pytest -q -p no:cacheprovider tests/test_compose_contract.py",
+          "컨테이너 재생성은 루이스 대표님 판단 — scripts/owner-ready.ps1 로만"
+        ]
+      }
+    ]
+  }
+}

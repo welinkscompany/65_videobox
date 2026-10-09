@@ -10,6 +10,51 @@
     ]
   },
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Read",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "statusMessage": "셸 명령 안전 확인 (python -, 이름으로 죽이기, .env, 남의 컨테이너)",
+            "timeout": 10,
+            "command": "sh \"D:/AI_Workspace_louis_office_50/10_workspace/_reference/harness/hooks/run.sh\" shell_guard.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "statusMessage": "열린 갈래 먼저 끝내기 확인",
+            "timeout": 20,
+            "command": "sh \"D:/AI_Workspace_louis_office_50/10_workspace/_reference/harness/hooks/run.sh\" finish_first_guard.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "statusMessage": "열린 갈래 먼저 끝내기 확인",
+            "timeout": 20,
+            "command": "sh \"D:/AI_Workspace_louis_office_50/10_workspace/_reference/harness/hooks/run.sh\" finish_first_guard.py"
+          },
+          {
+            "type": "command",
+            "shell": "bash",
+            "statusMessage": "서브에이전트 모델 지정 확인",
+            "timeout": 10,
+            "command": "sh \"D:/AI_Workspace_louis_office_50/10_workspace/_reference/harness/hooks/run.sh\" model_choice_guard.py"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Edit|Write",
@@ -20,6 +65,18 @@
             "statusMessage": "방금 고친 파일을 지키는 장치 확인",
             "timeout": 180,
             "command": "d=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; for p in \"$VIDEOBOX_GUARD_PYTHON\" \"$d/.venv/Scripts/python.exe\" \"$d/.venv/bin/python\"; do [ -x \"$p\" ] && exec \"$p\" \"$d/scripts/guard_router.py\" --hook post-tool-use; done; echo '{\"systemMessage\":\"guard_router: no .venv python found - nothing was checked\"}'"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "statusMessage": "합친 뒤 돌릴 검증 명령 안내",
+            "timeout": 20,
+            "command": "sh \"D:/AI_Workspace_louis_office_50/10_workspace/_reference/harness/hooks/run.sh\" merge_checklist.py"
           }
         ]
       }
@@ -33,6 +90,17 @@
             "statusMessage": "이번에 바뀐 파일 전체를 지키는 장치 확인",
             "timeout": 1800,
             "command": "d=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; for p in \"$VIDEOBOX_GUARD_PYTHON\" \"$d/.venv/Scripts/python.exe\" \"$d/.venv/bin/python\"; do [ -x \"$p\" ] && exec \"$p\" \"$d/scripts/guard_router.py\" --hook stop; done; echo '{\"systemMessage\":\"guard_router: no .venv python found - nothing was checked\"}'"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "statusMessage": "답 모양 확인 (칭찬 시작·이유 없는 동의·추천 없는 의견)",
+            "timeout": 10,
+            "command": "sh \"D:/AI_Workspace_louis_office_50/10_workspace/_reference/harness/hooks/run.sh\" answer_style_guard.py"
           }
         ]
       }
