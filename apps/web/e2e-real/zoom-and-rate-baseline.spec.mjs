@@ -1,11 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { openEditor, readFixture } from "./support/realFlow.mjs";
-import { collect, ensureLongPreviewMp4, installPlaybackProbe, median, startPlayback, withLongPreview } from "./support/playbackProbe.mjs";
+import { collect, ensureLongPreviewMp4, installPlaybackProbe, measurePlayback, median, startPlayback, withLongPreview } from "./support/playbackProbe.mjs";
 
 // 2026-10-09 계획 P2 Task 0: 기준 측정 + 첫 RED.
 //  1) 타임라인 처음 배율 -- 길이 7.75·30·120·600초 x 1440x900·1280x720 (ZOOM_BASELINE 출력).
 //  2) 빠르기 상한 -- 같은 30초 미리보기를 1·2·3·4·6·8배로 틀어 본다 (RATE_CEILING 출력).
-//  3) RED 두 개 -- "처음 창 >= 20초"와 "4배가 된다". 지금 코드에서는 둘 다 실패해야 한다.
+//  3) RED 두 개 -- "처음 창 >= 20초"(Task 2)와 "8배까지 된다"(Task 1, 이제 GREEN).
 // 문턱(RED)은 Task 1·2가 GREEN으로 만든다. 측정 시험은 출력만 하고 통과한다.
 // covers: zoom-initial-window, rate-4x
 // (serial 아님: 앞 RED가 실패해도 뒤 RED가 건너뛰어지지 않게. workers=1이라 어차피 차례로 돈다.)
@@ -134,6 +134,7 @@ test("빠르기 상한 기준: 1·2·3·4·6·8배 (RATE_CEILING)", async ({ pag
   }
   console.log("RATE_CEILING", JSON.stringify(table));
   expect(table.length).toBe(RATES.length);
+  for (const run of table.find((row) => row.rate === 1).runs) expect(run.effectiveRate).toBeGreaterThanOrEqual(0.95);
 });
 
 // ---- RED ----------------------------------------------------------------------------------------
@@ -147,18 +148,32 @@ test("RED: 짧은 프로젝트의 처음 타임라인 창은 적어도 20초를 
   expect(m.visibleSec).toBeGreaterThanOrEqual(20);
 });
 
-// Task 1 전에는 빠르기 단계가 2배까지라 4배를 고를 수 없다.
-test("RED: 재생 빠르기를 4배로 걸 수 있고 실제로 4배(±5%)로 흐른다", async ({ page }) => {
+// Task 1 (A): L 키로 4배·8배까지 올리면 실제로 그 속도로 흐르고, 재생 머리 시계도 따라간다.
+test("8배까지 된다: L 키로 올려 4배·8배에서 실효 ±5%, 앱 탐색 0, 머리 시계 매끈", async ({ page }) => {
   test.setTimeout(240_000);
   await installPlaybackProbe(page);
   await withLongPreview(page);
   await openEditor(page, readFixture().playback);
   await expect(page.getByLabel("편집본 미리보기")).toBeVisible({ timeout: 90_000 });
   await page.waitForFunction(() => document.querySelector("video")?.readyState >= 2);
-  // 화면의 빠르기 조작으로 걸어야 한다(L 키를 두 번 이상 눌러 올려 본다). 지금은 최대 2배.
   await page.locator("body").click({ position: { x: 5, y: 5 } });
-  for (let i = 0; i < 6; i += 1) await page.keyboard.press("l");
-  const rate = await page.evaluate(() => document.querySelector("video").playbackRate);
-  console.log("RED_RATE", JSON.stringify({ rateAfterSixL: rate }));
-  expect(rate).toBeCloseTo(4, 1);
+  const rateNow = () => page.evaluate(() => document.querySelector("video").playbackRate);
+  const result = {};
+  // 멈춘 첫 L은 재생만 한다(1배) -> 1.5·2·3·4.
+  for (let i = 0; i < 5; i += 1) await page.keyboard.press("l");
+  expect(await rateNow()).toBe(4);
+  result[4] = await measurePlayback(page, { startSec: 0, seconds: 5 });
+  await page.locator("body").click({ position: { x: 5, y: 5 } });
+  for (let i = 0; i < 6; i += 1) await page.keyboard.press("l"); // 멈춘 첫 L은 재생만 -> 6 -> 8 -> 8(끝에서 멈춘다)
+  expect(await rateNow()).toBe(8);
+  result[8] = await measurePlayback(page, { startSec: 0, seconds: 3 });
+  console.log("RATE_L_KEYS", JSON.stringify(result));
+  for (const rate of [4, 8]) {
+    const run = result[rate];
+    expect(run.effectiveRate / rate).toBeGreaterThan(0.95);
+    expect(run.effectiveRate / rate).toBeLessThan(1.05);
+    expect(run.appSeeksWhilePlaying).toBe(0);
+    expect(run.mediaTimeBackwardSteps).toBe(0);
+    expect(run.playheadGapP95).toBeLessThanOrEqual(100);
+  }
 });

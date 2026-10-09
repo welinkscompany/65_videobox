@@ -1,7 +1,9 @@
 // 재생 빠르기 (2026-10-09 계획 P Task 4). 보는 속도만 바꾼다 -- 완성 영상과 장면 `속도`는 그대로다.
-export const PLAYBACK_RATES = [0.25, 0.5, 0.75, 1, 1.5, 2] as const;
+export const PLAYBACK_RATES = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8] as const;
 export type PlaybackRate = (typeof PLAYBACK_RATES)[number];
 export const PLAYBACK_RATE_STORAGE_KEY = "videobox.editor.playback-rate";
+/** "L 키로 빠르게" 첫 사용 안내를 이미 봤는지 -- 한 번 보면 다시 안 띄운다. */
+export const PLAYBACK_RATE_HINT_STORAGE_KEY = "videobox.editor.playback-rate-hint-seen";
 
 /** 사생활 창에서는 `localStorage` 접근 자체가 던진다 -- 항상 try 안에서 읽는다. */
 function defaultStorage(): Storage | null {
@@ -43,4 +45,24 @@ export function applyPlaybackRate(media: HTMLMediaElement, rate: PlaybackRate): 
 
 export function formatPlaybackRate(rate: PlaybackRate): string {
   return `${rate}배`;
+}
+
+export function maxPlaybackRate(): PlaybackRate {
+  return PLAYBACK_RATES[PLAYBACK_RATES.length - 1];
+}
+
+/** 저장소를 못 읽으면 "봤다"로 친다 -- 안내를 지울 수 없는 창에서 계속 뜨지 않게. */
+export function readRateHintSeen(storage?: Pick<Storage, "getItem"> | null): boolean {
+  try {
+    const source = storage === undefined ? defaultStorage() : storage;
+    if (!source) return true;
+    return source.getItem(PLAYBACK_RATE_HINT_STORAGE_KEY) === "1";
+  } catch { return true; }
+}
+
+export function markRateHintSeen(storage?: Pick<Storage, "setItem"> | null): void {
+  try {
+    const target = storage === undefined ? defaultStorage() : storage;
+    target?.setItem(PLAYBACK_RATE_HINT_STORAGE_KEY, "1");
+  } catch { /* 저장하지 못해도 이번 화면에서는 이미 지웠다 */ }
 }

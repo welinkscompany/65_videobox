@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { PreviewStage } from "./preview-stage";
 import { createPlaybackClock } from "./playbackClock";
 import { playbackShortcutFor } from "./playbackShortcuts";
-import { PLAYBACK_RATE_STORAGE_KEY } from "./playbackRate";
+import { PLAYBACK_RATE_HINT_STORAGE_KEY, PLAYBACK_RATE_STORAGE_KEY } from "./playbackRate";
 
 beforeEach(() => { vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
@@ -718,7 +718,7 @@ describe("PreviewStage", () => {
 });
 
 describe("재생 빠르기와 J·K·L·화살표 (2026-10-09 계획 P Task 4)", () => {
-  beforeEach(() => { try { window.localStorage.removeItem(PLAYBACK_RATE_STORAGE_KEY); } catch { /* ignore */ } });
+  beforeEach(() => { try { window.localStorage.removeItem(PLAYBACK_RATE_STORAGE_KEY); window.localStorage.removeItem(PLAYBACK_RATE_HINT_STORAGE_KEY); } catch { /* ignore */ } });
   const player = (props: Partial<React.ComponentProps<typeof PreviewStage>> = {}, state: { paused: boolean; time?: number } = { paused: true }) => {
     const view = render(<PreviewStage {...current} fps={{ num: 30, den: 1 }} {...props} />);
     const media = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
@@ -737,7 +737,7 @@ describe("재생 빠르기와 J·K·L·화살표 (2026-10-09 계획 P Task 4)", 
     expect(select().value).toBe("1");
     expect(media.playbackRate).toBe(1);
     expect(select().tagName).toBe("SELECT");
-    expect([...select().options].map((option) => option.textContent)).toEqual(["0.25배", "0.5배", "0.75배", "1배", "1.5배", "2배"]);
+    expect([...select().options].map((option) => option.textContent)).toEqual(["0.25배", "0.5배", "0.75배", "1배", "1.5배", "2배", "3배", "4배", "6배", "8배"]);
   });
   it("0.5를 고르면 재생기에 바로 걸고 기억한다", () => {
     const { media } = player();
@@ -804,11 +804,63 @@ describe("재생 빠르기와 J·K·L·화살표 (2026-10-09 계획 P Task 4)", 
     expect(play).toHaveBeenCalledTimes(1);
     expect(select().value).toBe("1");
   });
-  it("재생 중 L은 1.5 -> 2 -> 2", () => {
+  it("재생 중 L은 1.5 -> 2 -> 3 -> 4 -> 6 -> 8 -> 8", () => {
     const { media } = player({}, { paused: false });
     press("l"); expect(media.playbackRate).toBe(1.5); expect(select().value).toBe("1.5");
-    press("l"); expect(media.playbackRate).toBe(2);
-    press("l"); expect(media.playbackRate).toBe(2); expect(select().value).toBe("2");
+    const seen: number[] = [];
+    for (let i = 0; i < 6; i += 1) { press("l"); seen.push(media.playbackRate); }
+    expect(seen).toEqual([2, 3, 4, 6, 8, 8]);
+    expect(select().value).toBe("8");
+  });
+  it("8배에서 J는 6 -> 4 -> 3 -> 2로 내려온다", () => {
+    window.localStorage.setItem(PLAYBACK_RATE_STORAGE_KEY, "8");
+    const { media } = player({}, { paused: false });
+    const seen: number[] = [];
+    for (let i = 0; i < 4; i += 1) { press("j"); seen.push(media.playbackRate); }
+    expect(seen).toEqual([6, 4, 3, 2]);
+  });
+  it("4배로 바꾼 뒤 새 소스가 열려도 4배를 다시 건다", () => {
+    const { media, rerender } = player();
+    fireEvent.change(select(), { target: { value: "4" } });
+    expect(media.playbackRate).toBe(4);
+    rerender(<PreviewStage {...current} fps={{ num: 30, den: 1 }} exactPreview={{ ...current.exactPreview, url: "/api/exact-3.mp4" }} />);
+    const next = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+    fireEvent.loadedMetadata(next);
+    expect(next.playbackRate).toBe(4);
+  });
+  describe("L 키 첫 사용 안내", () => {
+    const HINT = "빠르게 보려면 L 키를 눌러요";
+    it("저장소가 비었고 1배이면 재생줄에 뜬다(소리 알림은 없다)", () => {
+      player();
+      const hint = screen.getByText(HINT);
+      expect(hint.getAttribute("aria-live")).toBeNull();
+    });
+    it("재생 중 L로 올리면 사라지고 기억한다", () => {
+      player({}, { paused: false });
+      press("l");
+      expect(screen.queryByText(HINT)).toBeNull();
+      expect(window.localStorage.getItem(PLAYBACK_RATE_HINT_STORAGE_KEY)).toBe("1");
+    });
+    it("고르기에서 바꿔도 사라지고 기억한다", () => {
+      player();
+      fireEvent.change(select(), { target: { value: "2" } });
+      expect(screen.queryByText(HINT)).toBeNull();
+      expect(window.localStorage.getItem(PLAYBACK_RATE_HINT_STORAGE_KEY)).toBe("1");
+    });
+    it("다시 그려도, 1배로 돌아와도 다시 뜨지 않는다", () => {
+      const { unmount } = player();
+      fireEvent.change(select(), { target: { value: "2" } });
+      fireEvent.change(select(), { target: { value: "1" } });
+      expect(screen.queryByText(HINT)).toBeNull();
+      unmount();
+      player();
+      expect(screen.queryByText(HINT)).toBeNull();
+    });
+    it("1배가 아니면 처음부터 안 뜬다", () => {
+      window.localStorage.setItem(PLAYBACK_RATE_STORAGE_KEY, "2");
+      player();
+      expect(screen.queryByText(HINT)).toBeNull();
+    });
   });
   it("재생 중 J는 한 단계씩 느리게(2에서 시작: 1.5 -> 1 -> 0.75 -> 0.5)", () => {
     window.localStorage.setItem(PLAYBACK_RATE_STORAGE_KEY, "2");

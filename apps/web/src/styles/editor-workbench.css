@@ -531,10 +531,12 @@
    시절의 대처였고, 이제 안내가 모두 한 줄에 모여 있어 숨길 이유가 없다. */
 /* 재생 컨트롤은 한 줄 안에 모은다. 미리보기 판의 글자·단추 줄은 이미 세로 공간을
    가장 많이 먹는 쪽이라(1920x1080에서 181px), 줄을 새로 만들지 않는다. */
-.vb-preview-stage__transport { display: flex; flex-wrap: wrap; align-items: center; gap: var(--vb-space-1); }
+.vb-preview-stage__transport { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: var(--vb-space-1); }
 .vb-preview-stage__transport > button { flex: 0 0 auto; }
 /* 재생 빠르기 고르기: 보는 속도만 바꾼다. 단추 줄 맨 끝, 줄이 모자라면 줄바꿈 대신 단추처럼 안 줄어든다. */
 .vb-preview-stage__rate { display: inline-flex; flex: 0 0 auto; align-items: center; gap: var(--vb-space-1); }
+/* 첫 사용 안내는 줄 높이를 늘리지 않게 재생줄 위에 살짝 띄운다(줄이 한 번 더 감기면 미리보기가 줄어든다). */
+.vb-preview-stage__rate-hint { position: absolute; right: 0; bottom: 100%; z-index: 1; padding: var(--vb-space-1) var(--vb-space-2); border: 1px solid var(--border); border-radius: var(--vb-radius-sm); background: var(--background); color: var(--vb-muted); font-size: var(--vb-text-sm); white-space: nowrap; pointer-events: none; }
 .vb-preview-stage__rate select { width: auto; height: 1.5rem; min-height: 0; padding: 0 var(--vb-space-2); border-radius: var(--vb-radius-sm); font-size: var(--vb-text-sm); line-height: 1.4; }
 /* 단축키 안내: 대화 상자가 아니라 재생줄 바로 아래에 펼쳐지는 작은 쪽지. 메뉴처럼 보이지 않게 단추 모양을 주지 않는다. */
 .vb-preview-stage__shortcuts { flex: 1 0 100%; padding: var(--vb-space-2) var(--vb-space-3); border: 1px solid var(--border); border-radius: var(--vb-radius-sm); font-size: var(--vb-text-sm); }

@@ -173,3 +173,58 @@ test("재생 빠르기 0.5배·2배가 실제로 그만큼 흐르고, 다시 열
   const t2 = await page.evaluate(() => document.querySelector("video").currentTime);
   expect(Math.abs(t2 - t0)).toBeLessThan(0.02);
 });
+
+// 2026-10-09 계획 P2 Task 1(A): L 키로 8배까지. 장면 경계를 지나고 끝에 닿아도 빠르기를 지키고, 앱이 스스로 되감지 않는다.
+// covers: faster
+test("L을 눌러 8배까지 올리면 실제로 8배로 흐르고, 일시정지·재개와 끝에 닿아도 빠르기를 지킨다", async ({ page }) => {
+  test.setTimeout(300_000);
+  await installPlaybackProbe(page);
+  await withLongPreview(page);
+  await page.addInitScript(() => { try { if (!window.sessionStorage.getItem("__cleared")) { window.localStorage.clear(); window.sessionStorage.setItem("__cleared", "1"); } } catch { /* ignore */ } });
+  await openEditor(page, readFixture().playback);
+  await expect(page.getByLabel("편집본 미리보기")).toBeVisible({ timeout: 90_000 });
+  await page.waitForFunction(() => document.querySelector("video")?.readyState >= 2);
+  const rateSelect = () => page.getByLabel("재생 빠르기");
+  const videoState = () => page.evaluate(() => { const v = document.querySelector("video"); return { paused: v.paused, ended: v.ended, t: v.currentTime, rate: v.playbackRate, defaultRate: v.defaultPlaybackRate }; });
+  const blur = () => page.evaluate(() => document.activeElement?.blur?.());
+  await blur();
+  // 처음 쓰는 사람에게는 안내가 뜨고, 빠르기를 바꾸면 사라진다.
+  await expect(page.getByText("빠르게 보려면 L 키를 눌러요")).toBeVisible();
+  const labels = await rateSelect().locator("option").allTextContents();
+  expect(labels.slice(-4)).toEqual(["3배", "4배", "6배", "8배"]);
+  const seen = [];
+  await page.keyboard.press("l");              // 멈춰 있었으니 재생만
+  for (let i = 0; i < 7; i += 1) { await page.keyboard.press("l"); seen.push((await videoState()).rate); }
+  expect(seen).toEqual([1.5, 2, 3, 4, 6, 8, 8]);
+  await expect(page.getByText("빠르게 보려면 L 키를 눌러요")).toHaveCount(0);
+  expect(await rateSelect().inputValue()).toBe("8");
+
+  // 8배로 3회 잰다(시작 0·8·16초: 장면 경계 8초를 지난다).
+  const runs = [];
+  for (const startSec of [0, 8, 16]) runs.push(await measurePlayback(page, { startSec, seconds: 2.5, start: "button" }));
+  console.log("PLAYBACK_8X", JSON.stringify(runs));
+  for (const run of runs) { expect(run.appSeeksWhilePlaying).toBe(0); expect(run.mediaTimeBackwardSteps).toBe(0); }
+  expect(median(runs.map((r) => r.effectiveRate))).toBeGreaterThanOrEqual(7.6);
+  expect(median(runs.map((r) => r.effectiveRate))).toBeLessThanOrEqual(8.4);
+  expect(median(runs.map((r) => r.playheadGapP95))).toBeLessThanOrEqual(100);
+  expect((await videoState()).rate).toBe(8);   // 멈췄다 다시 틀어도 그대로
+
+  // 끝까지: 28초에서 8배로 틀면 곧 끝나고, 앱은 끝에서 되감지 않는다.
+  await page.evaluate(() => { window.__pb.harness = true; const v = document.querySelector("video"); v.pause(); v.currentTime = 28; window.__pb.harness = false; window.__pb.setterCalls = []; });
+  await page.waitForTimeout(500);
+  await page.getByRole("button", { name: "재생 또는 일시정지" }).click();
+  await page.waitForTimeout(1500);
+  const end = await page.evaluate(() => ({ calls: window.__pb.setterCalls.filter((c) => !c.harness).length }));
+  const endState = await videoState();
+  console.log("PLAYBACK_8X_END", JSON.stringify({ ...end, ...endState }));
+  expect(endState.ended).toBe(true);
+  expect(endState.rate).toBe(8);
+  expect(await rateSelect().inputValue()).toBe("8");
+  expect(end.calls).toBe(0);
+
+  // 다시 열어도 8배를 기억하고, 안내는 다시 뜨지 않는다.
+  await page.reload();
+  await expect(page.getByLabel("편집본 미리보기")).toBeVisible({ timeout: 90_000 });
+  expect(await rateSelect().inputValue()).toBe("8");
+  await expect(page.getByText("빠르게 보려면 L 키를 눌러요")).toHaveCount(0);
+});
