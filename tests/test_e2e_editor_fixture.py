@@ -48,3 +48,13 @@ def test_no_narration_fixture_has_the_742_shape_stale_caption_lineage_and_distin
     assert [(s["segment_id"], s["start_sec"], s["end_sec"]) for s in session["segments"]] == [(a, b, c) for a, b, c, _ in NO_NARRATION_SCENES]
     lineage = [s["content_windows"][0]["source_segment_id"] for s in session["segments"]]
     assert len(set(lineage)) < len(lineage), "자막 계보 id는 여러 장면이 같은 낡은 값을 달고 있어야 한다"
+
+
+def test_playback_fixture_is_thirty_seconds_in_four_scenes(tmp_path: Path) -> None:
+    """재생 매끄러움 시험(계획 P Task 0)은 20초 넘게 틀 수 있는 편집본이 있어야 잰다."""
+    from scripts.e2e_editor_fixture import PLAYBACK_SCENES
+    ids = seed_editor_fixtures(projects_root=tmp_path / "projects", media_dir=tmp_path / "media")
+    store = LocalProjectStore(tmp_path / "projects")
+    session = store.get_editing_session(project_id=ids["playback"]["project_id"], session_id=ids["playback"]["session_id"])
+    assert [(s["segment_id"], s["start_sec"], s["end_sec"]) for s in session["segments"]] == list(PLAYBACK_SCENES)
+    assert PLAYBACK_SCENES[-1][2] == 30.0

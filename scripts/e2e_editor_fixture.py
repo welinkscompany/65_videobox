@@ -50,6 +50,15 @@ NO_NARRATION_SCENES: tuple[tuple[str, float, float, str], ...] = (
     (f"{PARENT}__split_2__split_3", 7.0, 9.5, f"{PARENT}__split_2"),
 )
 
+#: 재생 매끄러움 시험(2026-10-09 계획 P Task 0)용 30초 네 장면. 20초 넘게 틀어야 되감기 고리가 쌓인다.
+PLAYBACK_SCENES: tuple[tuple[str, float, float], ...] = (
+    ("scene-1", 0.0, 7.5),
+    ("scene-2", 7.5, 15.0),
+    ("scene-3", 15.0, 22.5),
+    ("scene-4", 22.5, 30.0),
+)
+PLAYBACK_PROJECT_NAME = "재생 매끄러움 시험"
+
 _COLORS = ("blue", "green", "orange", "purple")
 _CAPTIONS = ("첫 장면", "둘째 장면", "셋째 장면", "넷째 장면")
 
@@ -67,6 +76,8 @@ def _make_media(media_dir: Path) -> dict[str, Any]:
     media_dir.mkdir(parents=True, exist_ok=True)
     narration = media_dir / "narration.wav"
     _ffmpeg("-f", "lavfi", "-i", "sine=frequency=330:duration=4", str(narration))
+    narration_30 = media_dir / "narration-30.wav"
+    _ffmpeg("-f", "lavfi", "-i", "sine=frequency=330:duration=30", str(narration_30))
     brolls = []
     for index, color in enumerate(_COLORS, start=1):
         path = media_dir / f"broll-{index}.mp4"
@@ -78,7 +89,7 @@ def _make_media(media_dir: Path) -> dict[str, Any]:
         brolls.append(path)
     overlay = media_dir / "overlay.png"
     _ffmpeg("-f", "lavfi", "-i", "color=c=white:s=320x180", "-frames:v", "1", str(overlay))
-    return {"narration": narration, "brolls": brolls, "overlay": overlay}
+    return {"narration": narration, "narration_30": narration_30, "brolls": brolls, "overlay": overlay}
 
 
 def _narration_clip(clip_id: str, segment_id: str, start: float, end: float, asset: Any) -> dict[str, Any]:
@@ -229,6 +240,31 @@ def _seed_no_narration(store: LocalProjectStore, media: dict[str, Any]) -> dict[
     return {"project_id": project.project_id, "session_id": session["session_id"], "timeline_id": timeline["timeline_id"]}
 
 
+def _seed_playback(store: LocalProjectStore, media: dict[str, Any]) -> dict[str, str]:
+    project = store.bootstrap_project(name=PLAYBACK_PROJECT_NAME)
+    narration = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=media["narration_30"])
+    clips = [
+        _narration_clip(f"clip_narration_{i:03d}", sid, start, end, narration)
+        for i, (sid, start, end) in enumerate(PLAYBACK_SCENES, start=1)
+    ]
+    timeline = store.save_timeline_run(
+        project_id=project.project_id, output_mode="landscape", timeline_payload=_timeline_payload(clips)
+    )
+    segments = [
+        {
+            "segment_id": sid, "start_sec": start, "end_sec": end, "caption_text": f"재생 시험 {i}",
+            "cut_action": "keep", "review_required": False, "visual_overlays": [],
+        }
+        for i, (sid, start, end) in enumerate(PLAYBACK_SCENES, start=1)
+    ]
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={"segments": segments, "history": []},
+    )
+    return {"project_id": project.project_id, "session_id": session["session_id"], "timeline_id": timeline["timeline_id"]}
+
+
 def seed_editor_fixtures(*, projects_root: Path, media_dir: Path) -> dict[str, dict[str, str]]:
     media = _make_media(Path(media_dir))
     store = LocalProjectStore(Path(projects_root))
@@ -236,4 +272,5 @@ def seed_editor_fixtures(*, projects_root: Path, media_dir: Path) -> dict[str, d
         "clean": _seed_clean(store, media),
         "duplicated_overlays": _seed_duplicated(store, media),
         "no_narration": _seed_no_narration(store, media),
+        "playback": _seed_playback(store, media),
     }
