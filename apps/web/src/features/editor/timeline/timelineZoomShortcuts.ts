@@ -20,6 +20,8 @@
  * 이 함수는 "무엇을 눌렀는가"만 답하고, "지금 그게 되는가"는 답하지 않는다 --
  * 그 판단은 화면(`TimelineDock`)이 단추와 키에 한 벌로 내려 준다.
  */
+import { editorShortcutFor } from "../editorShortcuts";
+
 export type TimelineZoomCommand = "in" | "out" | "fit";
 
 type Chord = Readonly<{ key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }>;
@@ -28,24 +30,9 @@ export function timelineZoomShortcutFor(event: Chord, targetIsEditable: boolean)
   if (!event || typeof event.key !== "string") return null;
   // 글을 쓰는 칸에서는 가로채지 않는다. 브라우저가 원래 하던 일까지 같이 막힌다.
   if (targetIsEditable) return null;
-  // Alt가 눌린 조합은 다른 뜻이다. 가로채지 않는다.
-  if (event.altKey) return null;
-  // 맥에는 Ctrl이 아니라 Cmd다. 하나만 받으면 나머지 절반이 못 쓴다 --
-  // `cutShortcuts.ts`가 Delete/Backspace를 둘 다 받는 것과 같은 이유다.
-  if (!(event.ctrlKey || event.metaKey)) return null;
-
-  switch (event.key) {
-    // 자판과 Shift에 따라 같은 자리가 `=`로도 `+`로도 온다(숫자판은 늘 `+`다).
-    // 둘 다 안 받으면 대표님이 Shift를 같이 눌렀을 때 조용히 아무 일도 안 한다.
-    case "=":
-    case "+":
-      return "in";
-    case "-":
-    case "_":
-      return "out";
-    case "0":
-      return "fit";
-    default:
-      return null;
-  }
+  const id = editorShortcutFor({ key: event.key, ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey, shiftKey: event.shiftKey, target: null, repeat: false, isComposing: false, defaultPrevented: false });
+  if (id === "zoom-in") return "in";
+  if (id === "zoom-out") return "out";
+  if (id === "zoom-fit") return "fit";
+  return null;
 }

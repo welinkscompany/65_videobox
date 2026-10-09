@@ -1,5 +1,6 @@
 import type { InspectorAction } from "../inspector/InspectorControls";
 import type { CutToolbarState } from "./cutToolbar";
+import { editorShortcutFor } from "../editorShortcuts";
 
 /** 캡컷 단축키.
  *
@@ -13,16 +14,9 @@ import type { CutToolbarState } from "./cutToolbar";
 type Chord = Readonly<{ key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }>;
 
 export function cutShortcutFor(event: Chord, tools: CutToolbarState): InspectorAction | null {
-  // Alt가 눌린 조합은 다른 뜻이다. 가로채지 않는다.
-  if (event.altKey) return null;
-  const chord = event.ctrlKey || event.metaKey;
-
-  if (chord && event.key.toLowerCase() === "b") {
-    return tools.split.enabled ? tools.split.action : null;
-  }
-  // 삭제 키는 두 이름으로 온다. 맥 키보드에는 Delete가 없고 Backspace만 있다.
-  if (!chord && (event.key === "Delete" || event.key === "Backspace")) {
-    return tools.drop.enabled ? tools.drop.action : null;
-  }
+  // 판정은 editorShortcuts.ts 한 곳. 여기서는 툴바가 정한 동작을 돌려줄 뿐이다.
+  const id = editorShortcutFor({ key: event.key, ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey, shiftKey: event.shiftKey, target: null, repeat: false, isComposing: false, defaultPrevented: false });
+  if (id === "split") return tools.split.enabled ? tools.split.action : null;
+  if (id === "delete") return tools.drop.enabled ? tools.drop.action : null;
   return null;
 }

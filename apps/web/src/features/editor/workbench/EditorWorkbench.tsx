@@ -26,7 +26,7 @@ import { hasLegacyEditorUiState, readEditorUiState, readToolbarCollapsedPreferen
 import type { RightDockCandidate, RightDockDirector } from "./rightDockTypes";
 import { VariantCompare } from "../variants/VariantCompare";
 import { cutToolbarState, EMPTY_CUT_TOOLS, type CutToolbarState } from "./cutToolbar";
-import { cutShortcutFor } from "./cutShortcuts";
+import { editorShortcutFor } from "../editorShortcuts";
 import { VariantConflictPanel } from "../variants/VariantConflictPanel";
 import { VariantSelector } from "../variants/VariantSelector";
 import { projectServerVariant, projectVariant, type VariantKind } from "../variants/variantProjection";
@@ -246,34 +246,29 @@ function EditorWorkbenchInstance({
   const cutToolsRef = useRef<CutToolbarState>(EMPTY_CUT_TOOLS);
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      const key = event.key.toLowerCase();
-      const target = event.target as HTMLElement | null;
-      if (target?.isContentEditable) return;
-      const tag = target?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      // 어느 자리에서 가로채도 되는지(글칸·서랍·조합 키·꾹 누름)는 문지기 한 곳이 정한다.
+      const id = editorShortcutFor(event);
+      if (!id) return;
       // 캡컷 컷 단축키. 무엇을 할 수 있는지는 툴바가 이미 정했으므로 그것을 그대로
       // 쓴다 -- 여기서 다시 계산하면 단추와 키가 서로 다른 판단을 하게 된다.
-      const cutAction = cutShortcutFor(event, cutToolsRef.current);
-      if (cutAction) {
-        if (isSavingTimeline || !onInspectorAction) return;
+      if (id === "split" || id === "delete") {
+        const tool = id === "split" ? cutToolsRef.current.split : cutToolsRef.current.drop;
+        if (!tool.enabled || !tool.action || isSavingTimeline || !onInspectorAction) return;
         event.preventDefault();
-        void onInspectorAction(cutAction);
+        void onInspectorAction(tool.action);
         return;
       }
-      if (key !== "z" && key !== "y") return;
-      const chord = (event.ctrlKey || event.metaKey) && !event.altKey;
-      const redo = chord && ((key === "z" && event.shiftKey) || (key === "y" && !event.shiftKey));
-      const undo = chord && key === "z" && !event.shiftKey;
-      if (redo) {
+      if (id === "redo") {
         if (isSavingTimeline || !onRedo || !session?.redoCount) return;
         event.preventDefault();
         void onRedo();
         return;
       }
-      if (!undo) return;
-      if (isSavingTimeline || !onUndo || !session?.undoCount) return;
-      event.preventDefault();
-      void onUndo();
+      if (id === "undo") {
+        if (isSavingTimeline || !onUndo || !session?.undoCount) return;
+        event.preventDefault();
+        void onUndo();
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
