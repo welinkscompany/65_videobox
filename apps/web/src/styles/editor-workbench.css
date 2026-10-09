@@ -1,12 +1,21 @@
 .vb-product-main { min-height:0; display:flex; flex-direction:column; }
 /* 빼는 값은 위 띠의 높이다. `--vb-top-bar-h`는 `.vb-product-shell`이 정하고 좁은
    화면에서 띠가 두 줄이 되면 거기서 같이 바뀐다(product-shell.css). */
+/* 편집기 화면의 껍데기는 화면 높이에 **고정**한다(2026-10-08 점검 9번, 계획 H Task 13).
+   `min-height: 100svh`만 있으면 작업판의 내용 높이가 화면보다 클 때 껍데기가 같이 자라
+   (1280x720에서 800px) 높이가 정해진 값이 아니라 내용 높이가 되고, `1fr` 행도 줄어들 줄
+   모르게 된다 -- 타임라인이 화면 아래(757px)로 밀려 85px 중 37px만 보였다.
+   화면이 충분히 높으면(900px 이상) 내용이 화면보다 작아 이 규칙이 아무것도 바꾸지 않는다. */
+.vb-product-shell:has(.vb-editor-workbench) { height: 100svh; min-height: 0; }
+/* 낮은 화면(1280x720 등)에서는 편집기 껍데기의 위아래 여백 64px가 타임라인 한 줄보다 크다.
+   여백만 줄인다 -- 높이 760px 이하에서만 걸려서 900px 이상 화면은 그대로다. */
+@media (max-height: 760px) { .vb-product-content:has(.vb-editor-workbench) { padding-block: var(--vb-space-2); } }
 .vb-product-content:has(.vb-editor-workbench) { flex:1 1 auto; min-height:0; height:calc(100svh - var(--vb-top-bar-h, 4.25rem)); overflow:hidden; }
 /* 두 번째 행(미리보기가 있는 body)에 바닥을 둔다. 2026-08-17에 타임라인 상한을
    40vh로 올렸더니 390x844에서 타임라인이 364px를 가져가 **미리보기 영상이 0px가
    됐다** -- 화면에 아무것도 안 보였다. 상한을 다시 계산해 고쳤지만, 다음에 누가
    또 늘려도 미리보기가 통째로 사라지지는 않게 바닥을 남긴다. */
-.vb-editor-workbench { display: grid; min-width:0; min-height:0; max-height:100%; height:100%; overflow:hidden; grid-template-rows: auto minmax(8rem, 1fr) auto; gap: var(--vb-space-3); color: var(--foreground); }
+.vb-editor-workbench { display: grid; min-width:0; min-height:0; max-height:100%; height:100%; overflow:hidden; grid-template-rows: auto minmax(6rem, 1fr) auto; gap: var(--vb-space-3); color: var(--foreground); }
 .vb-editor-workbench__toolbar, .vb-editor-workbench__timeline, .vb-editor-workbench__dock, .vb-editor-workbench__preview { border: 1px solid var(--border); border-radius: var(--vb-radius-md); background: var(--card); }
 .vb-editor-workbench__toolbar { display: flex; justify-content: space-between; align-items: center; gap: var(--vb-space-3); padding: var(--vb-space-3) var(--vb-space-4); }
 .vb-editor-workbench__toolbar div { display: flex; gap: var(--vb-space-2); }
@@ -506,7 +515,17 @@
      위를 전부 타임라인에 준다. 실제 면적은
      `apps/web/e2e/exact-preview.spec.mjs`가 브라우저에서 재서 지킨다. */
   /* 편집자가 손잡이를 잡으면 그 값이 이긴다. 안 잡았으면 화면 높이에 맞춘 기본값. */
-  .vb-editor-workbench__timeline { height: var(--vb-timeline-height, auto); max-height: var(--vb-timeline-height, clamp(4rem, calc(66vh - 390px), 26rem)); }
+  /* 타임라인 바닥: 눈금 + 트랙 셋 + 머리·여백(3.5rem)이 한 번에 보이는 높이(2026-10-08 점검 9번).
+     85px이던 시절엔 보이는 것이 37px뿐이라 트랙이 하나도 안 보였다. 길이는 줄 높이 변수에서
+     뽑아서 밀도를 바꾸면 따라간다. 590px대의 아주 낮은 화면은 영상이 69px로 쪼그라들어
+     (미리보기 바닥선 8.5% 근처) 예전 바닥(4rem)을 그대로 둔다. */
+  .vb-editor-workbench { --vb-timeline-floor: 4rem; }
+}
+@media (min-width: 768px) and (min-height: 680px) {
+  .vb-editor-workbench { --vb-timeline-floor: calc(var(--vb-timeline-ruler-h) + 3 * var(--vb-timeline-lane-h) + 3.5rem); }
+}
+@media (min-width: 768px) {
+  .vb-editor-workbench__timeline { height: var(--vb-timeline-height, auto); max-height: var(--vb-timeline-height, clamp(var(--vb-timeline-floor), calc(66vh - 390px), 26rem)); }
 }
 /* 예전에는 좁은 데스크톱에서 키 안내 줄을 숨겼다. 안내가 한 줄씩 자리를 먹던
    시절의 대처였고, 이제 안내가 모두 한 줄에 모여 있어 숨길 이유가 없다. */

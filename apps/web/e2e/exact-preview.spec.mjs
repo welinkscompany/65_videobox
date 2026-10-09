@@ -372,3 +372,50 @@ test("audition replaces the exact player without autoplay and can return to exac
   await expect(page.getByLabel("편집본 미리보기")).toHaveCount(1);
   await expect(page.locator("audio, video")).toHaveCount(1);
 });
+
+test("1280x720에서도 타임라인이 한 화면 안에서 트랙 셋 이상을 보여 준다 (2026-10-08 §3-9)", async ({ page }) => {
+  const clip = (id, type, segment, from, to) => ({ clip_id: id, segment_id: segment, clip_type: type, asset_id: `a-${id}`, asset_uri: `local://a-${id}`, start_sec: from, end_sec: to, media_controls: {} });
+  const state = {
+    current: manifest({
+      tracks: [
+        { track_id: "narration", track_type: "narration", clips: [clip("n1", "narration", "segment-1", 0, 6), clip("n2", "narration", "segment-2", 6, 12)] },
+        { track_id: "broll", track_type: "broll", clips: [clip("b1", "broll", "segment-1", 1, 5)] },
+        { track_id: "bgm", track_type: "bgm", clips: [clip("m1", "bgm", "segment-1", 0, 12)] },
+      ],
+    }),
+    retryBodies: [],
+  };
+  await page.setViewportSize({ width: 1280, height: 720 });
+  // 가짜 서버에 없는 목록 길(자산·가로세로)은 빈 목록으로 답한다. 안 그러면 "불러오지 못했어요" 상태 글
+  // 두 줄이 작업판 위에 붙어 작업판을 화면 아래로 밀어, 이 시험이 재려는 배치가 아니라 그 글을 잰다.
+  const empty = (body) => (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
+  await page.route("**/api/projects/local-draft/assets/broll-video", empty({ assets: [] }));
+  await page.route("**/api/media-library/assets", empty({ assets: [] }));
+  await page.route("**/api/library/assets*", empty({ assets: [], total: 0 }));
+  await page.route("**/api/projects/local-draft/output-variants*", empty({ variants: [] }));
+  await openEditor(page, state);
+  await expect(page.getByRole("region", { name: "타임라인" })).toBeVisible();
+  await expect.poll(() => page.locator(".vb-preview-stage__media-shell video").evaluate((node) => node.readyState >= HTMLMediaElement.HAVE_METADATA)).toBe(true);
+  const seen = await page.evaluate(() => {
+    const timeline = document.querySelector(".vb-editor-workbench__timeline");
+    const box = timeline.getBoundingClientRect();
+    // 트랙 줄(머리 칸의 항목)이 타임라인 상자 안에 통째로 보이는 개수.
+    const lanes = [...document.querySelectorAll('.vb-timeline-lane-headers [role="listitem"]')].map((el) => el.getBoundingClientRect());
+    const video = document.querySelector(".vb-preview-stage__media-shell video").getBoundingClientRect();
+    return {
+      docOverflow: document.documentElement.scrollHeight - window.innerHeight,
+      bottom: box.bottom,
+      height: box.height,
+      lanesFullyVisible: lanes.filter((r) => r.top >= box.top - 1 && r.bottom <= Math.min(box.bottom, window.innerHeight) + 1).length,
+      videoHeight: video.height,
+    };
+  });
+  // 원인(2026-10-08 측정): 껍데기가 `min-height: 100svh`뿐이라 작업판 내용(미리보기 판 459px 등)이
+  // 화면보다 크면 껍데기가 800px로 같이 자라 타임라인이 757px로 밀렸다(85px 중 37px만 보임).
+  expect(seen.docOverflow).toBeLessThanOrEqual(1);
+  expect(seen.bottom).toBeLessThanOrEqual(720);
+  expect(seen.height).toBeGreaterThanOrEqual(130); // 눈금 + 32px 트랙 셋
+  expect(seen.lanesFullyVisible).toBeGreaterThanOrEqual(3);
+  // 미리보기가 사라지지는 않는다(영상 높이 바닥).
+  expect(seen.videoHeight).toBeGreaterThan(100);
+});
