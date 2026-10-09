@@ -54,6 +54,13 @@ function stubSelectionApi({ jobs, finalRender }: { jobs: unknown[]; finalRender?
 }
 
 describe("내보내기 팝오버", () => {
+
+  it("목록이 아직 안 왔을 때도 확인하고 있다고 말한다", () => {
+    vi.spyOn(api, "getLatestEditingSession").mockReturnValue(new Promise(() => {}) as never);
+    vi.spyOn(api, "listJobs").mockReturnValue(new Promise(() => {}) as never);
+    render(<ExportPopover projectId="project-a" />);
+    expect(screen.getByRole("status")).toHaveTextContent("내보낼 곳을 확인하고 있어요.");
+  });
   it("목적지를 먼저 보여 준다 -- 완성본 화면을 통째로 열지 않는다", async () => {
     stubSelectionApi({ jobs: [timelineJob, masterFinalJob], finalRender: currentMasterRender });
 

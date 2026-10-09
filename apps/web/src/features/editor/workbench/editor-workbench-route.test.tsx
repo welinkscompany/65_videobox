@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { startTransition, StrictMode, Suspense, useState } from "react";
 
 import { ApiConflictError, ApiRequestError, DirectorProposalBlockedError, api } from "../../../api";
+import * as editorFeedback from "./editorFeedback";
 import { EditorWorkbenchRoute, affectedAreaLabel, findHermesRunProposalId, partialStatusLabel, prepareProjectAssetBrowserPreview, yujinSceneChangeNotice } from "./EditorWorkbenchRoute";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
@@ -5617,5 +5618,47 @@ describe("숏폼 화면 정직성", () => {
 
     expect(notice).not.toMatch(/개만 보고/);
     expect(notice).toMatch(/전체 장면으로 되돌릴 수 있어요/);
+  });
+});
+
+describe("편집 하나에 알림 하나", () => {
+  beforeEach(() => {
+    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue(narrationManifest(1) as never);
+    vi.spyOn(api, "getEditingSession").mockImplementation(
+      (projectId, sessionId) => Promise.resolve(editingSession(projectId, sessionId)) as never,
+    );
+    vi.spyOn(api, "listOutputVariants").mockResolvedValue({ variants: [] });
+    vi.spyOn(api, "listBrollAssets").mockResolvedValue([] as never);
+    vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({ assets: [], total: 0 } as never);
+    vi.spyOn(api, "listJobs").mockResolvedValue([]);
+    vi.spyOn(api, "listTtsCandidates").mockResolvedValue({ candidates: [] });
+    vi.spyOn(api, "listYujinMemoryCandidates").mockResolvedValue([]);
+  });
+
+  it("장면 끝을 한 번 자르면 저장하고 있어요 -> 저장했어요 알림이 같은 id로 차례로 뜬다", async () => {
+    const announce = vi.spyOn(editorFeedback, "announceEditorFeedback");
+    vi.spyOn(api, "getEditorPlaybackManifest")
+      .mockResolvedValueOnce(narrationManifest(1) as never)
+      .mockResolvedValueOnce(narrationManifest(2, 1) as never);
+    mockEditingSessionRevisions(1, 2);
+    const update = vi.spyOn(api, "updateEditingSessionSegmentBounds").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(clipSelectionButton("n-1"));
+    vi.spyOn(screen.getByTestId("timeline-track"), "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
+    const trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
+    pointer(trim, "pointerdown", 100);
+    pointer(trim, "pointermove", 200);
+    pointer(trim, "pointerup", 200);
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(announce).toHaveBeenCalledTimes(2));
+
+    expect(announce.mock.calls.map(([feedback]) => feedback.kind)).toEqual(["working", "done"]);
+    expect(announce.mock.calls[0][0].message).toBe("변경 내용을 저장하고 있어요.");
+    expect(announce.mock.calls[1][0].message).toBe("변경 내용을 저장했어요.");
+    // 읽어 주는 도구용 문장은 그대로다.
+    await waitFor(() => expect(screen.getByText("변경 내용을 저장했어요.")).toBeVisible());
   });
 });

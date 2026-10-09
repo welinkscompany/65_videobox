@@ -65,7 +65,8 @@ export function ExportPopover({
     return () => { active = false; };
   }, [projectId]);
 
-  if (!ready) return null;
+  // 목록이 오기 전 첫 1초도 빈 칸으로 두지 않는다 -- 누르자마자 무슨 일이 일어나는지 말한다.
+  if (!ready) return <p role="status" className="vb-export-popover__loading">내보낼 곳을 확인하고 있어요.</p>;
   const base = `/api/projects/${encodeURIComponent(projectId)}`;
   return (
     <div className="vb-export-popover">

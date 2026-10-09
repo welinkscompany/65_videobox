@@ -32,6 +32,7 @@ import { canRestorePartialRegenerationResult, canRunPartialRegeneration, createP
 import { EditorWorkbench } from "./EditorWorkbench";
 import { timelineZoomCommandFromInstruction } from "../timeline/timelineZoomVoiceCommand";
 import type { TimelineZoomCommand } from "../timeline/timelineZoomShortcuts";
+import { announceEditorFeedback, dismissEditorFeedback } from "./editorFeedback";
 import { buildQualityFollowUps } from "./qualityFollowUps";
 import type { RightDockCompletionEntry, RightDockDirector, RightDockEditingProposalPreview, RightDockMessage, RightDockProposal } from "./rightDockTypes";
 
@@ -911,6 +912,8 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     const currentView = state.view;
     mutationInFlight.current = true;
     setMutation({ isSaving: true, message: "변경 내용을 저장하고 있어요." });
+    // 누르자마자 알림 하나(같은 id)가 뜨고, 끝나면 같은 자리에서 바뀐다. 화면 읽기용 '편집 저장 상태' 문장은 따로 그대로다.
+    announceEditorFeedback({ kind: "working", message: "변경 내용을 저장하고 있어요." });
     // Any successful mutation invalidates the current exact-preview artifact
     // in the same backend transaction. Unmount it before issuing the request
     // so the browser cannot re-fetch a now-fenced URL and emit a transient 404.
@@ -934,6 +937,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
     if (!isCurrent()) {
       mutationInFlight.current = false;
+      if (routeEpoch.current.value !== epoch) dismissEditorFeedback();
       return;
     }
     const port = createEditorCommandPort({
@@ -943,6 +947,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     });
     let resultMessage = "변경 내용을 저장했어요.";
     let mutationSucceeded = true;
+    let refreshFailed = false;
     try {
       // 성공한 편집이 **자기 사정을 직접 말할 수 있게** 한다. 더빙처럼 "됐다"만으로는
       // 모자란 편집이 있다 -- 못 넣은 장면이 있으면 그것까지 말해 줘야 한다.
@@ -961,7 +966,10 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
           ?? "변경 내용을 저장하지 못했어요. 최신 내용을 확인한 뒤 다시 시도해 주세요.";
       if (isCurrent()) setMutation({ isSaving: true, message: resultMessage });
     }
-    if (!isCurrent()) return;
+    if (!isCurrent()) {
+      if (routeEpoch.current.value !== epoch) dismissEditorFeedback();
+      return;
+    }
     const refreshOperationId = manifestOperationId.current + 1;
     manifestOperationId.current = refreshOperationId;
     const isCurrentRefresh = () => isCurrent() && manifestOperationId.current === refreshOperationId;
@@ -990,6 +998,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         }
       }
     } catch (error) {
+      refreshFailed = true;
       if (isCurrent()) {
         if (error instanceof Error && error.message === "editor_snapshot_identity_mismatch") {
           resultMessage = "최신 편집 상태가 일치하지 않아요. 새로고침한 뒤 다시 시도해 주세요.";
@@ -1005,6 +1014,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       if (isCurrent()) {
         mutationInFlight.current = false;
         setMutation({ isSaving: false, message: resultMessage });
+        announceEditorFeedback({ kind: mutationSucceeded && !refreshFailed ? "done" : "failed", message: resultMessage });
         setPartialRecoveryRetryToken((current) => current + 1);
       }
     }
