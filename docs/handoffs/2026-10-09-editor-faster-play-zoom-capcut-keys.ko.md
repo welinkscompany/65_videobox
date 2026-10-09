@@ -1,5 +1,7 @@
 # 편집기 더 빠른 재생·타임라인 줌·캡컷 단축키 + 1280×720 한 화면 마감 — 계획 P2 Task 0~6, 계획 H Task 13 (2026-10-09)
 
+**대체됨:** `docs/handoffs/2026-10-10-editor-core-repair-h.ko.md`
+
 **이어받는 문서:** `2026-10-09-editor-playback-p.ko.md` (계획 P 재생 수리 마감)
 계획서: `docs/superpowers/plans/2026-10-09-editor-faster-play-zoom-capcut-keys-p2.ko.md` · H 계획: `docs/superpowers/plans/2026-10-08-editor-core-repair-h.ko.md` (Task 13까지 끝, **14~18 남음**)
 작업 장부: `.superpowers/sdd/2026-10-09-editor-faster-play-zoom-capcut-keys-p2.ko/progress.md` · 마감 보고서: `.superpowers/sdd/p2-closeout-2026-10-09.md` (원자료는 `.superpowers/sdd/p2c/`)

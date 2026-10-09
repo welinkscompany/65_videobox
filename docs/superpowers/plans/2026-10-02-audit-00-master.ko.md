@@ -17,6 +17,8 @@
 
 > 2026-10-08: 설명 모션 2단계(`2026-10-08-motion-graphics-step2.ko.md`)가 B–F보다 먼저 들어왔다. `api.ts`(타입 셋·메서드 둘), `owner-ready.ps1`(모션 다리 블록), `models.py`(모션 모델 넷), `main.py`(모션 서비스·라우터)가 바뀌었다 — 앵커는 문자열로 찾는다.
 
+> 2026-10-10: 계획 H(편집기 핵심 수리, `2026-10-08-editor-core-repair-h.ko.md`)가 B–F보다 먼저 들어왔다. 바뀐 공유 파일(H 문서 "같이 고치는 파일" 표): `api.ts`(미리보기 상태 읽기·`include_history`)·`pollJob.ts`·`EditorWorkbench.tsx`·`EditorWorkbenchRoute.tsx`·`editor-workbench.css`·`editing_session.py`(core·router)·`models.py`·`local_project_store.py`·`editor-ui-source-map.json`. 표 밖에서 더 바뀐 것: `composition_plan.py`·`output_variants.py`·`ffmpeg_final_renderer.py`·`pycapcut_adapter.py`·`assets.py`·`orchestration.py`·`main.py`. H는 `YujinPanel.tsx`·`OutputsPage.tsx`·`library_assets.py`를 건드리지 않았다 — 앵커는 문자열로 찾는다.
+
 **계획서끼리 병렬로 돌리지 않는다.** 아래 파일을 여럿이 같이 고친다:
 `apps/web/src/features/editor/workbench/YujinPanel.tsx`(B–F·G), `apps/web/src/app/OutputsPage.tsx`(B–F·G),
 `services/api/src/videobox_api/routers/library_assets.py`(A·B–F), `apps/web/src/api.ts`(A·B–F),

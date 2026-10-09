@@ -1,6 +1,7 @@
 # 묶음 G — 화면 개선 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> 2026-10-10: Task 0·6·13은 계획 H(`2026-10-08-editor-core-repair-h.ko.md`)가 먼저 실행했다 — 건너뛴다. Task 17 갭 점검에 그렇게 적는다.
 
 **Goal:** 대표님이 화면에서 바로 느끼는 불편을 줄인다. 프로젝트 카드에 첫 장면 그림이 보이고, 여러 프로젝트를 한 번에 보관(되돌리기 가능)하고, 검토 화면에서 편집본을 바로 재생하고, `+ 새로 만들기` 큰 막대를 카드 한 칸으로 줄이고, 편집기·설정·검토 화면의 겹치는 안내와 스크롤을 정리한다.
 
