@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 
 import { PreviewStage } from "./preview-stage";
 import { createPlaybackClock } from "./playbackClock";
+import { playbackShortcutFor } from "./playbackShortcuts";
 import { PLAYBACK_RATE_STORAGE_KEY } from "./playbackRate";
 
 beforeEach(() => { vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined); });
@@ -858,5 +859,74 @@ describe("재생 빠르기와 J·K·L·화살표 (2026-10-09 계획 P Task 4)", 
     fireEvent.keyDown(field, { key: "l" });
     expect(play).not.toHaveBeenCalled();
     field.remove();
+  });
+});
+
+describe("재생줄의 단축키 안내 (2026-10-09 계획 P Task 5)", () => {
+  beforeEach(() => { try { window.localStorage.removeItem(PLAYBACK_RATE_STORAGE_KEY); } catch { /* ignore */ } });
+  const shortcutButton = () => screen.getByRole("button", { name: "단축키" });
+  const note = () => screen.queryByRole("note", { name: "재생 단축키" });
+  const withPlayer = () => {
+    const view = render(<PreviewStage {...current} fps={{ num: 30, den: 1 }} />);
+    const media = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+    const flags = { paused: true, time: 0 };
+    Object.defineProperty(media, "paused", { configurable: true, get: () => flags.paused });
+    Object.defineProperty(media, "currentTime", { configurable: true, get: () => flags.time, set: (value: number) => { flags.time = value; } });
+    const play = vi.spyOn(media, "play").mockImplementation(async () => { flags.paused = false; });
+    return { ...view, media, play };
+  };
+
+  it("단축키 단추를 누르면 안내가 열리고 다시 누르면 닫힌다", () => {
+    render(<PreviewStage {...current} />);
+    expect(note()).toBeNull();
+    expect(shortcutButton().getAttribute("aria-expanded")).toBe("false");
+    expect(shortcutButton().getAttribute("aria-controls")).toBe("vb-playback-shortcuts");
+    fireEvent.click(shortcutButton());
+    const opened = note() as HTMLElement;
+    expect(opened.id).toBe("vb-playback-shortcuts");
+    for (const text of ["스페이스바", "J 키", "K 키", "L 키", "보는 속도"]) expect(opened.textContent).toContain(text);
+    expect(shortcutButton().getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(shortcutButton());
+    expect(note()).toBeNull();
+    expect(shortcutButton().getAttribute("aria-expanded")).toBe("false");
+  });
+  it("Esc나 바깥을 누르면 닫히고, 안내 안을 누르면 그대로다", () => {
+    render(<PreviewStage {...current} />);
+    fireEvent.click(shortcutButton());
+    fireEvent.pointerDown(note() as HTMLElement);
+    expect(note()).not.toBeNull();
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(note()).toBeNull();
+    fireEvent.click(shortcutButton());
+    fireEvent.pointerDown(document.body);
+    expect(note()).toBeNull();
+  });
+  it("안내를 열어 둬도 스페이스는 재생을 바꾼다(대화 상자가 아니다)", () => {
+    const { play } = withPlayer();
+    fireEvent.click(shortcutButton());
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.keyDown(document.body, { key: " " });
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+  it("단추에 키가 title로 붙는다(aria-label은 그대로)", () => {
+    render(<PreviewStage {...current} />);
+    expect(screen.getByRole("button", { name: "재생 또는 일시정지" }).getAttribute("title")).toBe("스페이스바");
+    expect(screen.getByRole("button", { name: "이전 프레임" }).getAttribute("title")).toBe("← 키");
+    expect(screen.getByRole("button", { name: "다음 프레임" }).getAttribute("title")).toBe("→ 키");
+  });
+  it("안내에 적힌 키는 전부 실제로 재생기를 움직인다(적고 안 되는 키가 없다)", () => {
+    render(<PreviewStage {...current} />);
+    fireEvent.click(shortcutButton());
+    const text = (note() as HTMLElement).textContent ?? "";
+    const listed: Array<[label: string, key: string, command: string]> = [
+      ["스페이스바", " ", "toggle"], ["K 키", "k", "pause"], ["L 키", "l", "faster"], ["J 키", "j", "slower"], ["←", "ArrowLeft", "step"], ["→", "ArrowRight", "step"],
+    ];
+    for (const [label, key, command] of listed) {
+      expect(text).toContain(label);
+      const result = playbackShortcutFor({ key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, repeat: false, isComposing: false, defaultPrevented: false, target: document.body });
+      expect(result?.type).toBe(command);
+    }
+    // 적힌 줄 수 = 시험한 줄 수 + 안내 한 줄. 새 줄을 적으면 여기서 걸린다.
+    expect((note() as HTMLElement).querySelectorAll("li").length).toBe(5);
   });
 });

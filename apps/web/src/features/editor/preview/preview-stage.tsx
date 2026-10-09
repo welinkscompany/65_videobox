@@ -7,6 +7,7 @@ import { capturePreviewStill } from "./previewStill";
 import type { PlaybackClock } from "./playbackClock";
 import { isSwallowedRepeat, playbackShortcutFor } from "./playbackShortcuts";
 import { applyPlaybackRate, formatPlaybackRate, PLAYBACK_RATES, readPlaybackRate, stepPlaybackRate, writePlaybackRate, type PlaybackRate } from "./playbackRate";
+import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 
 export type AuditionSource = AuditionMedia & Readonly<{ label: string }>;
@@ -105,6 +106,22 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
     setRate(next);
     writePlaybackRate(next);
   };
+  // 단축키 안내: 대화 상자가 아니다. 초점을 가두지 않고 키 처리도 막지 않는다(문지기는 aria-modal만 비킨다).
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const shortcutsButtonRef = useRef<HTMLButtonElement>(null);
+  const shortcutsNoteRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!shortcutsOpen) return;
+    const onKey = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setShortcutsOpen(false); };
+    const onPointer = (event: Event) => {
+      const target = event.target as Node | null;
+      if (target && (shortcutsNoteRef.current?.contains(target) || shortcutsButtonRef.current?.contains(target))) return;
+      setShortcutsOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onPointer);
+    return () => { window.removeEventListener("keydown", onKey); document.removeEventListener("pointerdown", onPointer); };
+  }, [shortcutsOpen]);
   const frameSec = fps && fps.num > 0 && fps.den > 0 ? fps.den / fps.num : 1 / 30;
 
   // 재생 시계: 재생 중에만 화면 프레임마다 재생기 시각을 읽어 알린다. 멈추면 고리도 멈춘다(rAF를 남겨 두지 않는다).
@@ -419,7 +436,7 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
         보였다** -- 왜인지 알 방법이 없었다. 캡컷은 재생 단추가 늘 있다.
         눌리지 않는 단추라도 있는 편이 낫다: 없으면 고장인지 내 잘못인지 모른다.
         (실시간 타임라인 재생은 별개의 큰 일이라 이번 범위가 아니다.) */}
-    {!isImageAudition && !visibleAuditionIssue && <div className="vb-preview-stage__playback" data-idle={currentMedia ? undefined : "true"}><div className="vb-preview-stage__transport"><button data-native-control="step-back" type="button" disabled={!currentMedia} onClick={() => stepFrame(-1)} aria-label="이전 프레임">◀｜</button><button data-native-control="toggle-playback" type="button" disabled={!currentMedia} onClick={togglePlayback} aria-label="재생 또는 일시정지">재생 / 일시정지</button><button data-native-control="step-forward" type="button" disabled={!currentMedia} onClick={() => stepFrame(1)} aria-label="다음 프레임">｜▶</button><button data-native-control="toggle-mute" type="button" disabled={!currentMedia} onClick={() => setMuted((current) => !current)} aria-label={muted ? "음소거 해제" : "음소거"} aria-pressed={muted}>{muted ? "음소거 해제" : "음소거"}</button>{loopRange && <button data-native-control="toggle-repeat" type="button" onClick={() => setRepeating((current) => !current)} aria-label="선택한 장면 반복" aria-pressed={repeating}>반복</button>}<button data-native-control="toggle-fullscreen" type="button" disabled={!currentMedia} onClick={toggleFullscreen} aria-label="미리보기 전체화면" aria-pressed={isFullscreen}>전체화면</button><label className="vb-preview-stage__rate" title="보는 속도만 바뀌어요. 영상은 바뀌지 않아요 · J 키 느리게 · L 키 빠르게 · K 키 멈춤"><span>재생 빠르기</span><NativeSelect aria-label="재생 빠르기" value={String(rate)} disabled={!currentMedia} onChange={(event) => changeRate(Number(event.target.value) as PlaybackRate)}>{PLAYBACK_RATES.map((value) => <option key={value} value={String(value)}>{formatPlaybackRate(value)}</option>)}</NativeSelect></label></div>{currentMedia ? <output aria-live="off">타임라인 <span ref={readoutRef} />{timelineTimeSuffix}</output> : <output aria-live="off">아직 재생할 영상이 없어요</output>}</div>}
+    {!isImageAudition && !visibleAuditionIssue && <div className="vb-preview-stage__playback" data-idle={currentMedia ? undefined : "true"}><div className="vb-preview-stage__transport"><button data-native-control="step-back" type="button" disabled={!currentMedia} onClick={() => stepFrame(-1)} aria-label="이전 프레임" title="← 키">◀｜</button><button data-native-control="toggle-playback" type="button" disabled={!currentMedia} onClick={togglePlayback} aria-label="재생 또는 일시정지" title="스페이스바">재생 / 일시정지</button><button data-native-control="step-forward" type="button" disabled={!currentMedia} onClick={() => stepFrame(1)} aria-label="다음 프레임" title="→ 키">｜▶</button><button data-native-control="toggle-mute" type="button" disabled={!currentMedia} onClick={() => setMuted((current) => !current)} aria-label={muted ? "음소거 해제" : "음소거"} aria-pressed={muted}>{muted ? "음소거 해제" : "음소거"}</button>{loopRange && <button data-native-control="toggle-repeat" type="button" onClick={() => setRepeating((current) => !current)} aria-label="선택한 장면 반복" aria-pressed={repeating}>반복</button>}<button data-native-control="toggle-fullscreen" type="button" disabled={!currentMedia} onClick={toggleFullscreen} aria-label="미리보기 전체화면" aria-pressed={isFullscreen}>전체화면</button><label className="vb-preview-stage__rate" title="보는 속도만 바뀌어요. 영상은 바뀌지 않아요 · J 키 느리게 · L 키 빠르게 · K 키 멈춤"><span>재생 빠르기</span><NativeSelect aria-label="재생 빠르기" value={String(rate)} disabled={!currentMedia} onChange={(event) => changeRate(Number(event.target.value) as PlaybackRate)}>{PLAYBACK_RATES.map((value) => <option key={value} value={String(value)}>{formatPlaybackRate(value)}</option>)}</NativeSelect></label><Button ref={shortcutsButtonRef} type="button" variant="ghost" size="sm" aria-expanded={shortcutsOpen} aria-controls="vb-playback-shortcuts" onClick={() => setShortcutsOpen((open) => !open)}>단축키</Button></div>{currentMedia ? <output aria-live="off">타임라인 <span ref={readoutRef} />{timelineTimeSuffix}</output> : <output aria-live="off">아직 재생할 영상이 없어요</output>}{shortcutsOpen && <div ref={shortcutsNoteRef} id="vb-playback-shortcuts" role="note" aria-label="재생 단축키" className="vb-preview-stage__shortcuts"><ul><li>스페이스바 — 재생 / 일시정지</li><li>K 키 — 멈춤</li><li>L 키 — 재생, 누를수록 빠르게(최대 2배)</li><li>J 키 — 느리게(최소 0.25배)</li><li>← → — 한 프레임씩</li></ul><p>빠르기는 보는 속도예요. 영상은 바뀌지 않아요.</p></div>}</div>}
     {showsADifferentMoment && <p role="status" aria-label="미리보기 위치 안내" aria-live="polite" className="vb-preview-stage__elsewhere">지금 화면은 타임라인 {timelineTime.toFixed(1)}초 모습이에요. 재생 위치는 아직 미리보기 밖이에요.</p>}
     {mode.kind === "exact" && <p role="status" aria-label="현재 캡션" aria-live="polite" aria-atomic="true" className="vb-preview-stage__caption-transcript vb-preview-stage__visually-hidden">{activeCaption ? `현재 캡션: ${activeCaption.text}` : "현재 캡션 없음"}</p>}
     <p role="status" aria-live="polite" className="vb-preview-stage__status">{mode.kind === "exact" ? `캡션도 함께 재생돼요. ${exact.copy} 타임라인 ${timelineTime.toFixed(1)}초` : mode.kind === "audition" ? isImageAudition ? "원본 그림 미리보기" : `원본 미리보기 · 타임라인 ${timelineTime.toFixed(1)}초` : `${projectIsEmpty ? "아직 넣은 영상이 없어요." : exact.copy} 타임라인 ${timelineTime.toFixed(1)}초`}</p>

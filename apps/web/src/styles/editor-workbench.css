@@ -514,6 +514,10 @@
 /* 재생 빠르기 고르기: 보는 속도만 바꾼다. 단추 줄 맨 끝, 줄이 모자라면 줄바꿈 대신 단추처럼 안 줄어든다. */
 .vb-preview-stage__rate { display: inline-flex; flex: 0 0 auto; align-items: center; gap: var(--vb-space-1); }
 .vb-preview-stage__rate select { width: auto; height: 1.5rem; min-height: 0; padding: 0 var(--vb-space-2); border-radius: var(--vb-radius-sm); font-size: var(--vb-text-sm); line-height: 1.4; }
+/* 단축키 안내: 대화 상자가 아니라 재생줄 바로 아래에 펼쳐지는 작은 쪽지. 메뉴처럼 보이지 않게 단추 모양을 주지 않는다. */
+.vb-preview-stage__shortcuts { flex: 1 0 100%; padding: var(--vb-space-2) var(--vb-space-3); border: 1px solid var(--border); border-radius: var(--vb-radius-sm); font-size: var(--vb-text-sm); }
+.vb-preview-stage__shortcuts ul { margin: 0; padding: 0; list-style: none; }
+.vb-preview-stage__shortcuts p { margin: var(--vb-space-1) 0 0; color: var(--vb-muted); }
 .vb-preview-stage__transport > button[aria-pressed="true"] { border-color: var(--vb-accent); background: var(--vb-accent-bg); }
 /* 전체화면은 판 전체가 커진다(영상만 키우면 재생·프레임 단추를 잃는다).
    바탕을 직접 깔아야 한다 -- 안 깔면 브라우저 기본 검정 위에 껍데기만 뜬다. */
