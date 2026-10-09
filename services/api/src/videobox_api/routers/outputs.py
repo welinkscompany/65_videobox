@@ -6,11 +6,13 @@ import threading
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from videobox_core_engine.audio_export import extract_audio_only
 from videobox_api.content_delivery import deliver_file
 from videobox_api.errors import _http_error
+from videobox_core_engine.editing_session_and_regeneration import EditingSessionConflict
+from videobox_storage.local_project_store import EditingSessionRevisionConflict
 from videobox_api.models import (
     CapCutHandoffDiagnosticsResponse,
     CapCutDraftExportArtifactResponse,
@@ -181,6 +183,19 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
                 target=orchestrator.run_exact_preview,
                 kwargs={"project_id": project_id, "generation_id": result["generation_id"]}, daemon=True,
             ).start()
+        except (EditingSessionConflict, EditingSessionRevisionConflict) as exc:
+            # 미리보기를 시키는 사이 더 새 편집·되돌리기가 먼저 저장됐다. 서버 고장이 아니라
+            # "낡은 판수" 거절이다 -- 다른 편집 길과 같은 409 본문(latest_session)에 고정 코드를 더한다.
+            latest = getattr(exc, "latest_session", None)
+            if latest is None:
+                try:
+                    latest = orchestrator.store.get_editing_session(project_id=project_id, session_id=session_id)
+                except Exception:
+                    latest = None
+            return JSONResponse(
+                status_code=status.HTTP_409_CONFLICT,
+                content={"code": "exact_preview_revision_conflict", "latest_session": latest},
+            )
         except Exception as exc:
             raise _http_error(exc) from exc
         return ExactPreviewResponse(**result)

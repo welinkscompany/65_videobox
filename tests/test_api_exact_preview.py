@@ -183,3 +183,40 @@ def test_exact_preview_revalidates_narration_source_uri_without_asset_id(tmp_pat
 
     status = client.get(f"/api/projects/{project_id}/exact-previews/{record['generation_id']}")
     assert status.status_code == 200 and status.json()["status"] == "stale" and status.json()["content_url"] is None
+
+
+def test_exact_preview_start_with_stale_revision_is_409_with_stable_code(tmp_path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, session_id = _session(client, tmp_path)
+    store = LocalProjectStore(tmp_path)
+    session = store.get_editing_session(project_id=project_id, session_id=session_id)
+    store.update_editing_session(project_id=project_id, session_id=session_id, session_payload=session, expected_revision=1)
+
+    stale = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/exact-preview",
+        json={"expected_revision": 1},
+    )
+
+    assert stale.status_code == 409, stale.text
+    body = stale.json()
+    assert body["code"] == "exact_preview_revision_conflict"
+    assert body["latest_session"]["session_revision"] == 2
+
+
+def test_exact_preview_start_losing_the_store_race_is_409_not_500(tmp_path, monkeypatch) -> None:
+    from videobox_storage.local_project_store import EditingSessionRevisionConflict
+
+    client = TestClient(create_app(projects_root=tmp_path), raise_server_exceptions=False)
+    project_id, session_id = _session(client, tmp_path)
+
+    def _lose_race(self, **_kwargs):
+        raise EditingSessionRevisionConflict("exact preview session revision is stale")
+
+    monkeypatch.setattr(LocalProjectStore, "begin_exact_preview", _lose_race)
+    raced = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/exact-preview",
+        json={"expected_revision": 1},
+    )
+
+    assert raced.status_code == 409, raced.text
+    assert raced.json()["code"] == "exact_preview_revision_conflict"
