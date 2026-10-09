@@ -7925,6 +7925,19 @@ class LocalProjectStore(OutputVariantMixin, PreviewShareMixin, YujinMemoryMixin,
         payload["updated_at"] = row["updated_at"]
         return payload
 
+    def get_editing_session_revision(self, *, project_id: str, session_id: str) -> int:
+        """세션 revision 숫자만 읽는다. `get_editing_session`은 세션 JSON 파일을
+        바인드 마운트에서 읽어 비교하므로(2026-10-09 실측 요청당 약 54ms)
+        미리보기 영상 범위 요청처럼 자주 묻는 자리에는 무겁다."""
+        row = self._fetchone(
+            project_id,
+            "SELECT session_revision FROM editing_sessions WHERE project_id = ? AND session_id = ?",
+            (project_id, session_id),
+        )
+        if row is None:
+            raise KeyError(f"Editing session not found: {session_id}")
+        return int(row["session_revision"])
+
     def get_latest_editing_session(self, *, project_id: str) -> dict[str, Any]:
         row = self._fetchone(
             project_id,

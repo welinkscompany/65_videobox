@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -128,6 +129,10 @@ def build_local_only_runtime_service(
 
 _LOGGER = logging.getLogger(__name__)
 
+#: 미리보기 영상 범위 요청이 전체 재검증 결과를 다시 쓰는 시간(초). 원본 파일을
+#: 제자리에서 바꾼 것만 이만큼 늦게 잡힌다 -- 세션 편집·낡음 표시는 매 요청 잡는다.
+_EXACT_PREVIEW_CONTENT_REVALIDATE_SECONDS = 10.0
+
 
 class ApiOrchestrator:
     def __init__(
@@ -139,6 +144,11 @@ class ApiOrchestrator:
         # This is intentionally a provider-neutral local planning seam. No
         # LLM/provider transport is constructed for an interview.
         self.creation_interview_runtime = creation_interview_runtime or DeterministicCreationInterviewRuntime()
+        # 미리보기 영상 범위 요청이 방금 끝낸 전체 재검증을 다시 쓰는 자리
+        # (`get_exact_preview_content_path`). 메모리에만 둔다.
+        self._exact_preview_content_verified: dict[tuple[str, str], tuple[tuple[int, int, str, str], float, Path]] = {}
+        self._exact_preview_content_lock = threading.Lock()
+        self._exact_preview_content_clock: Callable[[], float] = time.monotonic
         # 유튜브 학습 작업 상태(owner 결정 2026-08-29: "비동기로 바꾼다").
         # 다운로드·오디오 추출·컷/색감 분석을 합치면 nginx 프록시의 330초
         # 타임아웃보다 오래 걸릴 수 있어 요청 하나 안에서 동기로 끝내지 않는다.
@@ -837,6 +847,37 @@ class ApiOrchestrator:
         )
 
     def get_exact_preview_content_path(self, *, project_id: str, generation_id: str) -> Path:
+        """미리보기 영상 바이트를 내줄 경로. **범위 요청마다 불린다.**
+
+        탐색 한 번에 브라우저가 범위 요청을 여러 개(2026-10-09 실측 평균 6.6개,
+        `preload="metadata"`) 보낸다. 요청마다 원본 지문을 처음부터 다시 재면
+        컨테이너의 9p 바인드 마운트에서 stat/lstat 약 230번, 요청 하나에 약
+        350ms가 들어 탐색 하나가 1.5~9초가 됐다. 그래서 **방금 끝낸 전체
+        재검증을 짧게(`_EXACT_PREVIEW_CONTENT_REVALIDATE_SECONDS`) 다시 쓴다.**
+
+        다시 써도 매 요청 싸게 확인하는 것은 그대로다: 생성 기록이 아직
+        `succeeded`인가(누가 낡음 표시를 하면 바로 막힌다), 세션 revision이
+        그대로인가(편집하면 상태를 묻지 않아도 바로 막힌다), 지문·파일 주소가
+        같은가. 짧게 미뤄지는 것은 **원본 파일을 제자리에서 바꾼 경우**뿐이다.
+        상태 주소(`get_exact_preview_status`)는 지금처럼 매번 전체 재검증한다.
+        """
+        record = self.store.get_exact_preview(project_id=project_id, generation_id=generation_id)
+        key = (project_id, generation_id)
+        if str(record.get("state")) == "succeeded" and record.get("artifact_uri"):
+            revision = self.store.get_editing_session_revision(project_id=project_id, session_id=str(record["session_id"]))
+            signature = (revision, int(record["expected_revision"]), str(record["fingerprint"]), str(record["artifact_uri"]))
+            with self._exact_preview_content_lock:
+                cached = self._exact_preview_content_verified.get(key)
+            if (
+                cached is not None and cached[0] == signature
+                and signature[0] == signature[1]
+                and self._exact_preview_content_clock() < cached[1]
+            ):
+                path = cached[2]
+                if path.is_file():
+                    return path
+        with self._exact_preview_content_lock:
+            self._exact_preview_content_verified.pop(key, None)
         status = self.get_exact_preview_status(project_id=project_id, generation_id=generation_id)
         if status["status"] != "succeeded":
             raise KeyError("exact_preview_not_current")
@@ -844,6 +885,13 @@ class ApiOrchestrator:
         path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=str(record["artifact_uri"]))
         if not path.is_file():
             raise KeyError("exact_preview_content_missing")
+        signature = (int(record["expected_revision"]), int(record["expected_revision"]), str(record["fingerprint"]), str(record["artifact_uri"]))
+        with self._exact_preview_content_lock:
+            if len(self._exact_preview_content_verified) > 256:
+                self._exact_preview_content_verified.clear()
+            self._exact_preview_content_verified[key] = (
+                signature, self._exact_preview_content_clock() + _EXACT_PREVIEW_CONTENT_REVALIDATE_SECONDS, path,
+            )
         return path
 
     def get_latest_exact_preview_for_session(self, *, project_id: str, session_id: str) -> dict[str, Any]:

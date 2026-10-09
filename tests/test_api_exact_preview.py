@@ -77,6 +77,61 @@ def test_exact_preview_content_revalidates_session_and_refuses_range_after_stale
     assert client.get(content, headers={"Range": "bytes=2-5"}).status_code == 404
 
 
+def _finished_preview(tmp_path):
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, session_id = _session(client, tmp_path)
+    store = LocalProjectStore(tmp_path)
+    session, _timeline, plan, fingerprint = LocalPipelineRunner(store)._exact_preview_inputs(project_id=project_id, session_id=session_id)
+    record = store.begin_exact_preview(
+        project_id=project_id,
+        request=ExactPreviewRequest(session_id=session_id, expected_revision=1, start_sec=0, end_sec=2),
+        fingerprint=fingerprint, duration_sec=plan.duration_sec,
+    )
+    source = tmp_path / "proxy.mp4"; source.write_bytes(b"0123456789")
+    assert store.claim_exact_preview(project_id=project_id, generation_id=record["generation_id"], owner_token="worker")
+    assert store.finish_exact_preview(project_id=project_id, generation_id=record["generation_id"], fingerprint=fingerprint, artifact_path=source, owner_token="worker")
+    content = f"/api/projects/{project_id}/exact-previews/{record['generation_id']}/content"
+    return app, client, store, project_id, session_id, session, content
+
+
+def test_exact_preview_content_ranges_reuse_one_recent_full_revalidation(tmp_path, monkeypatch) -> None:
+    """탐색 한 번에 브라우저는 범위 요청을 여러 개(실측 평균 6.6개) 보낸다.
+    요청마다 원본 지문을 처음부터 다시 재면(9p 바인드 마운트에서 stat 230번,
+    약 350ms) 탐색 하나가 1.5~9초가 된다(2026-10-09 실측). 방금 끝낸 전체
+    재검증을 짧게 다시 쓰되, 세션이 바뀐 것은 매 요청 바로 잡는다."""
+    app, client, store, project_id, session_id, session, content = _finished_preview(tmp_path)
+    calls = []
+    original = LocalPipelineRunner._exact_preview_inputs
+    def counting(self, **kwargs):
+        calls.append(kwargs)
+        return original(self, **kwargs)
+    monkeypatch.setattr(LocalPipelineRunner, "_exact_preview_inputs", counting)
+    now = [1000.0]
+    app.state.orchestrator._exact_preview_content_clock = lambda: now[0]
+
+    for _ in range(3):
+        ranged = client.get(content, headers={"Range": "bytes=2-5"})
+        assert ranged.status_code == 206 and ranged.content == b"2345"
+    assert len(calls) == 1
+
+    now[0] += 60.0  # 오래 지나면 다시 전체 재검증한다
+    assert client.get(content, headers={"Range": "bytes=2-5"}).status_code == 206
+    assert len(calls) == 2
+
+    # 세션이 바뀌면 상태를 묻지 않아도 다음 범위 요청이 바로 막힌다
+    store.update_editing_session(project_id=project_id, session_id=session_id, session_payload=session, expected_revision=1)
+    assert client.get(content, headers={"Range": "bytes=2-5"}).status_code == 404
+
+
+def test_exact_preview_content_refuses_immediately_once_marked_stale(tmp_path) -> None:
+    app, client, store, project_id, _session_id, _session_row, content = _finished_preview(tmp_path)
+    assert client.get(content, headers={"Range": "bytes=2-5"}).status_code == 206
+    generation_id = content.split("/")[-2]
+    store.mark_exact_preview_stale(project_id=project_id, generation_id=generation_id, reason="test")
+    assert client.get(content, headers={"Range": "bytes=2-5"}).status_code == 404
+
+
 def test_exact_preview_status_revalidates_tracked_asset_fingerprint_before_exposing_url(tmp_path) -> None:
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
