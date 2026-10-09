@@ -61,9 +61,9 @@
   --vb-text: #F2F2F3;
   --vb-muted: #A3A3AC;
   --vb-faint: #8A8A93;
-  --vb-accent: #EA580C;
-  --vb-accent-bg: #3A1F0F;
-  --vb-accent-border: #7A3D18;
+  --vb-accent: #4A8BF5;
+  --vb-accent-bg: #14223D;
+  --vb-accent-border: #2C4A82;
   --vb-preview: #0B0B0C;
   --vb-success: #4ADE80;
   --vb-success-bg: #0F2A18;
@@ -111,18 +111,18 @@
   --card-foreground: #F2F2F3;
   --popover: #202024;
   --popover-foreground: #F2F2F3;
-  --primary: #EA580C;
-  --primary-foreground: #FFFFFF;
-  --secondary: #3A1F0F;
+  --primary: #4A8BF5;
+  --primary-foreground: #0B1020;
+  --secondary: #14223D;
   --secondary-foreground: #F2F2F3;
   --muted: #202024;
   --muted-foreground: #A3A3AC;
-  --accent: #3A1F0F;
+  --accent: #14223D;
   --accent-foreground: #F2F2F3;
   --destructive: #F87171;
   --border: #2E2E33;
   --input: #2E2E33;
-  --ring: #EA580C;
+  --ring: #4A8BF5;
   --radius: .625rem;
 }
 
