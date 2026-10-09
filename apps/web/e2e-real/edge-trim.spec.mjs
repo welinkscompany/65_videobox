@@ -46,6 +46,8 @@ test("가장자리 손잡이는 자르고 몸통은 옮기고 되돌려진다", 
   mkdirSync(SHOT_DIR, { recursive: true });
   const { clean } = readFixture();
   await openEditor(page, clean);
+  // P2(2026-10-09): 짧은 프로젝트의 처음 창이 20초가 됐다. 이 시험은 옛 배율(영상 전체)의 기하를 쓴다.
+  await page.getByRole("button", { name: "타임라인 전체 보기" }).click();
   await page.getByRole("button", { name: CLIP }).click();
   await expect(handle(page, "끝 자르기")).toBeVisible();
 

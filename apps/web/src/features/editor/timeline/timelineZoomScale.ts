@@ -17,6 +17,11 @@
  *  60초면 장면 열 개 남짓이 한눈에 들어오면서도 하나를 잡을 만큼은 넓다. */
 export const TIMELINE_INITIAL_VISIBLE_SECONDS = 60;
 
+/** 한 화면에 적어도 보이는 시간. P2(2026-10-09, 대표님 "초당 프레임이 그렇게 길어지면 수동 편집
+ *  자체가 힘들다"): 7.75초 영상이 153px/초로 열려 1초가 화면 8분의 1이었고 줄이기도 잠겨 있었다.
+ *  짧은 영상도 20초 창으로 열고, 줄이기 바닥도 이 창까지 내려간다 -- 영상 뒤쪽은 빈 자리다. */
+export const TIMELINE_MIN_VISIBLE_SECONDS = 20;
+
 /** 길이나 화면 폭을 못 믿을 때 돌아오는 자리. 예전 기본값 그대로다.
  *  0이나 Infinity가 `createTimelineNavigation`에 들어가면 RangeError가 나고
  *  편집기가 **통째로** 안 열린다 -- 배율 하나 때문에 화면을 잃지 않는다. */
@@ -48,19 +53,18 @@ export function fitPixelsPerSecond(input: TimelineZoomScaleInput): number | null
 export function pixelsPerSecondBounds(input: TimelineZoomScaleInput): TimelineZoomBounds {
   const fit = fitPixelsPerSecond(input);
   const max = TIMELINE_MAX_PIXELS_PER_SECOND;
-  // **줄이기는 영상 전체가 한 화면에 들어온 순간 멈춘다.** 그 너머는 빈 자리뿐이라
-  // 더 줄일 이유가 없고, 이렇게 두면 줄이기를 계속 누른 자리와 `전체 보기`가
-  // 정확히 같은 자리가 된다. 15초짜리를 2px/초까지 줄일 수 있게 두는 것은
-  // 기능이 아니라 길 잃기다.
   if (fit === null) return { min: ABSOLUTE_MIN_PIXELS_PER_SECOND, max };
-  return { min: Math.min(max, Math.max(ABSOLUTE_MIN_PIXELS_PER_SECOND, fit)), max };
+  // **줄이기는 칸이 max(영상 길이, 20초)를 담는 자리에서 멈춘다.** 긴 영상에선 영상 전체가 한 화면에
+  // 들어온 자리(= `전체 보기`)고, 20초보다 짧은 영상에선 20초 창이다 -- 영상 뒤는 빈 자리.
+  // 15초짜리를 2px/초까지 줄일 수 있게 두는 것은 기능이 아니라 길 잃기다.
+  const floor = input.viewportWidthPx / Math.max(input.durationSec, TIMELINE_MIN_VISIBLE_SECONDS);
+  return { min: Math.min(max, Math.max(ABSOLUTE_MIN_PIXELS_PER_SECOND, floor)), max };
 }
 
 export function initialPixelsPerSecond(input: TimelineZoomScaleInput): number {
   if (fitPixelsPerSecond(input) === null) return TIMELINE_FALLBACK_PIXELS_PER_SECOND;
-  // 영상이 60초보다 짧으면 60초를 그리지 않는다. 뒤쪽 빈 자리를 보여 주는 대신
-  // 영상 전체가 화면을 채운다.
-  const visibleSec = Math.min(input.durationSec, TIMELINE_INITIAL_VISIBLE_SECONDS);
+  // 처음 창 = 영상 길이를 20~60초로 접은 값. 60초보다 긴 영상은 60초만, 20초보다 짧은 영상은 20초(뒤는 빈 자리).
+  const visibleSec = Math.min(TIMELINE_INITIAL_VISIBLE_SECONDS, Math.max(input.durationSec, TIMELINE_MIN_VISIBLE_SECONDS));
   const bounds = pixelsPerSecondBounds(input);
   return Math.min(bounds.max, Math.max(bounds.min, input.viewportWidthPx / visibleSec));
 }

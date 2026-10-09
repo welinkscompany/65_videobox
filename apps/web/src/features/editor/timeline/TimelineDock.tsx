@@ -491,16 +491,18 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     pixelsPerSecond: state.pixelsPerSecond,
     originSec: state.viewportStartSec,
   });
+  const visibleEndSec = pixelsToTime(trackWidthPx, { pixelsPerSecond: state.pixelsPerSecond, originSec: state.viewportStartSec });
   // 확대 정도에 따라 간격을 고른다(스파이크 H-e). 1초마다 고정이면 전체 보기에서 글자가 11px 간격으로 붙는다.
   const rulerTicks = useMemo(() => {
     const { majorSec, minorSec } = rulerIntervals(state.pixelsPerSecond, view.fps, rulerLabelGapPx);
-    const range = { startSec: state.viewportStartSec, endSec: viewportEndSec };
+    // 눈금은 영상 끝 뒤 빈 자리까지 그린다(20초 창에서 7.75초 영상 뒤에도 10초·15초 눈금). 클립·따라가기는 길이로 자른다.
+    const range = { startSec: state.viewportStartSec, endSec: visibleEndSec };
     const majors = rulerMarkTimes({ ...range, majorSec });
     const majorSet = new Set(majors);
     const minors = minorSec < majorSec ? rulerMarkTimes({ ...range, majorSec: minorSec }).filter((seconds) => !majorSet.has(seconds)) : [];
-    const endAligned = new Set(majors.filter((seconds) => rulerLabelAlignsEnd({ seconds, viewportEndSec, pixelsPerSecond: state.pixelsPerSecond, labelRoomPx: rulerLabelRoomPx })));
+    const endAligned = new Set(majors.filter((seconds) => rulerLabelAlignsEnd({ seconds, viewportEndSec: visibleEndSec, pixelsPerSecond: state.pixelsPerSecond, labelRoomPx: rulerLabelRoomPx })));
     return { majorSec, majors, minors, endAligned };
-  }, [rulerLabelGapPx, rulerLabelRoomPx, state.pixelsPerSecond, state.viewportStartSec, view.fps, viewportEndSec]);
+  }, [rulerLabelGapPx, rulerLabelRoomPx, state.pixelsPerSecond, state.viewportStartSec, view.fps, visibleEndSec]);
   const rulerLeft = (seconds: number) => `${timeToPixels(seconds, { pixelsPerSecond: state.pixelsPerSecond, originSec: state.viewportStartSec })}px`;
 
   const handleClick = (event: MouseEvent<HTMLElement>) => {
@@ -526,11 +528,12 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   // 계산되면 화면은 잠겼다는데 키나 바퀴로는 통하는 일이 생긴다. 셋 다
   // `runZoom`을 지나고, `runZoom`은 이 표의 `enabled`만 본다.
   //
-  // 전체 보기가 가는 자리는 **줄이기의 바닥과 같은 값**이다(`zoomBounds.min`).
-  // 그래서 줄이기를 계속 누른 자리와 전체 보기를 누른 자리가 정확히 겹친다.
-  const fitTarget = fitPixelsPerSecond({ durationSec: view.output.durationSec, viewportWidthPx: trackWidthPx }) === null
-    ? null
-    : zoomBounds.min;
+  // 전체 보기가 가는 자리는 영상 전체가 칸을 채우는 배율이다. 60초 넘는 영상에선 줄이기의 바닥과
+  // 같은 값이라 줄이기를 계속 누른 자리와 정확히 겹친다.
+  // P2(2026-10-09): 줄이기 바닥은 이제 max(길이, 20초) 기준이라 20초보다 짧은 영상에서는 바닥보다 크다 --
+  // 전체 보기는 **영상 전체가 칸을 채우는 배율**(늘어난다)이고, 긴 영상에선 바닥과 같다.
+  const fitRaw = fitPixelsPerSecond({ durationSec: view.output.durationSec, viewportWidthPx: trackWidthPx });
+  const fitTarget = fitRaw === null ? null : Math.min(zoomBounds.max, Math.max(zoomBounds.min, fitRaw));
   // `anchorPx`를 안 주면 reducer가 **재생 머리**를 기준으로 잡는다(단추와 키가
   // 그렇게 쓴다). 바퀴만 손가락이 가리킨 자리를 넘긴다 -- 한계 판단(`enabled`)은
   // 셋이 똑같이 여기 한 곳을 본다.

@@ -178,6 +178,26 @@ describe("timeline navigation", () => {
     ]);
   });
 
+  it("보이는 끝이 영상 길이를 넘는 창(20초 창에 7.75초 영상)에서도 모든 사각형이 유한하다 -- 회귀 지킴(P2 Review Focus 3)", () => {
+    const rects = projectVisibleTimelineClips({
+      clips: [
+        { id: "n", role: "narration", startSec: 0, endSec: 7.75 },
+        { id: "b", role: "broll", startSec: 2, endSec: 7.75 },
+      ],
+      viewport: { startSec: 0, endSec: 20, topPx: 0, heightPx: 100 },
+      pixelsPerSecond: 60,
+      originSec: 0,
+      laneHeightPx: 20,
+    });
+
+    expect(rects).toHaveLength(2);
+    for (const rect of rects) {
+      for (const value of [rect.x, rect.y, rect.width, rect.height]) expect(Number.isFinite(value)).toBe(true);
+      expect(rect.width).toBeGreaterThan(0);
+      expect(rect.x + rect.width).toBeLessThanOrEqual(7.75 * 60 + 1e-9);
+    }
+  });
+
   it("keeps half-open visibility boundaries and projection input immutable", () => {
     const input = Object.freeze({
       clips: Object.freeze([

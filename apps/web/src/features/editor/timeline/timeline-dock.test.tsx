@@ -1276,9 +1276,9 @@ describe("타임라인을 늘리고 줄인다 (대표님 지시 2026-09-12)", ()
 
     cleanup();
 
-    // 15초짜리에 같은 규칙을 쓰면 영상 전체가 화면을 꽉 채운다. 빈 자리를 그리지 않는다.
+    // P2(2026-10-09): 15초짜리도 20초 창으로 연다(1200/20 = 60). 옛 기대는 영상 전체 = 80이었다.
     render(<TimelineDock view={fifteenSecondView} viewportWidthPx={1200} />);
-    expect(timelinePixelsPerSecond()).toBeCloseTo(80, 6);
+    expect(timelinePixelsPerSecond()).toBeCloseTo(60, 6);
   });
 
   it("타임라인에 초점이 없어도 단축키가 듣는다", () => {
@@ -1919,8 +1919,10 @@ describe("눈금 간격 (스파이크 H-e)", () => {
       const timeline = screen.getByRole("region", { name: "타임라인" });
       observer.report(1175);
       const pxPerSec = Number(timeline.getAttribute("data-pixels-per-second"));
+      // P2(2026-10-09): 짧은 영상의 처음 창은 20초다. 영상 전체는 그 안에 들고(끝이 안 가려진다) 뒤는 빈 자리.
       expect(pxPerSec * 7.75).toBeLessThanOrEqual(1175 + 1e-6);
-      expect(pxPerSec * 7.75).toBeGreaterThan(1175 * 0.99);
+      expect(pxPerSec * 20).toBeGreaterThan(1175 * 0.99);
+      expect(pxPerSec * 20).toBeLessThanOrEqual(1175 + 1e-6);
       for (const [width, duration] of [[1190, 3.75], [1000, 30], [640, 7.75], [300, 59.9]] as const) {
         cleanup();
         const o = stubObserver();
@@ -1939,8 +1941,9 @@ describe("눈금 간격 (스파이크 H-e)", () => {
       observer.report(1175);
       rendered.rerender(<TimelineDock view={{ ...placeholder, output: { ...placeholder.output, durationSec: 7.75 } }} viewportWidthPx={1360} />);
       const pxPerSec = Number(timeline.getAttribute("data-pixels-per-second"));
+      // P2(2026-10-09): 새 길이(7.75초)에도 20초 창 -- 옛 기대는 영상 전체가 칸을 채우는 것이었다.
       expect(pxPerSec * 7.75).toBeLessThanOrEqual(1175 + 1e-6);
-      expect(pxPerSec * 7.75).toBeGreaterThan(1175 * 0.99);
+      expect(pxPerSec * 20).toBeGreaterThan(1175 * 0.99);
     });
 
     it("사람이 이미 배율을 건드렸다면 폭이 바뀌어도 다시 맞추지 않는다", () => {
@@ -2046,5 +2049,71 @@ describe("눈금 간격 (스파이크 H-e)", () => {
       render(<TimelineDock playbackSec={2} view={view} viewportWidthPx={1000} />);
       expect(screen.getByTestId("timeline-playhead").style.transform).toBe("");
     });
+  });
+});
+
+describe("짧은 영상도 적어도 20초 창으로 연다 (P2 2026-10-09 대표님)", () => {
+  const shortView: EditorViewModel = { ...view, output: { ...view.output, durationSec: 7.75 }, tracks: [], captions: [], gaps: [] };
+  const longView: EditorViewModel = { ...view, output: { ...view.output, durationSec: 120 }, tracks: [], captions: [], gaps: [] };
+  const pps = () => Number(screen.getByRole("region", { name: "타임라인" }).getAttribute("data-pixels-per-second"));
+
+  it("7.75초는 20초 창(60px/초)으로 열고 축소는 잠기며, 전체 보기는 영상 전체가 칸을 채워(늘어난다) 축소가 열린다", () => {
+    render(<TimelineDock view={shortView} viewportWidthPx={1200} />);
+    const timeline = screen.getByRole("region", { name: "타임라인" });
+    expect(pps()).toBeCloseTo(60, 6);
+    expect(screen.getByRole("button", { name: "타임라인 축소" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "타임라인 확대" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "타임라인 전체 보기" }));
+    expect(timeline).toHaveAttribute("data-pixels-per-second", "154.83871");
+    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "0");
+    expect(screen.getByRole("button", { name: "타임라인 축소" })).toBeEnabled();
+
+    // 축소를 계속 누르면 20초 창(바닥)에서 멈춘다.
+    for (let i = 0; i < 10; i += 1) fireEvent.click(screen.getByRole("button", { name: "타임라인 축소" }));
+    expect(pps()).toBeCloseTo(60, 6);
+    expect(screen.getByRole("button", { name: "타임라인 축소" })).toBeDisabled();
+  });
+
+  it("120초 영상은 전과 같다 -- 처음 60초, 전체 보기 = 바닥", () => {
+    render(<TimelineDock view={longView} viewportWidthPx={1200} />);
+    expect(pps()).toBeCloseTo(20, 6);
+    expect(screen.getByRole("button", { name: "타임라인 축소" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "타임라인 전체 보기" }));
+    expect(pps()).toBeCloseTo(10, 6);
+    expect(screen.getByRole("button", { name: "타임라인 축소" })).toBeDisabled();
+  });
+
+  it("눈금이 영상 끝 뒤 빈 자리까지 이어진다(20초 창에서 10초 눈금이 있다)", () => {
+    render(<TimelineDock view={shortView} viewportWidthPx={1200} />);
+    expect(screen.getByLabelText("눈금 10초")).toBeInTheDocument();
+  });
+
+  it("120초를 전체 보기로 보면 마지막 큰 눈금은 2:00이고 끝에 붙는다(H 회귀)", () => {
+    render(<TimelineDock view={longView} viewportWidthPx={1200} />);
+    fireEvent.click(screen.getByRole("button", { name: "타임라인 전체 보기" }));
+    const last = screen.getAllByRole("listitem").filter((el) => (el.getAttribute("aria-label") ?? "").startsWith("눈금 "));
+    const end = last[last.length - 1];
+    expect(end.textContent).toBe("2:00");
+    expect(end.className).toContain("vb-ruler-major--end");
+  });
+
+  it("20초 창에서 영상 뒤 빈 자리(15초)를 누르면 재생 위치는 영상 끝(7.75)으로 접히고 편집기는 살아 있다", () => {
+    const onPlaybackSeek = vi.fn();
+    render(<TimelineDock view={shortView} viewportWidthPx={1200} onPlaybackSeek={onPlaybackSeek} />);
+    const timeline = screen.getByRole("region", { name: "타임라인" });
+    expect(() => fireEvent.click(timeline, { clientX: 15 * 60 })).not.toThrow();
+    expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "7.75");
+    expect(onPlaybackSeek).toHaveBeenLastCalledWith(7.75);
+  });
+
+  it("확대·축소는 재생 머리 자리를 지킨다 -- 확대한 뒤 줄여도 머리가 튀지 않는다", () => {
+    const longer: EditorViewModel = { ...view, output: { ...view.output, durationSec: 60 }, tracks: [], captions: [], gaps: [] };
+    render(<TimelineDock view={longer} viewportWidthPx={1200} playbackSec={30} />);
+    const marker = screen.getByTestId("timeline-playhead");
+    const before = Number(marker.style.left.replace("px", ""));
+    fireEvent.click(screen.getByRole("button", { name: "타임라인 확대" }));
+    fireEvent.click(screen.getByRole("button", { name: "타임라인 축소" }));
+    expect(Number(screen.getByTestId("timeline-playhead").style.left.replace("px", ""))).toBeCloseTo(before, 3);
   });
 });

@@ -5,7 +5,7 @@ import { collect, ensureLongPreviewMp4, installPlaybackProbe, measurePlayback, m
 // 2026-10-09 계획 P2 Task 0: 기준 측정 + 첫 RED.
 //  1) 타임라인 처음 배율 -- 길이 7.75·30·120·600초 x 1440x900·1280x720 (ZOOM_BASELINE 출력).
 //  2) 빠르기 상한 -- 같은 30초 미리보기를 1·2·3·4·6·8배로 틀어 본다 (RATE_CEILING 출력).
-//  3) RED 두 개 -- "처음 창 >= 20초"(Task 2)와 "8배까지 된다"(Task 1, 이제 GREEN).
+//  3) 문턱 -- "처음 창 >= 20초"(Task 2)와 "8배까지 된다"(Task 1).
 // 문턱(RED)은 Task 1·2가 GREEN으로 만든다. 측정 시험은 출력만 하고 통과한다.
 // covers: zoom-initial-window, rate-4x
 // (serial 아님: 앞 RED가 실패해도 뒤 RED가 건너뛰어지지 않게. workers=1이라 어차피 차례로 돈다.)
@@ -137,16 +137,40 @@ test("빠르기 상한 기준: 1·2·3·4·6·8배 (RATE_CEILING)", async ({ pag
   for (const run of table.find((row) => row.rate === 1).runs) expect(run.effectiveRate).toBeGreaterThanOrEqual(0.95);
 });
 
-// ---- RED ----------------------------------------------------------------------------------------
-// Task 2 전에는 7.75·30초 프로젝트가 영상 전체를 칸에 맞춰 처음 창이 20초보다 훨씬 좁다.
-test("RED: 짧은 프로젝트의 처음 타임라인 창은 적어도 20초를 보여 준다", async ({ page }) => {
+// ---- 문턱 (P2 Task 2: 처음 창 >= 20초) -------------------------------------------------------------
+test("짧은 프로젝트의 처음 타임라인 창은 적어도 20초를 보여 주고 줄이기는 잠긴다(바닥)", async ({ page }) => {
   await stretchTo(page, 7.75);
   await openEditor(page, readFixture().clean, { width: 1440, height: 900 });
   await page.waitForTimeout(500);
   const m = await measureZoom(page);
-  console.log("RED_ZOOM", JSON.stringify(m));
-  expect(m.visibleSec).toBeGreaterThanOrEqual(20);
+  console.log("ZOOM_20S", JSON.stringify(m));
+  expect(m.visibleSec).toBeGreaterThanOrEqual(19.5);
+  expect(m.zoomOutDisabled).toBe(true);
+  expect(m.zoomInDisabled).toBe(false);
+  // 눈금은 영상 끝(7.75초) 뒤 빈 자리까지 이어진다.
+  const rulerSeconds = await page.evaluate(() => [...document.querySelectorAll(".vb-ruler-major")].map((el) => el.getAttribute("aria-label")));
+  expect(rulerSeconds.some((label) => /눈금 (10|15)초/.test(label))).toBe(true);
+  // 전체 보기는 영상 전체가 칸을 채워(늘어난다) 축소가 다시 열린다.
+  await page.getByRole("button", { name: "타임라인 전체 보기" }).click();
+  const fit = await measureZoom(page);
+  expect(fit.pps * 7.75).toBeGreaterThan(fit.viewportPx * 0.98);
+  expect(fit.pps * 7.75).toBeLessThanOrEqual(fit.viewportPx + 1);
+  expect(fit.zoomOutDisabled).toBe(false);
 });
+
+// 60초 넘는 영상은 Task 0 기준값(1440: 약 19.83px/초, 60초 창)에서 +-1%.
+for (const durationSec of [120, 600]) {
+  test(`${durationSec}초 프로젝트의 처음 배율은 Task 0 값과 같다 (±1%)`, async ({ page }) => {
+    await stretchTo(page, durationSec);
+    await openEditor(page, readFixture().clean, { width: 1440, height: 900 });
+    await page.waitForTimeout(500);
+    const m = await measureZoom(page);
+    expect(Math.abs(m.pps / 19.83 - 1)).toBeLessThan(0.01);
+    expect(m.visibleSec).toBeGreaterThan(59);
+    expect(m.visibleSec).toBeLessThan(61);
+    expect(m.zoomOutDisabled).toBe(false);
+  });
+}
 
 // Task 1 (A): L 키로 4배·8배까지 올리면 실제로 그 속도로 흐르고, 재생 머리 시계도 따라간다.
 test("8배까지 된다: L 키로 올려 4배·8배에서 실효 ±5%, 앱 탐색 0, 머리 시계 매끈", async ({ page }) => {

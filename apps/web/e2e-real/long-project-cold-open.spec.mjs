@@ -50,7 +50,7 @@ test("120초·겹친 영상이 있는 실제 모양을 처음 열 때마다 편�
   console.log(`COLD_LOADS_DONE ${loads}`);
 });
 
-test("짧은 영상(0907 같은 3.75초)은 처음 열 때 전체 길이가 칸 안에 들어오고 칸을 채운다", async ({ page }) => {
+test("짧은 영상(0907 같은 3.75초)은 처음 열 때 전체 길이가 칸 안에 들어오고(20초 창), 전체 보기는 칸을 채운다", async ({ page }) => {
   const { clean } = readFixture();
   for (const viewport of VIEWPORTS) {
     await page.setViewportSize(viewport);
@@ -63,7 +63,13 @@ test("짧은 영상(0907 같은 3.75초)은 처음 열 때 전체 길이가 칸 
       return { pxPerSec: Number(region.getAttribute("data-pixels-per-second")), laneWidth: lanes ? lanes.clientWidth : 0 };
     });
     expect(fit.pxPerSec * 3.7512).toBeLessThanOrEqual(fit.laneWidth + 1);
-    expect(fit.pxPerSec * 3.7512).toBeGreaterThan(fit.laneWidth * 0.9);
+    // P2(2026-10-09): 처음 창은 적어도 20초라 짧은 영상은 칸의 일부만 채운다(뒤는 빈 자리). 칸을 채우는 것은 `전체 보기`가 한다.
+    expect(fit.pxPerSec * 20).toBeGreaterThan(fit.laneWidth * 0.9);
+    expect(fit.pxPerSec * 20).toBeLessThanOrEqual(fit.laneWidth + 1);
+    await page.getByRole("button", { name: "타임라인 전체 보기" }).click();
+    const filled = await page.getByRole("region", { name: "타임라인" }).evaluate((region) => Number(region.getAttribute("data-pixels-per-second")));
+    expect(filled * 3.7512).toBeLessThanOrEqual(fit.laneWidth + 1);
+    expect(filled * 3.7512).toBeGreaterThan(fit.laneWidth * 0.9);
   }
 });
 
