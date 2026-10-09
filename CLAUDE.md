@@ -6,6 +6,24 @@
 세부는 여기 두지 않는다. 이 파일은 **판단에 필요한 것만** 담고, 운영 세부는
 `docs/development-fast-path.ko.md` `## 10`(규정)과 `## 11`(명령·주소)에 있다.
 
+## 색인 — 무엇이 어디 있고 언제 읽히나
+
+이 파일은 **매번 알아야 하는 것만** 담는다(2026-10-09 W1428, 루이스 대표님 지시로 AK 하네스를 옮김).
+옮긴 글은 한 줄도 버리지 않고 원문 그대로 아래 파일로 갔다. 절 번호(§0~§8)는 그대로 남아 있어
+코드·문서 주석의 「CLAUDE.md §N」은 여기서 시작해 이 표를 따라가면 된다.
+
+| 주제 | 있는 곳 | 언제 읽히나 |
+|---|---|---|
+| §2 지금 유효한 결정(제품 방향·번역기·팔레트·Tauri·모션·안 만드는 것) | `.claude/rules/current-decisions.md` | **항상** |
+| §3 개발 환경(메인 체크아웃·worktree·venv·owner-ready·`.env.container`) | `.claude/rules/dev-environment.md` | **항상** |
+| §3 조각마다 하는 검증 넷(갭·역방향·동작·배선) | `.claude/rules/verification-four.md` | **항상** |
+| §3 재사용 게이트·기본 구현 루프 | `.claude/rules/reuse-gate-and-loop.md` | `apps/` `services/` `packages/` `scripts/` `tests/` `docker/` `config/` 작업 때 자동 |
+| §5 보호 경계 | `.claude/rules/protected-boundaries.md` | **항상** |
+| §6 Mem0 제거·유진 기억·§10.14 남은 조항 | `.claude/rules/yujin-memory.md` | 유진·기억·compose·`docs/decisions/` 작업 때 자동 |
+| §7 턴 종료 보고 내용 요건 | `.claude/rules/turn-end-report.md` | **항상** |
+| 훅(무엇이 언제 막나) | `.claude/hooks-README.md`, 값은 `.claude/harness-policy.json` | 훅에 막혔을 때 |
+| 운영 규정 SSOT·명령·주소 | `docs/development-fast-path.ko.md` `## 10`·`## 11` | §0 체크리스트대로 |
+
 ## 0. 세션 시작 체크리스트
 
 코드나 UI를 건드리기 **전에** 한다. 이 순서를 건너뛰어 승인된 디자인 결정을
@@ -51,22 +69,7 @@
 | 디자인 승인 기록 | `docs/decisions/` |
 | **최신 세션 인계** | `docs/handoffs/2026-10-09-editor-faster-play-zoom-capcut-keys.ko.md` |
 
-### 지금 유효한 결정 (전체는 `docs/decisions/`, 가장 나중 것부터 읽어라)
-
-- **제품 방향은 "캡컷 껍데기 + 내 자산"이다**(`2026-09-04`). 화면을 만들 때 "이게 내
-  자산을 다시 쓰기 쉽게 하는가"를 먼저 묻는다. 메뉴·배치·버튼까지 벤치마킹하되
-  **없는 기능의 버튼은 안 만든다**(`2026-08-30`).
-- **시작하는 문은 `+ 새로 만들기` 하나다**(`2026-09-05`). `/`는 항상 `/projects`.
-- **유진에게 말한 편집은 바로 적용된다**(`2026-09-01`). 없앤 확인 클릭 대신 되돌리기가
-  지킨다. "후보만 만든다"는 옛 설명으로 동작을 설명하지 마라.
-- **동영상 번역기는 끝났다**(`2026-09-02`~`09-03`). 자막 + 목소리 더빙이고 엔진은
-  호스트에 있다. `scripts/start-voice.ps1`로 켠다.
-- **팔레트는 다크다**(`2026-08-29`, 구현·검증 완료). 색을 바꾸려면 재승인이 필요하다.
-- **설치형(Tauri) 착수 승인**(`2026-08-30`). 남은 걸림돌은 `§10.19`.
-- **설명 모션은 하이퍼프레임으로 한다**(`2026-10-08`). 정해진 템플릿에 숫자·글을 채우는 모션만 범위 안이고,
-  전체 화면·오버레이로 쓴다. 리모션은 계속 제외. 자유 형식 모션그래픽은 여전히 범위 밖.
-- **안 만드는 것**: 색보정 넷과 `AI 스타일`(`2026-09-01`).
-- 역사 기록이라 판단 근거로 쓰지 않는다: `2026-08-27`, `2026-08-21-*`, `2026-08-05-*`.
+지금 유효한 결정 목록은 `.claude/rules/current-decisions.md`(항상 읽힘). 전체는 `docs/decisions/`, 가장 나중 것부터 읽어라.
 
 ## 2.1 제품 범위 경계
 
@@ -90,51 +93,8 @@
 
 ## 3. 개발 환경
 
-- **작업은 메인 체크아웃(`D:\...\65_videobox`, 브랜치 `main`)에서 직접 한다**(2026-09-19).
-  이전엔 별도 활성 worktree(`.worktrees/videobox-container-compatibility`,
-  브랜치 `codex/videobox-container-compatibility`)가 있었지만, main과 완전히
-  합쳐진 뒤 지웠다 — 더는 존재하지 않는다.
-- 병렬 작업이 필요하면 그때그때 격리된 worktree(`.claude/worktrees/agent-*`류)를
-  새로 만들어 쓰고, 끝나면 병합 후 지운다. 상시 유지하는 "활성 worktree"는 없다.
-- **main은 개발선과 합쳐져 있다(2026-09-07, 이후 계속 유지).** 뒤처짐을 다시
-  키우지 마라(`§10.21`) — 별도 worktree에서 오래 작업하다 main에 안 합치면
-  다시 벌어진다.
-- backend 검증은 반드시 `.venv/Scripts/python.exe -m pytest`를 쓴다. bare `pytest`나
-  시스템 Python 결과는 근거로 쓰지 않는다.
-- 컨테이너 스택은 `scripts/owner-ready.ps1`로 조작한다. 직접 `docker compose`를 치지 않는다.
-- `.env.container`는 gitignore 대상이다. 실제 credential을 커밋하지 않는다.
-- 나머지 명령·주소·스크립트는 `docs/development-fast-path.ko.md` `## 11`.
-
-### 재사용 게이트 (모든 구현 goal에 적용)
-
-`docs/implementation-plan.ko.md` §8.1이 정한 상위 규칙이다. 시작 **전에** 판단한다:
-이미 있는 내부 소스·외부 OSS가 있는가, `adopt as-is`/`partial port`/`rewrite`/`exclude`
-중 무엇인가, 실제 반영 단위는 무엇인가, 제외 후보와 그 이유는 무엇인가.
-
-기준은 소스 복제보다 경계 유지, 통째 복사보다 선별 이식이다.
-`UI 구조`, `Google Sheets/Drive 결합`, `provider 직접 호출 하드코딩`은 반입 금지다.
-
-### 기본 구현 루프
-
-`plan reconcile → RED → minimal GREEN → focused verification → broader verification`
-
-- 새 UI를 만들기 전에 기존 흐름을 재사용할 수 있는지 먼저 본다.
-- RED/GREEN 단계에서는 정확히 테스트 1개만 돌린다. broader는 Task가 닫힐 때만.
-
-### 조각마다 하는 검증 넷 (owner 상시 지시, 2026-09-11)
-
-리스크 기반이 아니라 **고정**이다. 조각을 닫을 때마다 넷을 다 한다.
-
-| 검증 | 묻는 것 |
-|---|---|
-| **갭** | 계획서 Step을 하나씩 대조한다. 특히 **안 한 것**을 정직하게 |
-| **역방향** | 테스트가 아니라 **실제 런타임**에서 — 브라우저·API·컨테이너 |
-| **동작** | 결과를 **재라**. 소리는 음량으로, 렌더는 픽셀로 |
-| **배선** | 화면에서 **실제로 부르는 자리**가 있는가. grep으로 소비자를 센다 |
-
-코드리뷰는 논리적으로 닫힌 단위마다 붙인다. 작은 변경은 자체 점검으로 갈음한다.
-
-**화면에 기능을 열면 유진이도 같은 조각에서 그 길을 쓸 수 있게 배선한다**(owner 상시 지시).
+본문은 `.claude/rules/dev-environment.md`(항상), 검증 넷은 `.claude/rules/verification-four.md`(항상),
+재사용 게이트·구현 루프는 `.claude/rules/reuse-gate-and-loop.md`(구현 폴더 작업 때 자동).
 
 ## 4. 완료의 정의 — 이 저장소가 가장 비싸게 배운 것
 
@@ -149,13 +109,7 @@
 
 ## 5. 보호 경계
 
-아래는 열거나 수정하지 않는다.
-
-- `.tmp-final-fence-debug/`, `.tmp-real-video-dogfood/`, `apps/web/.tmp-real-video-dogfood/`
-- 사용자 원본 영상 샘플 디렉터리 (read-only)
-
-`artifacts/`는 **다시 만들 수 있는가**로 판단해 지운다(owner 승인 2026-08-09).
-기준과 예외는 `§10.16`.
+본문은 `.claude/rules/protected-boundaries.md`(항상 읽힘).
 
 ## 6. 승인이 필요한 변경
 
@@ -167,24 +121,11 @@
 - 외부 게시·업로드 (유튜브·텔레그램은 승인됨. 개별 업로드 게이트는 유지)
 - 컨테이너 네트워크 경계 변경 (`§10.14`)
 
-**Mem0는 2026-09-18에 완전히 걷어냈다**(owner 지시, `docs/decisions/2026-09-18-mem0-removed-native-memory-librarian.ko.md`).
-유진의 승인된 기억은 이제 외부 provider 없이 로컬 Postgres(`yujin_memory_candidates`)에만
-저장된다. 대화(`director_conversations`/`director_messages`)를 사서가 훑어 후보를
-만들고(`packages/core-engine/.../memory_librarian.py`), owner가 승인해야 저장되는
-구조는 그대로다. 외부로 나가는 것이 아예 없으니 §10.14 2-A 조항은 폐기됐다 —
-남은 조항 1·2·2-B·2-C·3·4는 그대로 유효하다.
+Mem0 제거와 유진 기억 저장 구조는 `.claude/rules/yujin-memory.md`.
 
 ## 7. 턴 종료 보고
 
-고정 서식이 아니라 내용 요건이다. 해당 없으면 적지 않는다.
-
-- 이번 턴에 실제로 한 일 (쉬운 말)
-- 수행한 검증과, **검증하지 못한 채 남은 것**
-- 커밋·푸시 여부. 하지 않았으면 이유
-- 막힌 지점이나 사용자 결정이 필요한 사항 (있을 때만)
-
-구현 작업을 닫을 때는 `implementation-plan.ko.md` §8.3에 따라 재사용 후보·실제 반영
-항목과 방식·제외 항목과 이유·경계 보존 여부도 함께 남긴다.
+내용 요건은 `.claude/rules/turn-end-report.md`(항상 읽힘).
 
 인계는 프롬프트가 아니라 `docs/handoffs/` 문서로 남기고, **위 §2 표의 `최신 세션 인계`
 줄도 같이 옮긴다**(테스트가 지킨다). 진행률은 모수가 있을 때만 보고한다(`§10.8`).
