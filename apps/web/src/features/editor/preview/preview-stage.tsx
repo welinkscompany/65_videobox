@@ -57,6 +57,10 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
   // 진행을 막지 않는다.
   const previousPendingSeekSecondsRef = useRef<number | null>(null);
   const staleSeekBaselineRef = useRef<number | null>(null);
+  // 이 미리보기가 마지막으로 위로 올려보낸 타임라인 시각. `playbackSec`가 이 값 그대로 돌아오면
+  // 메아리다 -- 재생기는 그새 앞으로 갔으니 옮기면 되감는다(2026-10-09 실측: 20초에 67~74번,
+  // 실제 속도 0.62~0.70배). 진단: docs/superpowers/2026-10-09-playback-diagnosis.ko.md 원인 1.
+  const lastReportedTimelineSecRef = useRef<number | null>(null);
   const [mode, setMode] = useState<PreviewMode>(() => exact.kind === "current" ? coordinatorRef.current.showExact({ id: exactMediaId(exact), url: exact.url, timelineRange: exact.timelineRange }) : coordinatorRef.current.state);
   const [timelineTime, setTimelineTime] = useState(() => exact.kind === "current" ? exact.timelineRange.startSec : 0);
   const [refreshing, setRefreshing] = useState(false);
@@ -89,6 +93,7 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
   const frameSec = fps && fps.num > 0 && fps.den > 0 ? fps.den / fps.num : 1 / 30;
 
   const stopActiveMedia = () => {
+    lastReportedTimelineSecRef.current = null;
     const media = mediaRef.current;
     if (media) {
       try { media.pause(); } catch { /* native playback may already be detached */ }
@@ -148,6 +153,10 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
     if (!Number.isFinite(playbackSec) || mode.kind === "idle" || (mode.kind === "audition" && mode.media.mediaKind === "image")) return;
     const timelineSeconds = Math.min(mode.media.timelineRange.endSec, Math.max(mode.media.timelineRange.startSec, playbackSec!));
     setTimelineTime(timelineSeconds);
+    // 메아리: 내가 방금 올려보낸 위치가 그대로 돌아온 것이다. 재생기는 그새 앞으로 갔으니 옮기면 되감는다.
+    if (lastReportedTimelineSecRef.current !== null && Math.abs(timelineSeconds - lastReportedTimelineSecRef.current) <= 1e-6) return;
+    // 메아리가 아닌 값(진짜 탐색)이면 표식을 지운다 -- 같은 위치를 다시 눌러도 옮겨야 한다.
+    lastReportedTimelineSecRef.current = null;
     // 여기서 되돌려 올려보내지 않는다. 예전에는 구간 밖 재생 위치를 자기 구간 안으로
     // 밀어 올렸는데, 그러면 타임라인을 눌러도 재생 위치가 붙박여 `나누기`를 쓸 수 없다.
     // 미리보기가 스스로 알리는 위치는 `updateTimeline`이 따로 올려보낸다.
@@ -156,7 +165,9 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
     if (media && Math.abs(media.currentTime - mediaSeconds) > 0.001) {
       try { media.currentTime = mediaSeconds; } catch { /* the browser can reject a not-yet-seekable media element */ }
     }
-  }, [mode, onPlaybackTimeChange, playbackSec]);
+    // onPlaybackTimeChange는 매 렌더 새 함수다 -- deps에 두면 무관한 렌더마다 이 효과가 다시 돌아 되감았다(2026-10-09).
+    // 이 효과는 그 콜백을 쓰지도 않는다.
+  }, [mode, playbackSec]);
 
   const currentMedia = mode.kind === "idle" ? null : mode.media;
   const isImageAudition = mode.kind === "audition" && mode.media.mediaKind === "image";
@@ -199,6 +210,7 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
       }
     }
     const nextSeconds = coordinatorRef.current.timelineTime(node.currentTime);
+    lastReportedTimelineSecRef.current = nextSeconds;
     setTimelineTime(nextSeconds);
     onPlaybackTimeChange?.(nextSeconds);
   };
@@ -208,6 +220,7 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
     const range = mode.media.timelineRange;
     const clamped = Math.min(range.endSec, Math.max(range.startSec, timelineSeconds));
     try { media.currentTime = clamped - range.startSec; } catch { return; }
+    lastReportedTimelineSecRef.current = clamped;
     setTimelineTime(clamped);
     onPlaybackTimeChange?.(clamped);
   };

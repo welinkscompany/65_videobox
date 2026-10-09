@@ -11,6 +11,43 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const current = { expectedRevision: 4, exactPreview: { status: "succeeded" as const, url: "/api/exact.mp4", artifactRevision: 4, timelineStartSec: 0, timelineEndSec: 12 }, captions: [{ text: "첫 번째 안내 자막", startSec: 0, endSec: 3 }, { text: "두 번째 안내 자막", startSec: 3, endSec: 8 }], sources: [{ id: "clip-a", label: "B-roll A", url: "/api/assets/a/content", mediaKind: "video" as const, timelineRange: { startSec: 3, endSec: 8 } }] };
 
 describe("PreviewStage", () => {
+  const setupEchoPlayer = (initialSec = 2) => {
+    let reported = 0;
+    const onPlaybackTimeChange = vi.fn((seconds: number) => { reported = seconds; });
+    const view = render(<PreviewStage {...current} playbackSec={initialSec} onPlaybackTimeChange={onPlaybackTimeChange} />);
+    const media = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+    let time = 2.5;
+    const writes: number[] = [];
+    Object.defineProperty(media, "currentTime", { configurable: true, get: () => time, set: (value: number) => { writes.push(value); time = value; } });
+    Object.defineProperty(media, "paused", { configurable: true, value: false });
+    Object.defineProperty(media, "seeking", { configurable: true, value: false });
+    return { ...view, media, writes, onPlaybackTimeChange, getReported: () => reported, setTime: (v: number) => { time = v; } };
+  };
+  it("재생 중 자기가 올려보낸 위치가 되돌아와도 재생기를 되감지 않는다(2026-10-09 실측: 20초에 67~74번)", () => {
+    const { rerender, media, writes, onPlaybackTimeChange, getReported, setTime } = setupEchoPlayer();
+    fireEvent.timeUpdate(media);
+    expect(getReported()).toBe(2.5);
+    setTime(2.517);
+    rerender(<PreviewStage {...current} playbackSec={getReported()} onPlaybackTimeChange={onPlaybackTimeChange} />);
+    expect(writes).toEqual([]);
+  });
+  it("재생 중이라도 메아리가 아닌 위치(타임라인 클릭·장면 고르기·화살표)는 재생기를 옮긴다", () => {
+    const { rerender, media, writes, onPlaybackTimeChange, getReported, setTime } = setupEchoPlayer();
+    fireEvent.timeUpdate(media);
+    setTime(2.517);
+    rerender(<PreviewStage {...current} playbackSec={getReported()} onPlaybackTimeChange={onPlaybackTimeChange} />);
+    rerender(<PreviewStage {...current} playbackSec={7.25} onPlaybackTimeChange={onPlaybackTimeChange} />);
+    expect(writes).toEqual([7.25]);
+  });
+  it("메아리 뒤 사용자가 같은 위치를 다시 눌러도(2.5 → 1.0 → 2.5) 둘 다 옮긴다", () => {
+    const { rerender, media, writes, onPlaybackTimeChange, getReported, setTime } = setupEchoPlayer();
+    fireEvent.timeUpdate(media);
+    setTime(2.517);
+    rerender(<PreviewStage {...current} playbackSec={getReported()} onPlaybackTimeChange={onPlaybackTimeChange} />);
+    rerender(<PreviewStage {...current} playbackSec={1} onPlaybackTimeChange={onPlaybackTimeChange} />);
+    rerender(<PreviewStage {...current} playbackSec={2.5} onPlaybackTimeChange={onPlaybackTimeChange} />);
+    expect(writes).toEqual([1, 2.5]);
+  });
   it("편집 뒤 재생기가 사라지는 동안 바뀌기 전 마지막 장면을 그림으로 남기고, 새 미리보기가 오면 버린다", () => {
     const video = (width: number) => Object.defineProperty(HTMLVideoElement.prototype, "videoWidth", { configurable: true, get: () => width });
     video(1280);
