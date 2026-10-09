@@ -710,3 +710,8 @@
 }
 /* Q·W를 눌렀는데 못 한 이유 한 줄(4초). 머리의 다른 안내보다 눈에 띄게만 한다. */
 .vb-editor-workbench__timeline-head p[role="status"] { color: var(--foreground); }
+
+/* 편집 알림(`editorFeedback.ts`)은 알려 주기만 한다 -- 누를 단추도 닫기 단추도 없다. 그래서 카드가 클릭을 받지 않고
+   **그대로 통과**시킨다. 안 그러면 알림이 떠 있는 2초 동안 그 밑의 타임라인(클립·트랙 머리 단추)이 눌리지 않았다
+   (2026-10-10 실측: 1280에서 클립 3개, 375에서 머리 단추 포함 19개). 화면 읽기 프로그램용 aria-live 줄은 그대로다. */
+[data-sonner-toaster], [data-sonner-toaster] [data-sonner-toast] { pointer-events: none !important; }
