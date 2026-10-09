@@ -25,6 +25,12 @@ const SKIP_RULES = [
   { pattern: /추천받기|요청 보내기/, reason: "유진 대화 호출(언어 모델 호출 -- 소유자 GPU를 쓸 수 있음)" },
 ];
 
+// 조용해 보이지만 일부러 그런 것. 이유를 JSON의 exception 칸에 남긴다(Task 16 Step 4).
+const SILENT_EXCEPTIONS = [
+  { pattern: /(순서 바꾸기|이동)$/, reason: "클립이 42px(NARROW_CLIP_WIDTH_PX)보다 좁으면 마우스로 끌 몸통 자리가 없어서 일부러 화면 밖 크기(sr-only)의 키보드 전용 단추가 된다. 화살표 키로 움직이고, 타임라인을 늘리면 마우스로도 잡힌다." },
+  { pattern: /^이전 프레임$/, reason: "재생 위치가 맨 앞(0초)이면 더 갈 프레임이 없어서 눌러도 화면이 달라질 게 없다." },
+];
+
 function skipReason(name) {
   return SKIP_RULES.find((rule) => rule.pattern.test(name))?.reason ?? null;
 }
@@ -306,13 +312,23 @@ test("편집기 조작 전부를 진짜 백엔드에서 눌러 죽은 단추를 
     const name = item.key.split("|").slice(1).join("|");
     const reason = skipReason(parentChain ? parentChain + " " + name : name);
     if (reason) return { ...base, skipped: true, skipReason: reason };
-    const disabledResult = () => ({
-      ...base,
-      disabled: true,
-      disabledReason: [item.title, item.describedBy].filter(Boolean).join(" | ") || null,
-    });
+    // 꺼진 이유는 지금 단추가 말하는 것(title)을 다시 읽는다 -- 목록을 만든 뒤 상태가 바뀌어 꺼졌을 수 있다.
+    const disabledResult = async () => {
+      const live = await page.evaluate(([key, occ]) => window.__census.find(key, occ)?.el?.getAttribute("title") ?? null, [item.key, item.occ]).catch(() => null);
+      return {
+        ...base,
+        disabled: true,
+        disabledReason: [live ?? item.title, item.describedBy].filter(Boolean).join(" | ") || null,
+      };
+    };
     if (item.disabled) return disabledResult();
-    const prep = await page.evaluate(([key, occ]) => window.__census.prepare(key, occ), [item.key, item.occ]);
+    let prep = await page.evaluate(([key, occ]) => window.__census.prepare(key, occ), [item.key, item.occ]);
+    if (!prep) return { ...base, missing: true };
+    // 앞 조작이 저장을 시작해서 잠깐 잠긴 것일 수 있다 -- 저장이 끝나길 기다렸다가 다시 본다(죽은 단추로 세지 않는다).
+    for (let waited = 0; prep && prep.disabled && waited < 10; waited += 1) {
+      await page.waitForTimeout(750);
+      prep = await page.evaluate(([key, occ]) => window.__census.prepare(key, occ), [item.key, item.occ]);
+    }
     if (!prep) return { ...base, missing: true };
     if (prep.disabled) return disabledResult();
     // 이미 골라진 조작은 눌러도 달라질 게 없다. 같은 묶음의 다른 형제를 먼저 눌러 상태를 바꿔 놓고 잰다.
@@ -582,7 +598,9 @@ test("편집기 조작 전부를 진짜 백엔드에서 눌러 죽은 단추를 
     const reasons = [...new Set(disabledDetails.map((d) => d.reason).filter(Boolean))];
     const exception = worst.class === "always-disabled" && disabledDetails.length > 0 && disabledDetails.every((d) => /요\.$/.test(d.reason ?? ""))
       ? "꺼진 이유를 단추가 말한다: " + reasons.join(" / ")
-      : undefined;
+      : worst.class === "silent"
+        ? SILENT_EXCEPTIONS.find((rule) => rule.pattern.test(group.name))?.reason
+        : undefined;
     controls.push({
       name: group.name,
       role: group.role,
@@ -619,5 +637,5 @@ test("편집기 조작 전부를 진짜 백엔드에서 눌러 죽은 단추를 
   const counts = { ok: 0, silent: 0, "no-handler": 0, "always-disabled": 0, "skipped-side-effect": 0 };
   for (const control of controls) counts[control.class] = (counts[control.class] ?? 0) + 1;
   console.log(JSON.stringify(counts));
-  console.log("설명 없는 비활성:", controls.filter((control) => control.class === "always-disabled" && !control.exception).map((control) => control.name).join(" | ") || "없음");
+  console.log("설명 없는 비활성:", controls.filter((control) => ["silent", "no-handler", "always-disabled"].includes(control.class) && !control.exception).map((control) => control.name).join(" | ") || "없음");
 });

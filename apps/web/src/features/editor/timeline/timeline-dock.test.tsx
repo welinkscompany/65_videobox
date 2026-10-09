@@ -1648,12 +1648,7 @@ describe("가장자리 손잡이와 몸통 끌기", () => {
     expect(css).toMatch(/\.vb-clip-body-drag\s*\{[^}]*cursor:\s*grab/);
     expect(css).toMatch(/\.vb-trim-handle\s*\{[^}]*width:\s*var\(--vb-trim-hit-w\)/);
     expect(css).toMatch(/\.vb-trim-handle::before\s*\{[^}]*width:\s*var\(--vb-trim-handle-w\)/);
-    expect(css).toMatch(/\.vb-clip-body-drag\s*\{[^}]*left:\s*min\(var\(--vb-trim-hit-w\),\s*33%\)/);
-  });
-  it("아주 좁은 클립에서도 손잡이 둘이 몸통(이동·순서 바꾸기)을 다 덮지 않는다", () => {
-    const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
-    expect(css).toMatch(/\.vb-trim-handle\s*\{[^}]*max-width:\s*33%/);
-    expect(css).toMatch(/\.vb-clip-body-drag\s*\{[^}]*right:\s*min\(var\(--vb-trim-hit-w\),\s*33%\)/);
+    expect(css).toMatch(/\.vb-clip-body-drag\s*\{[^}]*left:\s*var\(--vb-trim-hit-w\)/);
   });
   it("몸통을 흔들림(2px)만 하고 놓으면 클릭이라 그 클립을 고르고 시작으로 이동한다", () => {
     const onUpdatePlacements = vi.fn();
