@@ -72,6 +72,10 @@ describe("PreviewStage", () => {
     delete (HTMLVideoElement.prototype as unknown as Record<string, unknown>).videoHeight;
   });
 
+  it("편집본 영상은 미리 받아 둔다(preload=auto) -- metadata면 탐색마다 범위 요청이 7~8개로 쪼개져 탐색 p95가 0.7~8.5초였다(2026-10-09 실측)", () => {
+    render(<PreviewStage {...current} />);
+    expect((screen.getByLabelText("편집본 미리보기") as HTMLVideoElement).getAttribute("preload")).toBe("auto");
+  });
   it("mounts a single exact video with burned-caption guidance and no duplicate visual caption", () => {
     const { container } = render(<PreviewStage {...current} />);
     expect(screen.getByLabelText("편집본 미리보기")).toHaveAttribute("src", "/api/exact.mp4");
