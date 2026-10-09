@@ -5,8 +5,8 @@ import * as api from "../../../api";
 import { CaptionPresetPicker, fromSnapshot } from "./CaptionPresetPicker";
 
 const presets = [
-  { preset_id: "builtin:clean", name: "Clean", scope: "built_in", style: { font_size: 42 } },
-  { preset_id: "builtin:highlight", name: "Highlight", scope: "built_in", style: { font_size: 52 } },
+  { preset_id: "builtin:clean", name: "깔끔하게", scope: "built_in", style: { font_size: 42 } },
+  { preset_id: "builtin:highlight", name: "강조", scope: "built_in", style: { font_size: 52 } },
 ] as never;
 
 describe("캡션 모양 고르기", () => {
@@ -30,9 +30,9 @@ describe("캡션 모양 고르기", () => {
     render(<CaptionPresetPicker projectId="project-a" onApply={vi.fn()} />);
 
     const select = await screen.findByRole("combobox", { name: "캡션 모양" });
-    expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["Clean", "Highlight"]);
-    expect(screen.queryByRole("button", { name: "Clean 적용" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Highlight 적용" })).toBeNull();
+    expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["깔끔하게", "강조"]);
+    expect(screen.queryByRole("button", { name: "깔끔하게 적용" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "강조 적용" })).toBeNull();
     expect(screen.getByRole("button", { name: "고른 모양 적용" })).toBeVisible();
   });
 
@@ -71,7 +71,7 @@ describe("캡션 모양 고르기", () => {
     render(<CaptionPresetPicker projectId="project-a" onApply={vi.fn()} />);
 
     const options = within(await screen.findByRole("combobox", { name: "캡션 모양" })).getAllByRole("option");
-    expect(options[0]).toHaveTextContent("Highlight");
+    expect(options[0]).toHaveTextContent("강조");
   });
 
   it("즐겨찾기를 저장하고, 실패하면 되돌리며 그 사실을 말한다", async () => {
@@ -108,8 +108,8 @@ describe("캡션 모양 고르기", () => {
     // 최근 목록은 적용할 때마다 기록되고 있었는데 아무도 다시 읽지 않아서,
     // 방금 쓴 모양을 다음에도 아래에서 찾아 내려가야 했다.
     vi.spyOn(api.api, "listEditorPresets").mockResolvedValue([
-      { preset_id: "builtin:clean", name: "Clean", scope: "built_in", style: {} },
-      { preset_id: "builtin:highlight", name: "Highlight", scope: "built_in", style: {} },
+      { preset_id: "builtin:clean", name: "깔끔하게", scope: "built_in", style: {} },
+      { preset_id: "builtin:highlight", name: "강조", scope: "built_in", style: {} },
       { preset_id: "builtin:bold", name: "Bold", scope: "built_in", style: {} },
     ] as never);
     vi.spyOn(api.api, "listEditorFavorites").mockResolvedValue(
@@ -121,7 +121,7 @@ describe("캡션 모양 고르기", () => {
     render(<CaptionPresetPicker projectId="project-a" onApply={vi.fn()} />);
 
     const options = within(await screen.findByRole("combobox", { name: "캡션 모양" })).getAllByRole("option");
-    expect(options.map((option) => option.textContent)).toEqual(["Bold", "Highlight", "Clean"]);
+    expect(options.map((option) => option.textContent)).toEqual(["Bold", "강조", "깔끔하게"]);
   });
 
   it("방금 쓴 모양을 다시 열지 않아도 최근으로 옮긴다", async () => {
@@ -135,7 +135,7 @@ describe("캡션 모양 고르기", () => {
 
     await waitFor(() => {
       const options = within(screen.getByRole("combobox", { name: "캡션 모양" })).getAllByRole("option");
-      expect(options[0]).toHaveTextContent("Highlight");
+      expect(options[0]).toHaveTextContent("강조");
     });
     // 고른 것이 최근이라는 표시는 드롭다운 아래 한 줄로 남는다.
     expect(screen.getByText("최근 사용")).toBeVisible();
@@ -196,7 +196,7 @@ describe("즐겨찾기할 수 없는 모양", () => {
     render(<CaptionPresetPicker projectId="project-a" onApply={vi.fn()} />);
 
     expect(await screen.findByRole("button", { name: "고른 모양 적용" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Clean 즐겨찾기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "깔끔하게 즐겨찾기" })).toBeNull();
   });
 
   it("프로젝트에 저장한 모양에는 띄운다", async () => {

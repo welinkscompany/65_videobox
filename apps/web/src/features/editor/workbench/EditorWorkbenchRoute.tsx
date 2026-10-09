@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
+import { editFailureMessage } from "./editFailureMessage";
 import { sceneSlotFailureMessage } from "./sceneSlotFailureMessage";
 import { voiceFailureMessage } from "./voiceFailureMessage";
 import { voiceSampleLabel } from "./voiceSampleLabel";
@@ -949,6 +950,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         ? "다른 변경이 먼저 저장됐어요. 최신 내용을 확인한 뒤 다시 시도해 주세요."
         : voiceFailureMessage(error)
           ?? sceneSlotFailureMessage(error)
+          ?? editFailureMessage(error)
           ?? "변경 내용을 저장하지 못했어요. 최신 내용을 확인한 뒤 다시 시도해 주세요.";
       if (isCurrent()) setMutation({ isSaving: true, message: resultMessage });
     }

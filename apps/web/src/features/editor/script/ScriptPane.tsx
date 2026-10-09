@@ -59,7 +59,7 @@ export function ScriptPane({
   return (
     <section aria-label="대본" className="vb-script-pane">
       <h2>대본</h2>
-      <p>붙여넣은 글이 이 프로젝트의 대본이 돼요. 장면 나누기는 `이야기`에서 해요.</p>
+      <p>붙여넣은 글이 이 프로젝트의 대본이 돼요. 장면 나누기는 이야기 화면에서 해요.</p>
       <label className="sr-only" htmlFor="vb-editor-script">대본</label>
       <Textarea
         aria-label="대본"

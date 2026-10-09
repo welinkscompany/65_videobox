@@ -9,13 +9,13 @@ from typing import Any
 _BUILT_IN_CAPTION_PRESETS: tuple[dict[str, Any], ...] = (
     {
         "preset_id": "builtin:clean",
-        "name": "Clean",
+        "name": "깔끔하게",
         "scope": "built_in",
         "style": {"font_size": 42, "text_color": "#FFFFFFFF", "font_family": "Noto Sans KR"},
     },
     {
         "preset_id": "builtin:highlight",
-        "name": "Highlight",
+        "name": "강조",
         "scope": "built_in",
         "style": {"font_size": 46, "text_color": "#FFD54FFF", "font_family": "Noto Sans KR"},
     },

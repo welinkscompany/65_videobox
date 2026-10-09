@@ -19,6 +19,12 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 describe("대본 자리", () => {
   const props = { projectId: "project-a", onOpenStory: vi.fn() };
 
+  it("안내 문장에 백틱이 화면에 보이지 않는다", () => {
+    render(<ScriptPane {...props} />);
+    expect(screen.queryByText(/`/)).toBeNull();
+    expect(screen.getByText(/장면 나누기는 이야기 화면에서 해요/)).toBeVisible();
+  });
+
   it("붙여넣은 대본을 저장하고, 다음에 갈 곳을 알려 준다", async () => {
     const create = vi.spyOn(api, "createCreationBrief").mockResolvedValue({ brief_id: "brief-1" } as never);
     const onOpenStory = vi.fn();

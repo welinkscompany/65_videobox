@@ -10,6 +10,7 @@ def test_builtin_caption_presets_are_immutable_and_project_snapshot_survives_rel
 
     built_in = store.list_caption_presets(project_id="project_001")
     assert built_in[0]["preset_id"] == "builtin:clean"
+    assert [preset["name"] for preset in built_in[:2]] == ["깔끔하게", "강조"]
     with pytest.raises(ValueError, match="built-in"):
         store.save_caption_preset(
             project_id="project_001",
