@@ -188,7 +188,7 @@ describe("product shell", () => {
     const retryButton = await screen.findByRole("button", { name: "다시 실행" });
     fireEvent.click(retryButton);
     expect(retry).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "닫기" })).not.toBeInTheDocument();
 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.getByRole("dialog", { name: "작업 상태" })).toBeVisible();
@@ -196,7 +196,7 @@ describe("product shell", () => {
     expect(retry).toHaveBeenCalledTimes(1);
 
     await act(async () => releaseRetry({ job_id: "job-new", status: "running" }));
-    const close = await screen.findByRole("button", { name: "Close" });
+    const close = await screen.findByRole("button", { name: "닫기" });
     fireEvent.click(close);
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "작업 상태" })).not.toBeInTheDocument());
 

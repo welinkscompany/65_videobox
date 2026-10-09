@@ -50,7 +50,7 @@ describe("desktop visual contracts", () => {
     );
 
     expect(document.querySelector(".vb-dialog-content")).toHaveClass("vb-dialog-content");
-    expect(screen.getByRole("button", { name: "Close" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "닫기" })).toBeVisible();
     fireEvent.keyDown(document, { key: "Escape" });
   });
 });

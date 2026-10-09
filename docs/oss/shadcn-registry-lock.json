@@ -78,7 +78,7 @@
       "upstream_path": "apps/v4/registry/new-york-v4/ui/dialog.tsx",
       "upstream_sha256": "604b7782195aef7666dc2ec09a8992d60977696c07f75382f22d3d1b33691559",
       "generated_path": "apps/web/src/components/ui/dialog.tsx",
-      "normalized_sha256": "cc571ee34b25c30a7fa8202e3ee8cba61a92f52c947ed2def388427c87269ac5",
+      "normalized_sha256": "970ce2ea6556dc63bc16e22e7a526b880ac317c4705b78c8636a7548979a90cf",
       "test_path": "apps/web/src/ui-system.test.tsx",
       "runtime_dependencies": [
         "react",
@@ -90,7 +90,7 @@
       "upstream_path": "apps/v4/registry/new-york-v4/ui/sheet.tsx",
       "upstream_sha256": "63863cf2df8f8973e52b3459ac9bdbf81be1262dbc70eb53d5271ffb03488e16",
       "generated_path": "apps/web/src/components/ui/sheet.tsx",
-      "normalized_sha256": "392c31f1be27f9f13785dbef08f752a0cd54b7ef224a40518825bc0aa7bc9955",
+      "normalized_sha256": "7192a8f1b920f42922e99e94bf96656e076d05159451c3944de6a37178bf2c89",
       "test_path": "apps/web/src/ui-system.test.tsx",
       "runtime_dependencies": [
         "react",

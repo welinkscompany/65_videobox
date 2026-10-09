@@ -22,7 +22,7 @@ test("job status lazily retries a global row with the row project and refreshes 
   });
   await recovery.getByRole("button", { name: "다시 실행" }).click();
   await expect.poll(() => retryRequestCount).toBe(1);
-  await expect(dialog.getByRole("button", { name: "Close" })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "닫기" })).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(dialog).toBeVisible();
   await expect(recovery.getByRole("button", { name: "다시 실행" })).toBeDisabled();
@@ -31,7 +31,7 @@ test("job status lazily retries a global row with the row project and refreshes 
   await expect(recovery.getByText("작업을 다시 시작했어요.")).toBeVisible();
   await expect(recovery.getByText("완료", { exact: true })).toBeVisible();
   await expect(recovery.getByRole("button", { name: "다시 실행" })).toHaveCount(0);
-  await dialog.getByRole("button", { name: "Close" }).click();
+  await dialog.getByRole("button", { name: "닫기" }).click();
   await expect(dialog).toHaveCount(0);
   await page.getByRole("button", { name: "작업 상태" }).click();
   await expect(page.getByRole("dialog", { name: "작업 상태" })).toBeVisible();

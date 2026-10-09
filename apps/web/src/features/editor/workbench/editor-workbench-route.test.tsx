@@ -4786,7 +4786,7 @@ describe("EditorWorkbenchRoute", () => {
     expect(createEditingProposal).toHaveBeenCalledWith("project-a", "session-a", { instruction: "두 번째 장면을 빠르게" });
     fireEvent.click(screen.getByRole("button", { name: "편집안 보기" }));
     expect(await screen.findByRole("dialog", { name: "편집안" })).toHaveTextContent("2배로 속도를 바꿔요.");
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "닫기" }));
 
     fireEvent.change(composer, { target: { value: "세 번째 장면도 다듬어 줘" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
