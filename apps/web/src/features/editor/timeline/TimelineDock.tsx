@@ -1220,7 +1220,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
               않는다. 예전의 "클립 위에 띄우고 걸린 트랙만 클릭을 양보" 규칙은 필요 없어서 지웠다. */}
           {TIMELINE_LANES.map((lane) => {
             return <div key={lane} aria-label={laneLabel[lane]} role="listitem" >
-            <span>{laneLabel[lane]}</span>
+            <span title={laneLabel[lane]}>{laneLabel[lane]}</span>
             {/* **잠금 · 눈 · 음소거**(`capcut-observed` 기록 §2: "트랙마다 왼쪽에
                 잠금 · 눈 · 음소거 · `···`"). 셋의 성격이 다르다 --
                 **잠금**은 화면 안에서만 쓰는 것이라 여기 상태로 끝나고(새로고침하면

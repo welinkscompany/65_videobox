@@ -665,6 +665,8 @@
 
 /* 트랙 머리 고정 칸(2026-10-08 점검 §3-4, 스파이크 H-b). 크기는 변수로만 -- 계획 I가 밀도를 바꾼다. */
 .vb-editor-workbench { --vb-timeline-header-w: 9rem; --vb-timeline-header-btn: 1.5rem; --vb-timeline-lane-h: 32px; --vb-timeline-ruler-h: 1.5rem; --vb-trim-handle-w: 8px; --vb-trim-hit-w: 14px; --vb-ruler-label-min-gap: 120px; --vb-snap-guide-w: 2px; --vb-ruler-label-room: 40px; }
+/* 폰 폭에서는 머리 칸이 화면의 38%를 먹었다(144px, 기준 35%). 7.5rem(375에서 32%)으로 줄인다. 단추 셋(1.5rem)은 그대로 두고 이름만 줄여서 말줄임표 + title로 보인다. */
+@media (max-width: 480px) { .vb-editor-workbench { --vb-timeline-header-w: 7.5rem; } }
 .vb-timeline-body { display: grid; grid-template-columns: var(--vb-timeline-header-w) minmax(0, 1fr); min-width: 0; }
 .vb-timeline-lane-headers { min-width: 0; border-right: 1px solid var(--border); }
 /* 줄 높이 변수는 **px 값이어야 한다** -- 좌표 계산이 숫자로 읽는다(rem·calc는 32로 되돌아간다). 눈금 높이는 CSS끼리만 쓰므로 단위 제한이 없다. */
