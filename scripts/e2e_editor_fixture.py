@@ -58,6 +58,8 @@ PLAYBACK_SCENES: tuple[tuple[str, float, float], ...] = (
     ("scene-4", 22.5, 30.0),
 )
 PLAYBACK_PROJECT_NAME = "재생 매끄러움 시험"
+#: 캡컷 단축키 편집 시험(2026-10-09 계획 P2 Task 0)용. 장면은 재생 시험과 같고, 편집 키가 재생 측정 프로젝트를 바꾸지 않게 따로 둔다.
+SHORTCUTS_PROJECT_NAME = "단축키 시험"
 
 _COLORS = ("blue", "green", "orange", "purple")
 _CAPTIONS = ("첫 장면", "둘째 장면", "셋째 장면", "넷째 장면")
@@ -240,8 +242,8 @@ def _seed_no_narration(store: LocalProjectStore, media: dict[str, Any]) -> dict[
     return {"project_id": project.project_id, "session_id": session["session_id"], "timeline_id": timeline["timeline_id"]}
 
 
-def _seed_playback(store: LocalProjectStore, media: dict[str, Any]) -> dict[str, str]:
-    project = store.bootstrap_project(name=PLAYBACK_PROJECT_NAME)
+def _seed_playback(store: LocalProjectStore, media: dict[str, Any], *, name: str = PLAYBACK_PROJECT_NAME) -> dict[str, str]:
+    project = store.bootstrap_project(name=name)
     narration = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=media["narration_30"])
     clips = [
         _narration_clip(f"clip_narration_{i:03d}", sid, start, end, narration)
@@ -273,4 +275,5 @@ def seed_editor_fixtures(*, projects_root: Path, media_dir: Path) -> dict[str, d
         "duplicated_overlays": _seed_duplicated(store, media),
         "no_narration": _seed_no_narration(store, media),
         "playback": _seed_playback(store, media),
+        "shortcuts": _seed_playback(store, media, name=SHORTCUTS_PROJECT_NAME),
     }

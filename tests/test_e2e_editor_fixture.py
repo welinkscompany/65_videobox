@@ -58,3 +58,15 @@ def test_playback_fixture_is_thirty_seconds_in_four_scenes(tmp_path: Path) -> No
     session = store.get_editing_session(project_id=ids["playback"]["project_id"], session_id=ids["playback"]["session_id"])
     assert [(s["segment_id"], s["start_sec"], s["end_sec"]) for s in session["segments"]] == list(PLAYBACK_SCENES)
     assert PLAYBACK_SCENES[-1][2] == 30.0
+
+
+def test_shortcuts_fixture_is_a_separate_thirty_second_project(tmp_path: Path) -> None:
+    """캡컷 단축키 편집 시험(계획 P2 Task 0)은 재생 측정 프로젝트와 따로 쓴다 -- 서로 밟지 않게."""
+    from scripts.e2e_editor_fixture import PLAYBACK_SCENES, SHORTCUTS_PROJECT_NAME
+    ids = seed_editor_fixtures(projects_root=tmp_path / "projects", media_dir=tmp_path / "media")
+    assert ids["shortcuts"]["project_id"] != ids["playback"]["project_id"]
+    store = LocalProjectStore(tmp_path / "projects")
+    session = store.get_editing_session(project_id=ids["shortcuts"]["project_id"], session_id=ids["shortcuts"]["session_id"])
+    assert [(s["segment_id"], s["start_sec"], s["end_sec"]) for s in session["segments"]] == list(PLAYBACK_SCENES)
+    assert SHORTCUTS_PROJECT_NAME == "단축키 시험"
+    assert store.get_project(project_id=ids["shortcuts"]["project_id"])["name"] == SHORTCUTS_PROJECT_NAME

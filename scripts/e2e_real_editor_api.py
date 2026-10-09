@@ -120,7 +120,7 @@ def main(argv: list[str] | None = None) -> int:
     fixture_file = Path(args.fixture_file)
     fixture_file.parent.mkdir(parents=True, exist_ok=True)
     fixture_file.write_text(
-        json.dumps({"clean": _camel(ids["clean"]), "duplicatedOverlays": _camel(ids["duplicated_overlays"]), "noNarration": _camel(ids["no_narration"]), "playback": _camel(ids["playback"])}, indent=2),
+        json.dumps({"clean": _camel(ids["clean"]), "duplicatedOverlays": _camel(ids["duplicated_overlays"]), "noNarration": _camel(ids["no_narration"]), "playback": _camel(ids["playback"]), "shortcuts": _camel(ids["shortcuts"])}, indent=2),
         encoding="utf-8",
     )
 

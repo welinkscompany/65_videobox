@@ -5,7 +5,7 @@ import { expect } from "@playwright/test";
 
 const fixtureFile = path.resolve(process.env.VIDEOBOX_E2E_FIXTURE_FILE ?? "test-results/real-flow-fixture.json");
 
-/** @returns {{ clean: Fixture, duplicatedOverlays: Fixture, noNarration: Fixture, playback: Fixture }} Fixture = { projectId, sessionId, timelineId } */
+/** @returns {{ clean: Fixture, duplicatedOverlays: Fixture, noNarration: Fixture, playback: Fixture, shortcuts: Fixture }} Fixture = { projectId, sessionId, timelineId } */
 export function readFixture() {
   return JSON.parse(readFileSync(fixtureFile, "utf-8"));
 }
