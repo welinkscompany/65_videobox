@@ -732,6 +732,13 @@ describe("TimelineDock", () => {
     expect(playhead.getAttribute("data-seconds")).toBe("5");
   });
 
+  it("제목 줄(\"타임라인\")을 눌러도 재생 위치가 0초로 움직이지 않는다(2026-10-09 실측)", () => {
+    render(<TimelineDock view={view} viewportWidthPx={400} playbackSec={5} />);
+    const playhead = screen.getByTestId("timeline-playhead");
+    fireEvent.click(screen.getByRole("heading", { name: "타임라인" }), { clientX: 0 });
+    expect(playhead.getAttribute("data-seconds")).toBe("5");
+  });
+
   it("재생줄과 클립은 같은 원점(클립 칸 왼쪽)에 놓인다", () => {
     render(<TimelineDock view={view} viewportWidthPx={400} playbackSec={5} />);
     const playhead = screen.getByTestId("timeline-playhead");

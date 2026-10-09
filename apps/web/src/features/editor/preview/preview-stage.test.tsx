@@ -579,7 +579,7 @@ describe("PreviewStage", () => {
     expect(screen.getAllByLabelText("편집본 미리보기")).toHaveLength(1);
   });
 
-  it("maps media time to timeline time, supports keyboard play/pause, and stops on scroll-away and unmount", () => {
+  it("maps media time to timeline time, supports keyboard play/pause, keeps playing in place when focus or the page moves, and stops on unmount", () => {
     const { unmount } = render(<PreviewStage {...current} />);
     const media = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
     const pause = vi.spyOn(media, "pause").mockImplementation(() => undefined);
@@ -588,13 +588,30 @@ describe("PreviewStage", () => {
     fireEvent.timeUpdate(media);
     expect(screen.getAllByRole("status").find((node) => node.classList.contains("vb-preview-stage__status"))).toHaveTextContent("타임라인 2.5초");
     fireEvent.keyDown(screen.getByRole("region", { name: "미리보기" }), { key: " " });
-    expect(pause).toHaveBeenCalled();
+    expect(pause).toHaveBeenCalledTimes(1);
+    // 행동 변경(2026-10-09 실측: 재생 중 타임라인 제목 클릭 -> 2.2초 -> 0초·정지):
+    // 초점이 밖으로 가거나 창이 굴러도 재생은 제자리에서 이어진다.
     fireEvent.blur(screen.getByRole("region", { name: "미리보기" }));
-    expect(pause.mock.calls.length).toBeGreaterThan(1);
     fireEvent.scroll(window);
-    expect(pause.mock.calls.length).toBeGreaterThan(2);
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(media.currentTime).toBe(2.5);
     unmount();
-    expect(pause.mock.calls.length).toBeGreaterThan(3);
+    expect(pause.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it("미리보기 판(영상 그림을 누른 뒤)에서 스페이스를 누르면 한 번만 재생된다(2026-10-09 실측: 둘이 상쇄)", () => {
+    render(<PreviewStage {...current} />);
+    const media = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+    const play = vi.spyOn(media, "play").mockResolvedValue(undefined);
+    let paused = true;
+    Object.defineProperty(media, "paused", { configurable: true, get: () => paused });
+    play.mockImplementation(async () => { paused = false; });
+    const stage = screen.getByRole("region", { name: "미리보기" });
+    stage.focus();
+    fireEvent.keyDown(stage, { key: " " });
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(paused).toBe(false);
+    expect(HTMLMediaElement.prototype.pause).not.toHaveBeenCalled();
   });
 
   describe("재생 시계(2026-10-09 계획 P Task 2)", () => {

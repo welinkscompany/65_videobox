@@ -30,3 +30,64 @@ test("1배로 틀면 미리보기가 스스로 되감지 않고 실제 속도로
   expect(median(runs.map((r) => r.playheadGapP95))).toBeLessThanOrEqual(100);      // 실측 고장 p50 300·p95 400
   expect(median(runs.map((r) => r.readoutGapP95))).toBeLessThanOrEqual(150);       // 0.1초 글자라 100ms 단위로 바뀐다(프레임 어림 포함 실측 107~118, 고장 276~280)
 });
+
+// 계획 P Task 3 (원인 3·4): 스페이스는 늘 재생/정지이고, 미리보기 밖을 눌러도 0초로 튀지 않는다.
+test("스페이스는 영상 그림을 누른 뒤에도·타임라인을 누른 뒤에도 재생/정지이고, 미리보기 밖을 눌러도 위치가 그대로다", async ({ page }) => {
+  test.setTimeout(240_000);
+  await installPlaybackProbe(page);
+  await withLongPreview(page);
+  await openEditor(page, readFixture().playback);
+  await expect(page.getByLabel("편집본 미리보기")).toBeVisible({ timeout: 90_000 });
+  const state = () => page.evaluate(() => { const v = document.querySelector("video"); return { paused: v.paused, t: v.currentTime }; });
+  const pauseNow = () => page.evaluate(() => { window.__pb.harness = true; document.querySelector("video").pause(); window.__pb.harness = false; });
+  await page.waitForFunction(() => document.querySelector("video")?.readyState >= 2);
+
+  // (가) 아무 데도 초점이 없을 때 / 영상 그림을 누른 뒤 / 타임라인을 누른 뒤 -- 스페이스가 켜고 끈다.
+  const starters = [
+    ["초점 없음", async () => { await page.evaluate(() => document.activeElement?.blur?.()); }],
+    ["영상 그림 클릭 뒤", async () => { await page.getByLabel("편집본 미리보기").click(); }],
+    ["타임라인 제목 클릭 뒤", async () => { await page.locator(".vb-editor-workbench__timeline-head h2").click(); }],
+  ];
+  for (const [name, prepare] of starters) {
+    await pauseNow();
+    await prepare();
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(700);
+    expect((await state()).paused, `${name}: 스페이스로 재생`).toBe(false);
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(400);
+    expect((await state()).paused, `${name}: 스페이스로 정지`).toBe(true);
+  }
+
+  // (나) 재생 단추로 재생 2초 -> 타임라인 제목 클릭 -> 계속 재생·위치 보존(예전: 0초·정지).
+  await pauseNow();
+  await page.getByRole("button", { name: "재생 또는 일시정지" }).click();
+  await page.waitForTimeout(2000);
+  const before = await state();
+  await page.locator(".vb-editor-workbench__timeline-head h2").click();
+  await page.waitForTimeout(600);
+  const after = await state();
+  expect(after.paused).toBe(false);
+  expect(after.t).toBeGreaterThanOrEqual(before.t - 0.3);
+  expect(after.t).toBeGreaterThan(2);
+  await pauseNow();
+
+  // (다) 음소거 단추에 초점이 있으면 스페이스는 그 단추를 누른다(재생 상태 그대로·음소거가 바뀜).
+  const mute = page.getByRole("button", { name: /^음소거/ });
+  const pressedBefore = await mute.getAttribute("aria-pressed");
+  await mute.focus();
+  await page.keyboard.press("Space");
+  await page.waitForTimeout(400);
+  expect(await mute.getAttribute("aria-pressed")).not.toBe(pressedBefore);
+  expect((await state()).paused).toBe(true);
+  await mute.click(); // 되돌린다
+
+  // (라) 글 쓰는 칸에서는 띄어쓰기이고 재생이 안 바뀐다.
+  const input = page.locator("input[type='text'], input:not([type]), textarea").first();
+  if (await input.count()) {
+    await input.focus();
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(400);
+    expect((await state()).paused).toBe(true);
+  }
+});

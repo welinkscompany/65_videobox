@@ -1,10 +1,11 @@
-import { type FocusEvent, type KeyboardEvent, type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type KeyboardEvent, type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { toExactPreviewState, type ExactPreviewInput } from "./exact-preview-state";
 import { PreviewCoordinator, type AuditionMedia, type PreviewMode, type TimelineRange } from "./preview-coordinator";
 import { isAllowedLocalUrl } from "../../../lib/network-guard";
 import { capturePreviewStill } from "./previewStill";
 import type { PlaybackClock } from "./playbackClock";
+import { isSwallowedRepeat, playbackShortcutFor } from "./playbackShortcuts";
 
 export type AuditionSource = AuditionMedia & Readonly<{ label: string }>;
 export type AuditionRequest = Readonly<{ requestId: number; source: AuditionSource }>;
@@ -176,11 +177,11 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
     // requestId deliberately permits re-auditioning the same source after exact-preview return.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auditionRequest?.requestId]);
-  useLayoutEffect(() => {
-    const stopForScroll = () => stopActiveMedia();
-    window.addEventListener("scroll", stopForScroll, { passive: true });
-    return () => { window.removeEventListener("scroll", stopForScroll); stopActiveMedia(); };
-  }, []);
+  // 언마운트 때만 멈춘다. 예전에는 초점이 밖으로 가거나(blur) 창이 구르면(scroll)
+  // 멈추고 0초로 되감았다 -- 2026-10-09 실측: 재생 중 타임라인 제목을 누르면
+  // 2.2초 -> 0초·정지(타임라인 위치는 옛 값 그대로). 캡컷도 다른 곳을 눌러도
+  // 재생이 이어지므로 그 두 리스너를 없앴다(의도된 행동 변경).
+  useLayoutEffect(() => () => stopActiveMedia(), []);
   // 렌더 도중(커밋 전) 동기로 채운다 -- `useEffect`에서 채우면 이미 늦다.
   {
     const nextPendingSeekSeconds = !Number.isFinite(playbackSec) || mode.kind === "idle" || (mode.kind === "audition" && mode.media.mediaKind === "image")
@@ -288,7 +289,8 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
     }
   };
   const onStageKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key !== " " && event.key !== "Enter") return;
+    // 스페이스는 아래 창 처리기 하나만 받는다(둘이 받으면 서로 상쇄했다).
+    if (event.key !== "Enter") return;
     if (event.target !== event.currentTarget) return;
     event.preventDefault();
     togglePlayback();
@@ -299,29 +301,21 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
   // 다만 글을 쓰는 중이면 띄어쓰기이고 단추 위에서는 그 단추를 누르는 것이다 --
   // 거기서 가로채면 접근성이 깨진다. 플레이어를 가진 이 컴포넌트가 직접 듣는다:
   // 소유자에게 올려 두면 재생 상태가 두 군데에 생긴다.
+  // 창 처리기는 한 번만 달고(StrictMode 안전) 최신 togglePlayback은 ref로 부른다.
+  const toggleRef = useRef(togglePlayback);
+  toggleRef.current = togglePlayback;
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== " " || event.ctrlKey || event.metaKey || event.altKey) return;
-      const target = event.target as HTMLElement | null;
-      if (target?.isContentEditable) return;
-      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
-      // 타임라인은 예외다. 장면 칸이 `<button>`이라 아래 규칙에 걸려서, 장면을
-      // 한 번 고르면(포커스가 그 단추에 남는다) 스페이스가 영영 안 먹었다 --
-      // owner 지적 "타임라인에서 스페이스바를 누르면 멈춰야 되는데, 그것도
-      // 안되고". 편집기 타임라인에서 스페이스는 재생/정지가 업계 표준이고
-      // 캡컷도 그렇다. 위의 입력칸 검사는 이 예외보다 먼저 걸린다.
-      if (!target?.closest("[data-timeline-surface='true']")
-        && target?.closest("button, [role='button']")) return;
       if (!mediaRef.current) return;
+      if (isSwallowedRepeat(event)) { event.preventDefault(); return; }
+      const command = playbackShortcutFor(event);
+      if (command?.type !== "toggle") return;
       event.preventDefault();
-      togglePlayback();
+      toggleRef.current();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  });
-  const onStageBlur = (event: FocusEvent<HTMLElement>) => {
-    if (!event.currentTarget.contains(event.relatedTarget)) stopActiveMedia();
-  };
+  }, []);
   const refresh = async () => {
     if (!onRefresh || refreshing) return;
     setRefreshing(true);
@@ -340,7 +334,7 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
     setAuditionIssue("이 원본은 여기서 화면을 열 수 없어요. 적용한 뒤 편집본 미리보기에서 확인해 주세요.");
   };
 
-  return <section ref={stageRef} className="vb-preview-stage" aria-label="미리보기" tabIndex={0} onKeyDown={onStageKeyDown} onBlur={onStageBlur}>
+  return <section ref={stageRef} className="vb-preview-stage" aria-label="미리보기" tabIndex={0} onKeyDown={onStageKeyDown}>
     <header className="vb-preview-stage__header"><div><p className="vb-preview-stage__eyebrow">{mode.kind === "audition" ? "원본 미리보기" : "편집본 미리보기"}</p><h2>{mode.kind === "audition" ? "원본 보기" : "편집 결과"}</h2></div>{mode.kind === "audition" && exact.kind === "current" && <button data-native-control="return-exact" type="button" onClick={showExact}>편집본으로 돌아가기</button>}</header>
     <div className="vb-preview-stage__media-shell" aria-busy={exact.kind === "pending" || exact.kind === "running"}>
       {visibleAuditionIssue

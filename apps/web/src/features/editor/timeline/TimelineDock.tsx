@@ -25,6 +25,7 @@ import type { PlaybackClock, PlaybackClockReading } from "../preview/playbackClo
 import { fitPixelsPerSecond, initialPixelsPerSecond, pixelsPerSecondBounds } from "./timelineZoomScale";
 import { timelineZoomShortcutFor, type TimelineZoomCommand } from "./timelineZoomShortcuts";
 import { timelineWheelGestureFor } from "./timelineWheelGesture";
+import { isTypingTarget } from "../preview/playbackShortcuts";
 
 /** 트랙 한 줄 높이의 기본값. 실제 값은 CSS 변수 `--vb-timeline-lane-h`에서 마운트 뒤 읽는다. */
 const DEFAULT_LANE_HEIGHT_PX = 32;
@@ -170,10 +171,7 @@ function formatClipShortName(lane: TimelineLane, ordinalInLane: number, content:
   return content ? `${laneLabel[lane]} ${ordinalInLane} · ${content}` : `${laneLabel[lane]} ${ordinalInLane}`;
 }
 
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  return target.isContentEditable || target.closest("input, textarea, select, [contenteditable='true']") !== null;
-}
+const isEditableTarget = isTypingTarget;
 
 function clipSources(view: EditorViewModel) {
   return [
@@ -510,6 +508,9 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     if (event.target instanceof Element && event.target.closest("button")) return;
     // 머리 칸(이름·빈자리·눈금 여백)은 클립 칸 왼쪽 밖이라 거기서 잰 x는 음수다 -- seek가 아니다.
     if (event.target instanceof Element && event.target.closest(".vb-timeline-lane-headers")) return;
+    // 제목 줄("타임라인"·확대 단추)도 시간 자리가 아니다 -- 여기를 눌러 0초로 되감기던 것이
+    // 2026-10-09 실측에서 "재생 중 밖을 누르면 0초로 튄다"의 한 갈래였다.
+    if (event.target instanceof Element && event.target.closest(".vb-editor-workbench__timeline-head")) return;
     // 클립·재생 머리와 **같은 좌표계**(트랙 원점)로 잰다. 섹션 원점으로 재면
     // 섹션 안쪽 여백만큼 옆으로 어긋난 자리로 seek한다.
     const track = event.currentTarget.querySelector<HTMLElement>("[data-timeline-track]");
