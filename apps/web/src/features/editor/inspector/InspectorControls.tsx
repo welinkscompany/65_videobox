@@ -671,6 +671,7 @@ export function InspectorControls({
               ) : null}
               <Button
                 disabled={disabled || !selectedTtsCandidateId}
+                title={disabled ? "저장하고 있어요. 잠시 뒤에 눌러 주세요." : !selectedTtsCandidateId ? "먼저 승인한 음성을 골라 주세요." : undefined}
                 onClick={() => {
                   const candidate = ttsCandidates.find((item) => item.candidateId === selectedTtsCandidateId);
                   if (candidate) emit({ kind: "apply-tts-candidate", segmentId: selectedSegment.segmentId, candidateId: candidate.candidateId, assetId: candidate.assetId });
@@ -1411,8 +1412,8 @@ export function InspectorControls({
             {partialFieldLabels[field] ?? field}
           </label>)}
           <Button disabled={disabled || selectedPartialFields.length === 0} onClick={() => partialAction("partial-preflight")} type="button">재생성 범위 미리보기</Button>
-          <Button disabled={disabled || !partialRegeneration.canRun || !preparedFieldsMatch || !preparedSegmentMatches} onClick={() => partialAction("partial-run")} type="button">부분 재생성 실행</Button>
-          <Button disabled={disabled || !partialRegeneration.canResume} onClick={() => partialAction("partial-resume")} type="button">이전 결과 열기</Button>
+          <Button disabled={disabled || !partialRegeneration.canRun || !preparedFieldsMatch || !preparedSegmentMatches} title={disabled ? "저장하고 있어요. 잠시 뒤에 눌러 주세요." : !partialRegeneration.canRun ? "먼저 \"재생성 범위 미리보기\"를 눌러 바뀌는 범위를 확인해 주세요." : !preparedFieldsMatch || !preparedSegmentMatches ? "고른 항목이 바뀌었어요. \"재생성 범위 미리보기\"를 다시 눌러 주세요." : undefined} onClick={() => partialAction("partial-run")} type="button">부분 재생성 실행</Button>
+          <Button disabled={disabled || !partialRegeneration.canResume} title={disabled ? "저장하고 있어요. 잠시 뒤에 눌러 주세요." : !partialRegeneration.canResume ? "열 수 있는 이전 결과가 아직 없어요." : undefined} onClick={() => partialAction("partial-resume")} type="button">이전 결과 열기</Button>
         </fieldset>
         </details>
       ) : null}

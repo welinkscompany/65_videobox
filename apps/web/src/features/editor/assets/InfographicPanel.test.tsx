@@ -163,3 +163,15 @@ describe("InfographicPanel", () => {
     expect(failed.textContent).not.toContain("bridge");
   });
 });
+
+describe("InfographicPanel: 꺼진 만들기 단추", () => {
+  it("아무것도 적지 않았으면 무엇을 먼저 적을지 단추가 말한다", async () => {
+    vi.restoreAllMocks();
+    vi.spyOn(api, "listInfographicStyles").mockResolvedValue(STYLES);
+    render(<InfographicPanel />);
+    const button = screen.getByRole("button", { name: "인포그래픽 만들기" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "무엇에 대한 그림인지 먼저 적어 주세요.");
+    cleanup();
+  });
+});

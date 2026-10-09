@@ -239,7 +239,7 @@ export function MotionPanel({ projectId, sceneSeconds = null, onMade, onBusyChan
 
     {hasForbidden ? <p className="vb-infographic__warning" role="alert">{"< > 기호는 쓸 수 없어요."}</p> : null}
 
-    <Button type="button" disabled={!ready} onClick={create} className="vb-infographic__make">
+    <Button type="button" disabled={!ready} title={busy ? "만드는 중이에요. 끝나면 다시 만들 수 있어요." : !template ? "모션 모양을 먼저 골라 주세요." : hasForbidden ? "< > 기호는 쓸 수 없어요." : !durationOk ? `길이는 ${minimum}초에서 ${maximum}초 사이로 적어 주세요.` : !filled ? "비어 있는 칸을 먼저 채워 주세요." : undefined} onClick={create} className="vb-infographic__make">
       {busy ? "만드는 중… 1분 안쪽으로 걸려요" : "모션 만들기"}
     </Button>
 

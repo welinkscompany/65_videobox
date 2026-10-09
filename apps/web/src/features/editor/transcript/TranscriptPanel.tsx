@@ -92,7 +92,7 @@ export function TranscriptPanel({
         {/* 완전히 비운 상태는 "캡션 저장"이 아니라 위 onChange의 삭제 경로가
             이미 처리했다(또는 처리하는 중이다) -- 빈 문자열로 저장을 눌러
             빈 캡션을 만드는 혼동을 막는다. */}
-        <Button disabled={isSaving || !onSaveCaption || draft === selectedEntry.text || draft.trim() === ""} onClick={() => onSaveCaption?.({ segmentId: selectedEntry.segmentId, text: draft })} type="button">캡션 저장</Button>
+        <Button disabled={isSaving || !onSaveCaption || draft === selectedEntry.text || draft.trim() === ""} title={isSaving ? "저장하고 있어요. 잠시 뒤에 눌러 주세요." : !onSaveCaption ? "여기서는 캡션을 저장할 수 없어요." : draft.trim() === "" ? "캡션이 비어 있어요. 글자를 적어 주세요." : draft === selectedEntry.text ? "고친 곳이 아직 없어요. 글자를 고치면 저장할 수 있어요." : undefined} onClick={() => onSaveCaption?.({ segmentId: selectedEntry.segmentId, text: draft })} type="button">캡션 저장</Button>
       </> : null}
     </section>
   </>;

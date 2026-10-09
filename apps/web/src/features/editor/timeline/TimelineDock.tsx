@@ -1205,9 +1205,9 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
       <span className="vb-editor-workbench__timeline-zoom">
         {/* 바퀴로도 된다는 것을 여기 적어 둔다. 눈에 안 보이면 안 쓰는 기능이다 --
             2026-08-17에 컷 도구가 정확히 그랬다. 옆으로 미는 것은 `Shift`와 바퀴다. */}
-        <button data-native-control="timeline-zoom-out" type="button" aria-label="타임라인 축소" title="줄이기 (Ctrl과 - 키, Ctrl과 바퀴)" disabled={!zoomControls.out.enabled} onClick={() => runZoom("out")}>−</button>
-        <button data-native-control="timeline-zoom-in" type="button" aria-label="타임라인 확대" title="늘리기 (Ctrl과 = 키, Ctrl과 바퀴)" disabled={!zoomControls.in.enabled} onClick={() => runZoom("in")}>+</button>
-        <button data-native-control="timeline-fit" type="button" aria-label="타임라인 전체 보기" title="영상 전체가 한 화면에 들어오게 (Shift와 Z 키, Ctrl과 0 키)" disabled={!zoomControls.fit.enabled} onClick={() => runZoom("fit")}>전체</button>
+        <button data-native-control="timeline-zoom-out" type="button" aria-label="타임라인 축소" title={zoomControls.out.enabled ? "줄이기 (Ctrl과 - 키, Ctrl과 바퀴)" : "더 줄일 수 없어요. 가장 멀리서 보고 있어요."} disabled={!zoomControls.out.enabled} onClick={() => runZoom("out")}>−</button>
+        <button data-native-control="timeline-zoom-in" type="button" aria-label="타임라인 확대" title={zoomControls.in.enabled ? "늘리기 (Ctrl과 = 키, Ctrl과 바퀴)" : "더 늘릴 수 없어요. 가장 가까이서 보고 있어요."} disabled={!zoomControls.in.enabled} onClick={() => runZoom("in")}>+</button>
+        <button data-native-control="timeline-fit" type="button" aria-label="타임라인 전체 보기" title={zoomControls.fit.enabled ? "영상 전체가 한 화면에 들어오게 (Shift와 Z 키, Ctrl과 0 키)" : "영상 길이를 아직 몰라서 맞출 수 없어요."} disabled={!zoomControls.fit.enabled} onClick={() => runZoom("fit")}>전체</button>
       </span>
     </div>
     {/* 캡컷처럼 눈금과 트랙을 한 좌표계에 놓고, 그 위에 재생 위치 선을 관통시킨다.

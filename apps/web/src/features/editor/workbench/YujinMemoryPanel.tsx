@@ -61,6 +61,7 @@ export function YujinMemoryPanel({
             memory.createAction === "creating"
             || !memory.canCreateCandidate
           }
+          title={memory.createAction === "creating" ? "만드는 중이에요." : !memory.candidateDraft.trim() ? "기억으로 남길 말을 먼저 적어 주세요." : !memory.canCreateCandidate ? "기억으로 만들 대화가 아직 없어요." : undefined}
           onClick={() => void memory.onCreateCandidate()}
         >
           {memory.createAction === "creating"

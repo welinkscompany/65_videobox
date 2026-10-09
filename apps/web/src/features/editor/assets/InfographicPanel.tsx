@@ -115,7 +115,7 @@ export function InfographicPanel({ onMade }: { onMade?: () => void }) {
       <span className="vb-infographic__hint">{styles.find((item) => item.key === style)?.direction ?? ""}</span>
     </div> : null}
 
-    <Button type="button" disabled={!ready} onClick={make} className="vb-infographic__make">
+    <Button type="button" disabled={!ready} title={busy ? "그리는 중이에요. 끝나면 다시 만들 수 있어요." : !topic.trim() ? "무엇에 대한 그림인지 먼저 적어 주세요." : usable.length === 0 ? "이름과 숫자가 모두 있는 줄을 한 줄 이상 채워 주세요." : undefined} onClick={make} className="vb-infographic__make">
       {busy ? "그리는 중… 몇 분 걸릴 수 있어요" : "인포그래픽 만들기"}
     </Button>
 

@@ -465,6 +465,11 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
     <div className={`vb-editor-assets__cards${viewMode === "grid" ? " vb-editor-assets__cards--grid" : ""}`}>
       {visibleCards.map((card) => {
         const applyDisabled = target === null || isSaving || !card.canApply;
+        // 꺼져 있으면 왜 꺼졌는지 단추가 말한다(눌러도 아무 일이 없는 단추를 남기지 않는다).
+        const applyDisabledReason = !applyDisabled ? undefined
+          : target === null ? "먼저 쓸 장면을 골라 주세요."
+            : isSaving ? "저장하고 있어요. 잠시 뒤에 눌러 주세요."
+              : "이 자료는 아직 장면에 쓸 수 없어요.";
         const previewState = previewStates[card.id];
         const choice = assetPreferenceChoice(taste.preferences, card.assetId);
         const creator = card.sourceMetadata.creator.trim();
@@ -599,8 +604,8 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
                 이유는 두 길이 나란히 있을 때 그 이름이 어느 쪽인지 말해 주지
                 않기 때문이다 -- 눌러 보고 나서야 알게 된다. */}
             {card.kind === "image"
-              ? <Button type="button" aria-label={`${card.title} 화면으로 깔기`} disabled={applyDisabled} onClick={() => target && onApply(card, target.segmentId)}>화면으로 깔기</Button>
-              : <Button type="button" aria-label={`${card.title} 적용`} disabled={applyDisabled} onClick={() => target && onApply(card, target.segmentId)}>적용</Button>}
+              ? <Button type="button" aria-label={`${card.title} 화면으로 깔기`} disabled={applyDisabled} title={applyDisabledReason} onClick={() => target && onApply(card, target.segmentId)}>화면으로 깔기</Button>
+              : <Button type="button" aria-label={`${card.title} 적용`} disabled={applyDisabled} title={applyDisabledReason} onClick={() => target && onApply(card, target.segmentId)}>적용</Button>}
             {/* 장면을 바꾸는 `적용`(B-roll)과 달리, 장면 **위에** 얹는다.
                 오버레이 endpoint와 렌더는 처음부터 있었는데 고를 자리가
                 없었다 -- 자산 목록이 그 선택기다.
@@ -617,7 +622,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
               // 사라진다. `targetHasOverlay`가 참이면 그 사실을 단추 이름이
               // 미리 말한다. 동작(`onApplyOverlay` 호출)은 그대로다 -- 백엔드가
               // 이미 upsert이므로 새 확인 창이나 분기를 더하지 않는다.
-              <Button type="button" aria-label={`${card.title} ${targetHasOverlay ? "얹은 것 바꾸기" : "화면에 얹기"}`} disabled={applyDisabled} onClick={() => target && onApplyOverlay(card, target.segmentId)}>{targetHasOverlay ? "얹은 것 바꾸기" : "화면에 얹기"}</Button>
+              <Button type="button" aria-label={`${card.title} ${targetHasOverlay ? "얹은 것 바꾸기" : "화면에 얹기"}`} disabled={applyDisabled} title={applyDisabledReason} onClick={() => target && onApplyOverlay(card, target.segmentId)}>{targetHasOverlay ? "얹은 것 바꾸기" : "화면에 얹기"}</Button>
             ) : null}
             {/* 독립 "미디어" 화면(2026-08-27 결정으로 편집기에 접힘, 2026-09-01
                 실행)의 유일한 고유 동작 중 하나. 라이브러리에서 들여온 프로젝트

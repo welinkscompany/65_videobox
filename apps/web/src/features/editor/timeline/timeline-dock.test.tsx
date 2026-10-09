@@ -1648,7 +1648,12 @@ describe("가장자리 손잡이와 몸통 끌기", () => {
     expect(css).toMatch(/\.vb-clip-body-drag\s*\{[^}]*cursor:\s*grab/);
     expect(css).toMatch(/\.vb-trim-handle\s*\{[^}]*width:\s*var\(--vb-trim-hit-w\)/);
     expect(css).toMatch(/\.vb-trim-handle::before\s*\{[^}]*width:\s*var\(--vb-trim-handle-w\)/);
-    expect(css).toMatch(/\.vb-clip-body-drag\s*\{[^}]*left:\s*var\(--vb-trim-hit-w\)/);
+    expect(css).toMatch(/\.vb-clip-body-drag\s*\{[^}]*left:\s*min\(var\(--vb-trim-hit-w\),\s*33%\)/);
+  });
+  it("아주 좁은 클립에서도 손잡이 둘이 몸통(이동·순서 바꾸기)을 다 덮지 않는다", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
+    expect(css).toMatch(/\.vb-trim-handle\s*\{[^}]*max-width:\s*33%/);
+    expect(css).toMatch(/\.vb-clip-body-drag\s*\{[^}]*right:\s*min\(var\(--vb-trim-hit-w\),\s*33%\)/);
   });
   it("몸통을 흔들림(2px)만 하고 놓으면 클릭이라 그 클립을 고르고 시작으로 이동한다", () => {
     const onUpdatePlacements = vi.fn();
@@ -2301,5 +2306,17 @@ describe("캡컷 키: Q·W·위아래·Home·End·Shift+Z (계획 P2 Task 4)", (
   it("전체 보기 단추 설명에 새 키가 적혀 있다", () => {
     render(<TimelineDock view={twoNarrationView} viewportWidthPx={1000} />);
     expect(screen.getByRole("button", { name: "타임라인 전체 보기" })).toHaveAttribute("title", "영상 전체가 한 화면에 들어오게 (Shift와 Z 키, Ctrl과 0 키)");
+  });
+});
+
+
+describe("꺼진 확대·축소 단추는 왜 꺼졌는지 말한다", () => {
+  it("가장 멀리서 보는 자리에서는 축소 단추가 더 줄일 수 없다고 말한다", () => {
+    const shortView: EditorViewModel = { ...view, output: { ...view.output, durationSec: 7.75 }, tracks: [], captions: [], gaps: [] };
+    render(<TimelineDock view={shortView} viewportWidthPx={1200} />);
+    const zoomOut = screen.getByRole("button", { name: "타임라인 축소" });
+    expect(zoomOut).toBeDisabled();
+    expect(zoomOut).toHaveAttribute("title", "더 줄일 수 없어요. 가장 멀리서 보고 있어요.");
+    expect(screen.getByRole("button", { name: "타임라인 확대" })).toHaveAttribute("title", "늘리기 (Ctrl과 = 키, Ctrl과 바퀴)");
   });
 });

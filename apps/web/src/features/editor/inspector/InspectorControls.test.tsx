@@ -1667,3 +1667,30 @@ describe("InspectorControls", () => {
     expect(screen.getByLabelText("영상 사진 움직임")).toHaveValue("zoom_out");
   });
 });
+
+describe("InspectorControls: 꺼진 단추는 왜 꺼졌는지 말한다", () => {
+  const segment = { segmentId: "a", startSec: 0, endSec: 1, nextSegmentId: null, cutAction: "keep" };
+
+  it("승인한 음성이 없으면 승인한 음성 적용 단추가 먼저 고르라고 말한다", async () => {
+    const load = vi.fn().mockResolvedValue([]);
+    render(<InspectorControls disabled={false} onAction={vi.fn()} projectId="p" selectedSegment={segment} target={null} loadApprovedTtsCandidates={load} />);
+    fireEvent.click(screen.getByRole("button", { name: "승인한 음성 불러오기" }));
+    const apply = await screen.findByRole("button", { name: "승인한 음성 적용" });
+    expect(apply).toBeDisabled();
+    expect(apply).toHaveAttribute("title", "먼저 승인한 음성을 골라 주세요.");
+  });
+
+  it("범위를 미리 보지 않았으면 부분 재생성 실행 단추가 미리보기부터 누르라고 말한다", () => {
+    render(<InspectorControls disabled={false} onAction={vi.fn()} selectedSegment={segment} target={null} partialRegeneration={{ canResume: false, canRun: false, fields: ["caption"] }} />);
+    const run = screen.getByRole("button", { name: "부분 재생성 실행" });
+    expect(run).toBeDisabled();
+    expect(run).toHaveAttribute("title", "먼저 \"재생성 범위 미리보기\"를 눌러 바뀌는 범위를 확인해 주세요.");
+  });
+
+  it("열 이전 결과가 없으면 이전 결과 열기 단추가 없다고 말한다", () => {
+    render(<InspectorControls disabled={false} onAction={vi.fn()} selectedSegment={segment} target={null} partialRegeneration={{ canResume: false, canRun: false, fields: ["caption"] }} />);
+    const open = screen.getByRole("button", { name: "이전 결과 열기" });
+    expect(open).toBeDisabled();
+    expect(open).toHaveAttribute("title", "열 수 있는 이전 결과가 아직 없어요.");
+  });
+});

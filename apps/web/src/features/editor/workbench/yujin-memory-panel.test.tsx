@@ -277,3 +277,12 @@ describe("Yujin memory panel", () => {
       .toHaveTextContent("빠른 컷 편집을 선호합니다.");
   });
 });
+
+describe("Yujin memory panel: 꺼진 기억 후보 만들기 단추", () => {
+  it("적은 말이 없으면 먼저 적으라고 단추가 말한다", () => {
+    renderPanel({ ...memoryCallbacks(), canCreateCandidate: false, candidates: [], loadError: null });
+    const button = screen.getByRole("button", { name: "기억 후보 만들기" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "기억으로 남길 말을 먼저 적어 주세요.");
+  });
+});

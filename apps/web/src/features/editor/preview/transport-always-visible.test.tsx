@@ -39,3 +39,12 @@ describe("재생줄은 사라지지 않는다", () => {
     expect(screen.getByText(/아직 재생할 영상이 없어요/)).toBeInTheDocument()
   })
 })
+
+describe("꺼진 재생 조작은 왜 꺼졌는지 단추가 말한다", () => {
+  it.each(["이전 프레임", "재생 또는 일시정지", "다음 프레임", "음소거", "미리보기 전체화면"])("%s", (name) => {
+    render(<PreviewStage {...base} exactPreview={{ status: "unavailable" }} />)
+    const button = screen.getByRole("button", { name })
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute("title", "아직 재생할 영상이 없어요.")
+  })
+})

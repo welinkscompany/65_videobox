@@ -1255,3 +1255,22 @@ describe("편집 툴바는 캡컷처럼 아이콘 줄이다", () => {
     expect(screen.getByRole("tab", { name: "미디어" })).toBeInTheDocument();
   });
 });
+
+
+describe("꺼진 실행 취소·다시 실행은 왜 꺼졌는지 말한다", () => {
+  it("되돌릴 편집이 없으면 실행 취소와 다시 실행 단추가 그렇게 말한다", async () => {
+    render(<EditorWorkbench view={view} />);
+    await screen.findByRole("region", { name: "편집 작업판" });
+    const undo = screen.getByRole("button", { name: "실행 취소" });
+    const redo = screen.getByRole("button", { name: "다시 실행" });
+    expect(undo).toBeDisabled();
+    expect(undo).toHaveAttribute("title", "실행 취소 — 되돌릴 편집이 아직 없어요.");
+    expect(redo).toHaveAttribute("title", "다시 실행 — 다시 할 편집이 아직 없어요.");
+  });
+
+  it("저장하는 동안 잠긴 실행 취소 단추는 저장 중이라서 잠겼다고 말한다", async () => {
+    render(<EditorWorkbench view={view} isSavingTimeline />);
+    await screen.findByRole("region", { name: "편집 작업판" });
+    expect(screen.getByRole("button", { name: "실행 취소" })).toHaveAttribute("title", "실행 취소 — 저장하고 있어요. 잠시 뒤에 눌러 주세요.");
+  });
+});

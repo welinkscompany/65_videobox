@@ -225,3 +225,16 @@ describe("MotionPanel", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 });
+
+describe("MotionPanel: 꺼진 만들기 단추", () => {
+  it("빈 칸이 있으면 채우라고 단추가 말한다", async () => {
+    vi.restoreAllMocks();
+    vi.spyOn(api, "listMotionTemplates").mockResolvedValue(TEMPLATES);
+    render(<MotionPanel projectId="project-a" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "막대 비교" })).toHaveAttribute("aria-pressed", "true"));
+    const button = screen.getByRole("button", { name: "모션 만들기" });
+    expect(button).toBeDisabled();
+    await waitFor(() => expect(button).toHaveAttribute("title", "비어 있는 칸을 먼저 채워 주세요."));
+    cleanup();
+  });
+});

@@ -556,6 +556,7 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
             <NativeSelect
               aria-label="후보에 사용할 목소리"
               disabled={isBusy || samples.length === 0}
+              title={isBusy ? "작업하는 중이에요. 끝나면 고를 수 있어요." : samples.length === 0 ? "먼저 목소리를 추가해 주세요." : undefined}
               onChange={(event) => setSelectedSampleId(event.target.value)}
               value={selectedSampleId}
             >
@@ -583,7 +584,7 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
             함께 보는 폴더 밖의 경로는 추가되지 않아요. 안 되면 아래 업로드를 써 주세요.
           </span>
         </label>
-        <Button disabled={isBusy || loadState !== "ready" || !localPath.trim()} onClick={() => void registerLocalPath()} type="button">
+        <Button disabled={isBusy || loadState !== "ready" || !localPath.trim()} title={isBusy ? "작업하는 중이에요. 끝나면 누를 수 있어요." : loadState !== "ready" ? "목소리 목록을 불러오는 중이에요." : !localPath.trim() ? "음성 파일이 있는 곳을 먼저 적어 주세요." : undefined} onClick={() => void registerLocalPath()} type="button">
           {actionName === "register" ? "추가하는 중" : "이 위치로 추가"}
         </Button>
       </div>
@@ -619,7 +620,7 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
             value={youtubeUrl}
           />
         </label>
-        <Button disabled={isBusy || loadState !== "ready" || !youtubeUrl.trim()} onClick={() => void importFromYoutube()} type="button">
+        <Button disabled={isBusy || loadState !== "ready" || !youtubeUrl.trim()} title={isBusy ? "작업하는 중이에요. 끝나면 누를 수 있어요." : loadState !== "ready" ? "목소리 목록을 불러오는 중이에요." : !youtubeUrl.trim() ? "내 유튜브 영상 링크를 먼저 적어 주세요." : undefined} onClick={() => void importFromYoutube()} type="button">
           {actionName === "youtube-import" ? "영상에서 가져오는 중" : "유튜브 링크로 배우기"}
         </Button>
         <p className="vb-setting-note">목소리는 바로 후보 만들기에 쓸 수 있어요. 컷 빠르기·색감은 참고로만 보여 주고, 편집에 자동으로 입히지 않아요.</p>
@@ -652,6 +653,7 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
       </label>
       <Button
         disabled={isBusy || candidateLoadState === "loading" || !selectedSegment || !selectedSampleId || !selectedSegment.caption_text.trim()}
+        title={isBusy ? "작업하는 중이에요. 끝나면 누를 수 있어요." : !selectedSegment ? "후보를 만들 구간을 먼저 골라 주세요." : !selectedSampleId ? "먼저 목소리를 추가해 주세요." : !selectedSegment.caption_text.trim() ? "이 구간에는 읽을 글자가 없어요." : candidateLoadState === "loading" ? "이 구간의 후보를 불러오는 중이에요." : undefined}
         onClick={() => void generateCandidate()}
         type="button"
       >

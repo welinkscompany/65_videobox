@@ -700,3 +700,42 @@ describe("VoiceTtsSettings", () => {
     expect(screen.queryByRole("option", { name: /늦게 도착한 A 프로젝트 문장/ })).not.toBeInTheDocument();
   });
 });
+
+describe("VoiceTtsSettings: 꺼진 단추는 왜 꺼졌는지 말한다", () => {
+  async function renderReady(samples: { asset_id: string; asset_type: string; storage_uri: string }[]) {
+    vi.spyOn(api, "listVoiceSamples").mockResolvedValue(samples as never);
+    vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(editingSession("project-a"));
+    vi.spyOn(api, "listTtsCandidates").mockResolvedValue({ candidates: [] });
+    render(<VoiceTtsSettings projectId="project-a" />);
+    await screen.findByRole("button", { name: "유튜브 링크로 배우기" });
+  }
+
+  it("음성 파일 위치를 안 적었으면 이 위치로 추가 단추가 적으라고 말한다", async () => {
+    await renderReady([]);
+    const button = screen.getByRole("button", { name: "이 위치로 추가" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "음성 파일이 있는 곳을 먼저 적어 주세요.");
+  });
+
+  it("링크를 안 적었으면 유튜브 링크로 배우기 단추가 적으라고 말한다", async () => {
+    await renderReady([]);
+    const button = screen.getByRole("button", { name: "유튜브 링크로 배우기" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "내 유튜브 영상 링크를 먼저 적어 주세요.");
+  });
+
+  it("목소리가 없으면 후보 목소리 상자와 후보 만들기 단추가 목소리를 먼저 더하라고 말한다", async () => {
+    await renderReady([]);
+    expect(screen.getByRole("button", { name: "내 목소리 후보 만들기" })).toHaveAttribute("title", "후보를 만들 구간을 먼저 골라 주세요.");
+    const voice = screen.getByRole("combobox", { name: "후보에 사용할 목소리" });
+    expect(voice).toBeDisabled();
+    expect(voice).toHaveAttribute("title", "먼저 목소리를 추가해 주세요.");
+  });
+
+  it("목소리가 있어도 구간을 안 골랐으면 후보 만들기 단추가 구간을 고르라고 말한다", async () => {
+    await renderReady([{ asset_id: "sample_one", asset_type: "voice_sample_audio", storage_uri: "local://voice/one.wav" }]);
+    const button = screen.getByRole("button", { name: "내 목소리 후보 만들기" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "후보를 만들 구간을 먼저 골라 주세요.");
+  });
+});

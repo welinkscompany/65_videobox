@@ -428,6 +428,17 @@ test("편집기 조작 전부를 진짜 백엔드에서 눌러 죽은 단추를 
         await reopen();
         result = { ...(await measure(state, item, parentChain)), retried: true };
       }
+      // 조용했다면 한 번 더: 깨끗이 다시 연 화면에서 처음부터 다시 잰다. 앞선 조작이 쌓은 상태(소란·눌려 있는 값)
+      // 때문에 반응이 묻힌 것인지, 정말 조용한 단추인지를 가른다. 다시 쟀을 때 반응하면 그 결과를 쓴다.
+      const quiet = (r) => r.clicked && r.hitSelf !== false && !r.untestableActive
+        && !r.reaction.domMutations && !r.reaction.requests && !r.reaction.focusMoved && !r.reaction.ariaChanged && !r.reaction.dialogOpened && !r.reaction.urlChanged;
+      if (quiet(result)) {
+        await page.keyboard.press("Escape").catch(() => {});
+        await reopen();
+        const again = { ...(await measure(state, item, parentChain)), remeasured: true };
+        if (again.clicked) result = again;
+        sinceOpen += 1;
+      }
       results.push(result);
       if (result.clicked) {
         sinceOpen += 1;
@@ -566,9 +577,16 @@ test("편집기 조작 전부를 진짜 백엔드에서 눌러 죽은 단추를 
     }
     const worst = slotResults.reduce((a, b) => ((RANK[b.class] ?? 6) > (RANK[a.class] ?? 6) ? b : a));
     const mixed = new Set(slotResults.map((slot) => slot.class)).size > 1;
+    // 꺼져 있는 이유를 단추 자신이 말하면(title이 "~요."로 끝나는 문장) 죽은 단추가 아니라 설명 있는 비활성이다.
+    const disabledDetails = slotResults.flatMap((slot) => slot.detail).filter((d) => d.disabled);
+    const reasons = [...new Set(disabledDetails.map((d) => d.reason).filter(Boolean))];
+    const exception = worst.class === "always-disabled" && disabledDetails.length > 0 && disabledDetails.every((d) => /요\.$/.test(d.reason ?? ""))
+      ? "꺼진 이유를 단추가 말한다: " + reasons.join(" / ")
+      : undefined;
     controls.push({
       name: group.name,
       role: group.role,
+      ...(exception ? { exception } : {}),
       nativeControl: slotResults.find((slot) => slot.native)?.native ?? null,
       states: [...new Set(slotResults.flatMap((slot) => slot.states))],
       class: worst.class,
@@ -601,4 +619,5 @@ test("편집기 조작 전부를 진짜 백엔드에서 눌러 죽은 단추를 
   const counts = { ok: 0, silent: 0, "no-handler": 0, "always-disabled": 0, "skipped-side-effect": 0 };
   for (const control of controls) counts[control.class] = (counts[control.class] ?? 0) + 1;
   console.log(JSON.stringify(counts));
+  console.log("설명 없는 비활성:", controls.filter((control) => control.class === "always-disabled" && !control.exception).map((control) => control.name).join(" | ") || "없음");
 });

@@ -133,3 +133,14 @@ describe("TranscriptPanel", () => {
     expect(screen.getByRole("button", { name: "둘 캡션 선택" })).not.toHaveAttribute("aria-current");
   });
 });
+
+describe("TranscriptPanel: 꺼진 캡션 저장 단추", () => {
+  it("고친 곳이 없으면 그렇다고 단추가 말하고, 비우면 비었다고 말한다", () => {
+    render(<TranscriptPanel entries={entries} playbackSec={0} selectedSegmentId="segment-1" onSelectSegment={vi.fn()} onSeek={vi.fn()} onSaveCaption={vi.fn()} />);
+    const save = screen.getByRole("button", { name: "캡션 저장" });
+    expect(save).toBeDisabled();
+    expect(save).toHaveAttribute("title", "고친 곳이 아직 없어요. 글자를 고치면 저장할 수 있어요.");
+    fireEvent.change(screen.getByRole("textbox", { name: "segment-1 캡션 텍스트" }), { target: { value: "   " } });
+    expect(screen.getByRole("button", { name: "캡션 저장" })).toHaveAttribute("title", "캡션이 비어 있어요. 글자를 적어 주세요.");
+  });
+});

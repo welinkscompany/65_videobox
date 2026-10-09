@@ -42,6 +42,9 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
  * 현재 선택 장면 찾기, 내보내기 팝업에서 장면 클릭)이라 하나로 모았다 --
  * 코드리뷰(2026-08-29)로 잡힌 결함: 예전엔 세 곳에 각자 손으로 있어서 이 규칙이
  * 한 곳에서만 갱신되고 나머지에 안 옮겨질 위험이 있었다. */
+/** 저장 중에 잠긴 단추가 왜 잠겼는지 말하는 한 문장. */
+const SAVING_REASON = "저장하고 있어요. 잠시 뒤에 눌러 주세요.";
+
 function findNarrationOrCaptionBySegment(view: EditorViewModel, segmentId: string) {
   return sceneSpanBySegmentId(view, segmentId);
 }
@@ -442,7 +445,7 @@ function EditorWorkbenchInstance({
         type="button"
         variant="outline"
         size="icon"
-        title={`${tool.label} — ${tool.hint}`}
+        title={`${tool.label} — ${tool.enabled && isSavingTimeline ? SAVING_REASON : tool.hint}`}
         aria-description={tool.hint}
         disabled={!tool.enabled || isSavingTimeline || !onInspectorAction}
         onClick={() => { if (tool.action) void onInspectorAction?.(tool.action); }}
@@ -458,9 +461,13 @@ function EditorWorkbenchInstance({
   // 끝에 확대·축소가 있다. `TimelineDock`이 이미 그 자리(줌 조작)를 갖고
   // 있으므로 여기 만든 조각을 그 줄의 `editToolbar` 자리로 그대로 넘긴다 --
   // 같은 버튼을 두 번 짜지 않는다.
+  const undoTitle = isSavingTimeline ? `실행 취소 — ${SAVING_REASON}`
+    : !session?.undoCount ? "실행 취소 — 되돌릴 편집이 아직 없어요." : "실행 취소 — Ctrl+Z";
+  const redoTitle = isSavingTimeline ? `다시 실행 — ${SAVING_REASON}`
+    : !session?.redoCount ? "다시 실행 — 다시 할 편집이 아직 없어요." : "다시 실행 — Ctrl+Shift+Z 또는 Ctrl+Y";
   const editToolbar = <span className="vb-timeline-edit-toolbar">
-    <Button type="button" variant="outline" size="icon" title="실행 취소 — Ctrl+Z" disabled={isSavingTimeline || !onUndo || !session?.undoCount} onClick={() => void onUndo?.()}><Undo2 aria-hidden="true" /><span className="sr-only">실행 취소</span></Button>
-    <Button type="button" variant="outline" size="icon" title="다시 실행 — Ctrl+Shift+Z 또는 Ctrl+Y" disabled={isSavingTimeline || !onRedo || !session?.redoCount} onClick={() => void onRedo?.()}><Redo2 aria-hidden="true" /><span className="sr-only">다시 실행</span></Button>
+    <Button type="button" variant="outline" size="icon" title={undoTitle} disabled={isSavingTimeline || !onUndo || !session?.undoCount} onClick={() => void onUndo?.()}><Undo2 aria-hidden="true" /><span className="sr-only">실행 취소</span></Button>
+    <Button type="button" variant="outline" size="icon" title={redoTitle} disabled={isSavingTimeline || !onRedo || !session?.redoCount} onClick={() => void onRedo?.()}><Redo2 aria-hidden="true" /><span className="sr-only">다시 실행</span></Button>
     {cutButton(cutTools.split, Scissors)}{cutButton(cutTools.join, ChevronsLeftRight)}{cutButton(cutTools.drop, Trash2)}{cutButton(cutTools.copyToNext, Copy)}
   </span>;
   const playAssetCard = (card: EditorAssetCard, previewUrl: string) => {

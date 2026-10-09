@@ -949,3 +949,18 @@ describe("편집기에서 모션 만들기 열기", () => {
     expect(screen.queryByRole("button", { name: "모션" })).toBeNull();
   });
 });
+
+describe("EditorAssetBrowser: 꺼진 적용·얹기 단추는 왜 꺼졌는지 말한다", () => {
+  it("쓸 장면을 안 골랐으면 화면에 얹기 단추가 장면부터 고르라고 말한다", () => {
+    render(<EditorAssetBrowser cards={[picture]} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} />);
+    const button = screen.getByRole("button", { name: "바다.png 화면에 얹기" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "먼저 쓸 장면을 골라 주세요.");
+    expect(screen.getByRole("button", { name: "바다.png 화면으로 깔기" })).toHaveAttribute("title", "먼저 쓸 장면을 골라 주세요.");
+  });
+
+  it("저장하는 동안에는 저장 중이라서 잠겼다고 말한다", () => {
+    render(<EditorAssetBrowser cards={[picture]} target={{ segmentId: "seg-1", startSec: 0, endSec: 2 }} isSaving onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "바다.png 화면에 얹기" })).toHaveAttribute("title", "저장하고 있어요. 잠시 뒤에 눌러 주세요.");
+  });
+});

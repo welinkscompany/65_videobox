@@ -93,3 +93,13 @@ describe("LibraryPickerDialog", () => {
     expect(within(screen.getByTestId("library-video-grid")).getByText("관련도 100%")).toBeInTheDocument();
   });
 });
+
+describe("LibraryPickerDialog: 꺼진 가져오기 단추", () => {
+  it("자료를 고르기 전에는 먼저 고르라고 단추가 말한다", async () => {
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({ assets: [asset()], total: 1 });
+    render(<LibraryPickerDialog open projectId="project-a" onOpenChange={() => {}} />);
+    const button = await screen.findByRole("button", { name: "가져오기" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "가져올 자료를 먼저 골라 주세요.");
+  });
+});

@@ -162,7 +162,7 @@ export function LibraryPickerDialog({
       </div>
       {message ? <p role="status">{message}</p> : null}
       <div className="vb-library-picker__footer">
-        <Button type="button" disabled={!selected || importing} onClick={() => void confirmImport()}>
+        <Button type="button" disabled={!selected || importing} title={importing ? "가져오는 중이에요." : !selected ? "가져올 자료를 먼저 골라 주세요." : undefined} onClick={() => void confirmImport()}>
           {importing ? "가져오는 중" : "가져오기"}
         </Button>
       </div>
