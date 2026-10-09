@@ -755,6 +755,14 @@ npm --prefix apps/web run build
 npm --prefix apps/web exec tsc -- --noEmit
 ```
 
+편집 흐름 e2e(가짜 API 묶음 `npm run test:e2e`는 `apps/web`에서 돈다):
+
+```bash
+cd apps/web && npm run test:e2e:real-flow
+```
+
+진짜 백엔드·고정 시험 프로젝트로 편집 흐름을 밟는다(2026-10-08 계획 H). 가짜 API e2e가 못 잡는 materialize·되돌리기·placement 결함을 잡는다.
+
 ### 로컬 실행
 
 컨테이너 스택은 `scripts/owner-ready.ps1`로 조작한다. 직접 `docker compose`를 치지 않는다.
