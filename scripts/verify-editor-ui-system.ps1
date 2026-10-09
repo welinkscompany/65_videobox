@@ -20,7 +20,7 @@ else {
   # (2026-08-05) to dark. contrast.test.ts locks the same hexes from the JS
   # side; both must move together, and only with a new approval record
   # (CLAUDE.md §6).
-  foreach ($token in @('--vb-canvas: #0F0F11', '--vb-panel: #18181B', '--vb-accent: #4A8BF5', '--vb-preview: #0B0B0C', 'PretendardVariable.woff2')) { if (-not $css.Contains($token)) { $errors.Add("missing UI token: $token") } }
+  foreach ($token in @('--vb-canvas: #0F0F11', '--vb-panel: #18181B', '--vb-accent: #9EC0F7', '--vb-preview: #0B0B0C', 'PretendardVariable.woff2')) { if (-not $css.Contains($token)) { $errors.Add("missing UI token: $token") } }
   # 흰 팔레트로 되돌아가면(2026-08-05 값) 여기서 잡는다 -- 다크 전환
   # (2026-08-29)이 owner 재승인 없이 조용히 풀리는 것을 막는다.
   foreach ($dead in @('--vb-canvas: #FAFAFA', '--vb-panel: #FFFFFF', '--vb-accent: #C2410C')) { if ($css.Contains($dead)) { $errors.Add("reverted light palette token is back: $dead") } }
