@@ -1229,3 +1229,67 @@ def test_exact_preview_retry_preserves_validated_ranged_duration_and_rejects_cor
     with pytest.raises(ValueError, match="exact_preview_invalid_range"):
         store.retry_exact_preview(project_id=project.project_id, generation_id=retried["generation_id"])
     assert store.get_exact_preview(project_id=project.project_id, generation_id=retried["generation_id"])["state"] == "failed"
+
+
+def _five_second_blue_timeline(tmp_path: Path) -> tuple[LocalProjectStore, str, dict, CompositionPlan]:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="keyframes")
+    blue, audio = tmp_path / "blue.mp4", tmp_path / "audio.wav"
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=blue:s=320x240:d=5", "-pix_fmt", "yuv420p", str(blue)], check=True, capture_output=True)
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo:d=5", str(audio)], check=True, capture_output=True)
+    blue_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=blue)
+    audio_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=audio)
+    timeline = {"output": {"width": 320, "height": 240}, "tracks": [
+        {"track_type": "narration", "clips": [{"clip_id": "n", "asset_id": audio_asset.asset_id, "asset_uri": f"local://projects/{project.project_id}/assets/{audio_asset.asset_id}", "start_sec": 0, "end_sec": 5}]},
+        {"track_type": "broll", "clips": [{"clip_id": "b", "asset_id": blue_asset.asset_id, "asset_uri": f"local://projects/{project.project_id}/assets/{blue_asset.asset_id}", "start_sec": 0, "end_sec": 5}]},
+    ]}
+    return store, project.project_id, timeline, CompositionPlan.from_timeline(timeline=timeline)
+
+
+def _keyframe_times(path: Path) -> list[float]:
+    probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-skip_frame", "nokey", "-show_entries", "frame=pts_time", "-of", "csv=p=0", str(path)], check=True, capture_output=True, text=True).stdout
+    return sorted(float(line.split(",")[0]) for line in probe.splitlines() if line.strip())
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None, reason="ffmpeg fixture required")
+def test_exact_preview_has_a_keyframe_every_second(tmp_path: Path) -> None:
+    """2026-10-09 실측: 기본 keyint 250이라 30fps 미리보기의 키프레임이 8.3초 간격이었고 탐색마다 최대 8초를 다시 풀었다."""
+    store, project_id, timeline, plan = _five_second_blue_timeline(tmp_path)
+    output = tmp_path / "preview.mp4"
+    FfmpegFinalRenderer(store=store, video_width=320, video_height=240).render_exact_preview_to_mp4(project_id=project_id, composition_plan=plan, timeline_context=timeline, output_path=output, subtitle_ass_path=None)
+    times = _keyframe_times(output)
+    assert len(times) >= 5, times
+    gaps = [later - earlier for earlier, later in zip(times, times[1:])]
+    assert max(gaps) <= 1.0 + 1 / 30, times
+    assert times[-1] >= 4.0 - 1 / 30, times  # 끝까지 이어진다
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg fixture required")
+def test_only_the_preview_gets_the_keyframe_interval_the_final_render_does_not(tmp_path: Path) -> None:
+    store, project_id, timeline, plan = _five_second_blue_timeline(tmp_path)
+    commands: list[list[str]] = []
+
+    class _Recording(FfmpegFinalRenderer):
+        def _run(self, command):  # type: ignore[no-untyped-def]
+            commands.append(list(command))
+            return super()._run(command)
+
+    renderer = _Recording(store=store, video_width=320, video_height=240)
+    renderer.render_exact_preview_to_mp4(project_id=project_id, composition_plan=plan, timeline_context=timeline, output_path=tmp_path / "preview.mp4", subtitle_ass_path=None)
+    preview_commands = list(commands)
+    commands.clear()
+    renderer.render_timeline_to_mp4(project_id=project_id, timeline=timeline, output_path=tmp_path / "final.mp4", composition_plan=plan)
+    final_commands = list(commands)
+
+    def has_interval(command: list[str]) -> bool:
+        return "-g" in command and "-keyint_min" in command
+
+    assert any(has_interval(command) for command in preview_commands)
+    assert final_commands and not any("-g" in command or "-keyint_min" in command for command in final_commands)
+    encode = next(command for command in preview_commands if has_interval(command))
+    assert encode[encode.index("-g") + 1] == "30" and encode[encode.index("-keyint_min") + 1] == "30"
+
+
+@pytest.mark.parametrize(("fps", "expected"), (("30/1", 30), ("30000/1001", 30), ("24000/1001", 24), ("60", 60), ("15/1", 15)))
+def test_keyframe_interval_is_one_second_of_frames_for_any_fps(tmp_path: Path, fps: str, expected: int) -> None:
+    assert FfmpegFinalRenderer(store=LocalProjectStore(tmp_path), video_fps=fps)._keyframe_interval_frames() == expected
