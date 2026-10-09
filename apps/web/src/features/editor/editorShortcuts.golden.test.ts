@@ -20,6 +20,15 @@ function intendedChange(c: GoldenCase, was: string): string | null {
   return null;
 }
 
+/** 계획 P2 Task 4가 **새로 더한** 캡컷 키들 -- 옛 처리기에는 없던 키라 옛 표에서는 null이었다. 이 여섯 명령 말고는 늘어나면 안 된다. */
+const ADDED_IDS = new Set(["trim-left", "trim-right", "prev-cut", "next-cut", "go-start", "go-end"]);
+function addedKey(c: GoldenCase, now: string): string | null {
+  if (ADDED_IDS.has(now)) return "새 캡컷 키";
+  // 맨 Shift+Z -> 전체 보기 (Ctrl+0은 옛 표에도 있었다).
+  if (now === "zoom-fit" && c.key.toLowerCase() === "z" && c.mods === "shift") return "새 캡컷 키";
+  return null;
+}
+
 describe("옛 동작 골든 표", () => {
   it("그물의 모든 칸이 옛 동작과 같다 (의도된 차이는 이름을 달아 허용)", () => {
     const unexplained: string[] = [];
@@ -30,13 +39,13 @@ describe("옛 동작 골든 표", () => {
       const now = editorShortcutFor(eventFor(c, makeTarget(c.target)));
       const was = expected[c.id] ?? null;
       if (now === was) continue;
-      const reason = was !== null && now === null ? intendedChange(c, was) : null;
+      const reason = was !== null && now === null ? intendedChange(c, was) : was === null && now !== null ? addedKey(c, now) : null;
       if (reason) explained[reason] = (explained[reason] ?? 0) + 1;
       else unexplained.push(`${c.id}: ${was} -> ${now}`);
     }
     expect(total).toBeGreaterThan(10000);
     expect(unexplained).toEqual([]);
     // 허용 사유 넷이 실제로 닿아야 한다(헛 허용 방지).
-    expect(Object.keys(explained).sort()).toEqual(["jsdom 글칸 가짜 허용", "꾹 누름 반복 안 함", "서랍 안 Delete", "조합 중·이미 막힘"].sort());
+    expect(Object.keys(explained).sort()).toEqual(["jsdom 글칸 가짜 허용", "꾹 누름 반복 안 함", "서랍 안 Delete", "조합 중·이미 막힘", "새 캡컷 키"].sort());
   });
 });

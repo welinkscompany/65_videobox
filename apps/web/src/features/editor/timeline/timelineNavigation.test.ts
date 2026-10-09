@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { frameToSeconds, pixelsToTime } from "./time-scale";
 import {
+  adjacentCutPoint,
   createTimelineNavigation,
   navigationKeyAction,
   projectVisibleTimelineClips,
@@ -258,5 +259,53 @@ describe("timeline navigation", () => {
       laneHeightPx: 32,
     });
     expect(rects.map((rect) => rect.clipId)).toEqual(["a"]);
+  });
+});
+
+describe("adjacentCutPoint (캡컷 위·아래 화살표: 앞/뒤 자른 자리)", () => {
+  const fps30 = { num: 30, den: 1 };
+  const points = [0, 7.5, 15, 22.5, 30];
+  it.each([
+    [8, 1, 15],
+    [8, -1, 7.5],
+    [7.5, 1, 15],   // 지금 자리는 건너뛴다
+    [7.5, -1, 0],
+    [7.51, -1, 0],  // 반 프레임(0.0167초) 안은 "지금 자리"
+    [7.49, 1, 15],
+    [7.52, -1, 7.5], // 반 프레임 밖
+    [30, 1, null],
+    [0, -1, null],
+    [0, 1, 7.5],
+    [29, 1, 30],
+  ])("playhead %s direction %s -> %s", (playhead, direction, expected) => {
+    expect(adjacentCutPoint(points, playhead, direction as 1 | -1, fps30)).toBe(expected);
+  });
+  it("빈 배열·한 점", () => {
+    expect(adjacentCutPoint([], 5, 1, fps30)).toBeNull();
+    expect(adjacentCutPoint([], 5, -1, fps30)).toBeNull();
+    expect(adjacentCutPoint([10], 5, 1, fps30)).toBe(10);
+    expect(adjacentCutPoint([10], 5, -1, fps30)).toBeNull();
+    expect(adjacentCutPoint([10], 10, 1, fps30)).toBeNull();
+    expect(adjacentCutPoint([10], 10, -1, fps30)).toBeNull();
+  });
+  it("정렬 안 된 입력과 중복도 같은 답", () => {
+    expect(adjacentCutPoint([30, 15, 0, 15, 7.5, 7.5, 22.5], 8, 1, fps30)).toBe(15);
+    expect(adjacentCutPoint([30, 15, 0, 15, 7.5, 7.5, 22.5], 8, -1, fps30)).toBe(7.5);
+  });
+  it("첫 점 앞·끝 점 뒤", () => {
+    expect(adjacentCutPoint([5, 10], 1, 1, fps30)).toBe(5);
+    expect(adjacentCutPoint([5, 10], 1, -1, fps30)).toBeNull();
+    expect(adjacentCutPoint([5, 10], 20, -1, fps30)).toBe(10);
+    expect(adjacentCutPoint([5, 10], 20, 1, fps30)).toBeNull();
+  });
+  it("유한하지 않은 값은 무시한다", () => {
+    expect(adjacentCutPoint([Number.NaN, 5, Infinity], 1, 1, fps30)).toBe(5);
+    expect(adjacentCutPoint([5], Number.NaN, 1, fps30)).toBeNull();
+  });
+  it("29.97fps에서도 반 프레임 폭이 fps를 따른다", () => {
+    const ntsc = { num: 30_000, den: 1_001 };
+    const half = 0.5 * 1_001 / 30_000;
+    expect(adjacentCutPoint([5, 9], 5 + half * 0.9, 1, ntsc)).toBe(9);
+    expect(adjacentCutPoint([5, 9], 5 + half * 1.1, -1, ntsc)).toBe(5);
   });
 });

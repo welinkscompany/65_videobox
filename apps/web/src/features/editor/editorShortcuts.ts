@@ -5,7 +5,8 @@
 export type EditorShortcutId =
   | "toggle-play" | "pause" | "faster" | "slower" | "frame-back" | "frame-forward"
   | "split" | "delete" | "undo" | "redo"
-  | "zoom-in" | "zoom-out" | "zoom-fit";
+  | "zoom-in" | "zoom-out" | "zoom-fit"
+  | "trim-left" | "trim-right" | "prev-cut" | "next-cut" | "go-start" | "go-end";
 
 export type EditorKeyEvent = Readonly<{
   key: string;
@@ -46,8 +47,19 @@ export const EDITOR_SHORTCUTS: readonly EditorShortcut[] = [
   { id: "redo", owner: "workbench", group: "되돌리기", keys: "Ctrl + Shift + Z", label: "다시 하기", capcut: "same", samples: [{ key: "Z", ctrlKey: true, shiftKey: true }, { key: "y", ctrlKey: true }] },
   { id: "zoom-in", owner: "timeline", group: "타임라인 보기", keys: "Ctrl + =", label: "타임라인 늘리기", capcut: "same", samples: [{ key: "=", ctrlKey: true }, { key: "+", ctrlKey: true, shiftKey: true }] },
   { id: "zoom-out", owner: "timeline", group: "타임라인 보기", keys: "Ctrl + -", label: "타임라인 줄이기", capcut: "same", samples: [{ key: "-", ctrlKey: true }, { key: "_", metaKey: true }] },
-  { id: "zoom-fit", owner: "timeline", group: "타임라인 보기", keys: "Ctrl + 0", label: "타임라인 전체 보기", capcut: "same", samples: [{ key: "0", ctrlKey: true }] },
+  { id: "zoom-fit", owner: "timeline", group: "타임라인 보기", keys: "Shift + Z (또는 Ctrl + 0)", label: "영상 전체 보기", capcut: "same", samples: [{ key: "0", ctrlKey: true }, { key: "Z", shiftKey: true }] },
+  { id: "trim-left", owner: "timeline", group: "자르기", keys: "Q 키", label: "재생 위치 왼쪽 잘라 내기", capcut: "same", note: "빈자리는 그대로 둬요", samples: [{ key: "q" }, { key: "Q" }] },
+  { id: "trim-right", owner: "timeline", group: "자르기", keys: "W 키", label: "재생 위치 오른쪽 잘라 내기", capcut: "same", note: "빈자리는 그대로 둬요", samples: [{ key: "w" }] },
+  { id: "prev-cut", owner: "timeline", group: "이동", keys: "↑", label: "앞 자른 자리로", capcut: "same", samples: [{ key: "ArrowUp" }] },
+  { id: "next-cut", owner: "timeline", group: "이동", keys: "↓", label: "뒤 자른 자리로", capcut: "same", samples: [{ key: "ArrowDown" }] },
+  { id: "go-start", owner: "timeline", group: "이동", keys: "Home 키", label: "처음으로", capcut: "same", samples: [{ key: "Home" }] },
+  { id: "go-end", owner: "timeline", group: "이동", keys: "End 키", label: "끝으로", capcut: "same", samples: [{ key: "End" }] },
 ];
+
+/** 이 명령을 누가 실행하나(표의 owner 칸). */
+export function ownerOf(id: EditorShortcutId): ShortcutOwner {
+  return (EDITOR_SHORTCUTS.find((row) => row.id === id) as EditorShortcut).owner;
+}
 
 const TYPING = "input, textarea, select, [contenteditable='true']";
 const SELF_SPACE = "button, [role='button'], [role='menuitem'], [role='menuitemradio'], [role='option'], [role='slider'], [role='checkbox'], [role='switch'], [role='tab'], [role='radio'], summary, a[href]";
@@ -84,6 +96,16 @@ export function editorShortcutFor(event: EditorKeyEvent): EditorShortcutId | nul
 
   if (event.key === "Delete" || event.key === "Backspace") return "delete"; // 5
 
+  if (event.key === "ArrowUp" || event.key === "ArrowDown") { // 5-a: 앞/뒤 자른 자리 (타임라인 면 안에서도 받는다 -- 거기서는 위아래를 쓰지 않는다)
+    if (event.shiftKey || target?.closest(SELF_ARROWS)) return null;
+    return event.key === "ArrowUp" ? "prev-cut" : "next-cut";
+  }
+
+  if (event.key === "Home" || event.key === "End") { // 5-b: 타임라인 면 안은 타임라인이 이미 받는다(둘이 받으면 두 번 간다)
+    if (event.shiftKey || target?.closest("[data-timeline-surface='true']") || target?.closest(SELF_ARROWS)) return null;
+    return event.key === "Home" ? "go-start" : "go-end";
+  }
+
   if (event.key === "ArrowLeft" || event.key === "ArrowRight") { // 6
     // Shift+화살표는 이번 범위 밖. 타임라인 면 안은 타임라인이 이미 받는다(둘이 받으면 두 프레임 간다).
     if (event.shiftKey) return null;
@@ -101,6 +123,10 @@ export function editorShortcutFor(event: EditorKeyEvent): EditorShortcutId | nul
   if (letter === "k") return "pause";
   if (letter === "l") return "faster";
   if (letter === "j") return "slower";
+  // 캡컷 Q·W(재생 위치 왼쪽·오른쪽 잘라 내기)와 Shift+Z(전체 보기). Shift+Q·Shift+W와 맨 z는 아니다.
+  if (letter === "q") return event.shiftKey ? null : "trim-left";
+  if (letter === "w") return event.shiftKey ? null : "trim-right";
+  if (letter === "z") return event.shiftKey ? "zoom-fit" : null;
   return null;
 }
 

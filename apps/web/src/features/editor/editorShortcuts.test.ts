@@ -1,7 +1,9 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { EDITOR_SHORTCUTS, editorShortcutFor, isSwallowedRepeat, type EditorKeyEvent, type EditorShortcutId } from "./editorShortcuts";
 
-const ALL_IDS: EditorShortcutId[] = ["toggle-play", "pause", "faster", "slower", "frame-back", "frame-forward", "split", "delete", "undo", "redo", "zoom-in", "zoom-out", "zoom-fit"];
+const ALL_IDS: EditorShortcutId[] = ["toggle-play", "pause", "faster", "slower", "frame-back", "frame-forward", "split", "delete", "undo", "redo", "zoom-in", "zoom-out", "zoom-fit", "trim-left", "trim-right", "prev-cut", "next-cut", "go-start", "go-end"];
 
 function el(html: string): HTMLElement {
   const host = document.createElement("div");
@@ -64,6 +66,49 @@ describe("문지기 규칙", () => {
     ...["m", "n", "p", "v", "a", "[", "]"].map((k) => [`캡컷에만 있는 ${k}`, () => ev({ key: k }), null] as const),
     ...["c", "v", "d", "r", "g"].map((k) => [`Ctrl+${k}`, () => ev({ key: k, ctrlKey: true }), null] as const),
     ["Alt+k", () => ev({ key: "k", altKey: true }), null],
+    ["Q 키는 왼쪽 자르기", () => ev({ key: "q" }), "trim-left"],
+    ["W 키는 오른쪽 자르기", () => ev({ key: "w" }), "trim-right"],
+    ["Shift+Q는 아니다", () => ev({ key: "Q", shiftKey: true }), null],
+    ["Shift+W는 아니다", () => ev({ key: "W", shiftKey: true }), null],
+    ["Ctrl+Q·Ctrl+W는 브라우저 몫", () => ev({ key: "q", ctrlKey: true }), null],
+    ["Ctrl+W(탭 닫기)", () => ev({ key: "w", ctrlKey: true }), null],
+    ["Alt+Q", () => ev({ key: "q", altKey: true }), null],
+    ["글칸 textarea 안의 q는 글자다", () => ev({ key: "q", target: el("<textarea id=t></textarea>") }), null],
+    ["글칸 input 안의 w는 글자다", () => ev({ key: "w", target: el("<input id=t>") }), null],
+    ["contenteditable 안의 q", () => ev({ key: "q", target: el("<div contenteditable='true'><b id=t></b></div>") }), null],
+    ["서랍(aria-modal) 안의 q", () => ev({ key: "q", target: modal() }), null],
+    ["꾹 누른 q는 한 번만", () => ev({ key: "q", repeat: true }), null],
+    ["한글 조합 중 q", () => ev({ key: "q", isComposing: true }), null],
+    ["이미 막힌 w", () => ev({ key: "w", defaultPrevented: true }), null],
+    ["단추 위의 q도 받는다(글자는 단추 몫이 아니다)", () => ev({ key: "q", target: el("<button id=t></button>") }), "trim-left"],
+    ["타임라인 면 안의 w도 받는다", () => ev({ key: "w", target: el("<div data-timeline-surface='true'><button id=t></button></div>") }), "trim-right"],
+    ["ArrowUp은 앞 자른 자리", () => ev({ key: "ArrowUp" }), "prev-cut"],
+    ["ArrowDown은 뒤 자른 자리", () => ev({ key: "ArrowDown" }), "next-cut"],
+    ["타임라인 면 안의 ArrowUp도 받는다", () => ev({ key: "ArrowUp", target: el("<div data-timeline-surface='true'><i id=t></i></div>") }), "prev-cut"],
+    ["높이 손잡이(separator) 위 ArrowUp은 손잡이 몫", () => ev({ key: "ArrowUp", target: el("<div role='separator' id=t></div>") }), null],
+    ["슬라이더 위 ArrowDown", () => ev({ key: "ArrowDown", target: el("<div role='slider' id=t></div>") }), null],
+    ["목록 항목 위 ArrowDown", () => ev({ key: "ArrowDown", target: el("<div role='option' id=t></div>") }), null],
+    ["Shift+ArrowUp", () => ev({ key: "ArrowUp", shiftKey: true }), null],
+    ["Ctrl+ArrowDown", () => ev({ key: "ArrowDown", ctrlKey: true }), null],
+    ["글칸 안의 ArrowUp", () => ev({ key: "ArrowUp", target: el("<textarea id=t></textarea>") }), null],
+    ["꾹 누른 ArrowDown", () => ev({ key: "ArrowDown", repeat: true }), null],
+    ["서랍 안의 ArrowUp", () => ev({ key: "ArrowUp", target: modal() }), null],
+    ["본문의 Home은 처음으로", () => ev({ key: "Home" }), "go-start"],
+    ["본문의 End는 끝으로", () => ev({ key: "End" }), "go-end"],
+    ["타임라인 면 안 Home은 타임라인이 이미 받는다", () => ev({ key: "Home", target: el("<div data-timeline-surface='true'><i id=t></i></div>") }), null],
+    ["타임라인 면 안 End", () => ev({ key: "End", target: el("<div data-timeline-surface='true'><button id=t></button></div>") }), null],
+    ["슬라이더 위 Home은 슬라이더 몫", () => ev({ key: "Home", target: el("<div role='slider' id=t></div>") }), null],
+    ["높이 손잡이 위 End", () => ev({ key: "End", target: el("<div role='separator' id=t></div>") }), null],
+    ["글칸 안의 Home", () => ev({ key: "Home", target: el("<input id=t>") }), null],
+    ["서랍 안의 End", () => ev({ key: "End", target: modal() }), null],
+    ["Shift+Home", () => ev({ key: "Home", shiftKey: true }), null],
+    ["Ctrl+End", () => ev({ key: "End", ctrlKey: true }), null],
+    ["꾹 누른 Home", () => ev({ key: "Home", repeat: true }), null],
+    ["Shift+Z는 영상 전체 보기", () => ev({ key: "Z", shiftKey: true }), "zoom-fit"],
+    ["맨 z는 아니다", () => ev({ key: "z" }), null],
+    ["글칸 안의 Shift+Z", () => ev({ key: "Z", shiftKey: true, target: el("<textarea id=t></textarea>") }), null],
+    ["Ctrl+Shift+Z는 여전히 다시 하기", () => ev({ key: "Z", ctrlKey: true, shiftKey: true }), "redo"],
+    ["Alt+Shift+Z", () => ev({ key: "Z", shiftKey: true, altKey: true }), null],
   ] as const)("%s", (_name, make, expected) => {
     expect(editorShortcutFor(make())).toBe(expected);
   });
@@ -94,5 +139,23 @@ describe("진짜 KeyboardEvent", () => {
     Object.defineProperty(real, "target", { value: document.body });
     expect(isSwallowedRepeat(real)).toBe(true);
     expect(editorShortcutFor(new KeyboardEvent("keydown", { key: "j" }))).toBe("slower");
+  });
+});
+
+describe("진짜 Chromium 덮개", () => {
+  // 표에 줄을 더하면서 진짜 브라우저 시험을 안 더하면 여기서 빨개진다. 시험 머리의 `// covers: <id>` 주석이 열쇠다.
+  const specs = ["capcut-shortcuts.spec.mjs", "playback-smoothness.spec.mjs"];
+  const covered = new Set<string>();
+  for (const name of specs) {
+    const source = readFileSync(resolve(import.meta.dirname, "../../../e2e-real", name), "utf-8");
+    for (const match of source.matchAll(/\/\/ covers: ([a-z-]+)/g)) covered.add(match[1]);
+  }
+  it("모든 단축키 줄이 진짜 Chromium 시험을 가진다", () => {
+    const missing = EDITOR_SHORTCUTS.map((row) => row.id).filter((id) => !covered.has(id));
+    expect(missing).toEqual([]);
+  });
+  it("덮개 주석이 표에 없는 id를 가리키지 않는다(오타·지운 줄 방지)", () => {
+    const known = new Set<string>(EDITOR_SHORTCUTS.map((row) => row.id));
+    expect([...covered].filter((id) => !known.has(id))).toEqual([]);
   });
 });

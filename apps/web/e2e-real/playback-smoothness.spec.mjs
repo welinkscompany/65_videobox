@@ -32,6 +32,7 @@ test("1배로 틀면 미리보기가 스스로 되감지 않고 실제 속도로
 });
 
 // 계획 P Task 3 (원인 3·4): 스페이스는 늘 재생/정지이고, 미리보기 밖을 눌러도 0초로 튀지 않는다.
+// covers: toggle-play
 test("스페이스는 영상 그림을 누른 뒤에도·타임라인을 누른 뒤에도 재생/정지이고, 미리보기 밖을 눌러도 위치가 그대로다", async ({ page }) => {
   test.setTimeout(240_000);
   await installPlaybackProbe(page);
@@ -93,6 +94,10 @@ test("스페이스는 영상 그림을 누른 뒤에도·타임라인을 누른 
 });
 
 // 계획 P Task 4: 재생 빠르기 0.25~2배. 보는 속도만 바뀐다(완성 영상은 그대로).
+// covers: pause
+// covers: slower
+// covers: frame-back
+// covers: frame-forward
 test("재생 빠르기 0.5배·2배가 실제로 그만큼 흐르고, 다시 열어도 기억한다", async ({ page }) => {
   test.setTimeout(420_000);
   await installPlaybackProbe(page);

@@ -2117,3 +2117,189 @@ describe("짧은 영상도 적어도 20초 창으로 연다 (P2 2026-10-09 대�
     expect(Number(screen.getByTestId("timeline-playhead").style.left.replace("px", ""))).toBeCloseTo(before, 3);
   });
 });
+
+describe("캡컷 키: Q·W·위아래·Home·End·Shift+Z (계획 P2 Task 4)", () => {
+  const placedView = (): EditorViewModel => ({
+    ...twoNarrationView,
+    tracks: twoNarrationView.tracks.map((track) => track.role === "broll"
+      ? { ...track, clips: track.clips.map((clip) => ({ ...clip, placementId: "broll:b-1" })) }
+      : track),
+  });
+  const playhead = () => screen.getByLabelText("재생 위치").getAttribute("data-seconds");
+
+  it("Q는 고른 장면의 시작을 재생 위치(프레임 반올림)로, W는 끝을 재생 위치로 자른다", () => {
+    const onTrimNarration = vi.fn();
+    render(<TimelineDock view={twoNarrationView} viewportWidthPx={1000} selectedSegmentId="segment-2" playbackSec={1.51} onTrimNarration={onTrimNarration} />);
+    fireEvent.keyDown(window, { key: "q" });
+    expect(onTrimNarration).toHaveBeenCalledTimes(1);
+    expect(onTrimNarration).toHaveBeenLastCalledWith({ segmentId: "segment-2", startSec: 1.52, endSec: 2 });
+    fireEvent.keyDown(window, { key: "w" });
+    expect(onTrimNarration).toHaveBeenCalledTimes(2);
+    expect(onTrimNarration).toHaveBeenLastCalledWith({ segmentId: "segment-2", startSec: 1, endSec: 1.52 });
+  });
+
+  it("재생 위치가 장면 시작에서 반 프레임 안이면 자르지 않고 이유를 한 줄로 알린다", () => {
+    const onTrimNarration = vi.fn();
+    render(<TimelineDock view={twoNarrationView} viewportWidthPx={1000} selectedSegmentId="segment-2" playbackSec={1.01} onTrimNarration={onTrimNarration} />);
+    fireEvent.keyDown(window, { key: "q" });
+    expect(onTrimNarration).not.toHaveBeenCalled();
+    expect(screen.getByRole("status", { name: "자르기 안내" })).toHaveTextContent("재생 위치를 고른 장면 안으로 옮겨 주세요.");
+  });
+
+  it("재생 위치가 장면 끝에서 반 프레임 안이어도, 아예 밖이어도 자르지 않는다", () => {
+    const onTrimNarration = vi.fn();
+    const { rerender } = render(<TimelineDock view={twoNarrationView} viewportWidthPx={1000} selectedSegmentId="segment-2" playbackSec={1.99} onTrimNarration={onTrimNarration} />);
+    fireEvent.keyDown(window, { key: "w" });
+    expect(onTrimNarration).not.toHaveBeenCalled();
+    rerender(<TimelineDock view={twoNarrationView} viewportWidthPx={1000} selectedSegmentId="segment-2" playbackSec={7} onTrimNarration={onTrimNarration} />);
+    fireEvent.keyDown(window, { key: "q" });
+    expect(onTrimNarration).not.toHaveBeenCalled();
+    expect(screen.getByRole("status", { name: "자르기 안내" })).toHaveTextContent("재생 위치를 고른 장면 안으로 옮겨 주세요.");
+  });
+
+  it("고른 것이 없으면 자르지 않고 먼저 고르라고 알린다", () => {
+    const onTrimNarration = vi.fn();
+    render(<TimelineDock view={twoNarrationView} viewportWidthPx={1000} playbackSec={1.5} onTrimNarration={onTrimNarration} />);
+    fireEvent.keyDown(window, { key: "w" });
+    expect(onTrimNarration).not.toHaveBeenCalled();
+    expect(screen.getByRole("status", { name: "자르기 안내" })).toHaveTextContent("장면을 먼저 골라 주세요.");
+  });
+
+  it("알림은 4초 뒤 사라진다", () => {
+    vi.useFakeTimers();
+    try {
+      render(<TimelineDock view={twoNarrationView} viewportWidthPx={1000} playbackSec={1.5} />);
+      fireEvent.keyDown(window, { key: "q" });
+      expect(screen.getByRole("status", { name: "자르기 안내" })).toBeInTheDocument();
+      act(() => { vi.advanceTimersByTime(4100); });
+      expect(screen.queryByRole("status", { name: "자르기 안내" })).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("내레이션 트랙이 잠겼으면 이유를 알리고, 저장 중이면 자르지 않는다", () => {
+    const onTrimNarration = vi.fn();
+    const { rerender } = render(<TimelineDock view={twoNarrationView} viewportWidthPx={1000} selectedSegmentId="segment-2" playbackSec={1.5} onTrimNarration={onTrimNarration} />);
+    fireEvent.click(screen.getByRole("button", { name: "내레이션 트랙 잠금" }));
+    fireEvent.keyDown(window, { key: "q" });
+    expect(onTrimNarration).not.toHaveBeenCalled();
+    expect(screen.getByRole("status", { name: "자르기 안내" })).toHaveTextContent("잠긴 트랙이에요.");
+    fireEvent.click(screen.getByRole("button", { name: "내레이션 트랙 잠금" }));
+    rerender(<TimelineDock view={twoNarrationView} viewportWidthPx={1000} selectedSegmentId="segment-2" playbackSec={1.5} isSaving onTrimNarration={onTrimNarration} />);
+    fireEvent.keyDown(window, { key: "w" });
+    expect(onTrimNarration).not.toHaveBeenCalled();
+  });
+
+  it("글칸·서랍 안에서는 Q·W가 아무것도 자르지 않는다", () => {
+    const onTrimNarration = vi.fn();
+    render(<TimelineDock view={twoNarrationView} viewportWidthPx={1000} selectedSegmentId="segment-2" playbackSec={1.5} onTrimNarration={onTrimNarration} />);
+    const input = document.createElement("textarea");
+    document.body.append(input);
+    fireEvent.keyDown(input, { key: "q" });
+    const modal = document.createElement("div");
+    modal.setAttribute("aria-modal", "true");
+    const inner = document.createElement("div");
+    modal.append(inner);
+    document.body.append(modal);
+    fireEvent.keyDown(inner, { key: "w" });
+    fireEvent.keyDown(window, { key: "q", repeat: true });
+    fireEvent.keyDown(window, { key: "Q", shiftKey: true });
+    expect(onTrimNarration).not.toHaveBeenCalled();
+    input.remove(); modal.remove();
+  });
+
+  it("배치(영상) 하나를 고르고 Q·W를 누르면 그 배치의 시작·끝이 재생 위치로 간다", () => {
+    const onUpdatePlacements = vi.fn();
+    const onTrimNarration = vi.fn();
+    render(<TimelineDock view={placedView()} viewportWidthPx={1000} playbackSec={6} onUpdatePlacements={onUpdatePlacements} onTrimNarration={onTrimNarration} />);
+    selectTimelineClip("broll:b-1");
+    fireEvent.keyDown(window, { key: "q" });
+    expect(onUpdatePlacements).toHaveBeenCalledWith({ changes: [{ placementId: "broll:b-1", kind: "broll", startSec: 6, endSec: 9 }] });
+    fireEvent.keyDown(window, { key: "w" });
+    expect(onUpdatePlacements).toHaveBeenLastCalledWith({ changes: [{ placementId: "broll:b-1", kind: "broll", startSec: 5, endSec: 6 }] });
+    expect(onTrimNarration).not.toHaveBeenCalled();
+  });
+
+  it("배치 밖이거나 영상 트랙이 잠겼으면 자르지 않는다", () => {
+    const onUpdatePlacements = vi.fn();
+    const { rerender } = render(<TimelineDock view={placedView()} viewportWidthPx={1000} playbackSec={12} onUpdatePlacements={onUpdatePlacements} />);
+    selectTimelineClip("broll:b-1");
+    fireEvent.keyDown(window, { key: "q" });
+    expect(onUpdatePlacements).not.toHaveBeenCalled();
+    expect(screen.getByRole("status", { name: "자르기 안내" })).toHaveTextContent("재생 위치를 고른 장면 안으로 옮겨 주세요.");
+    rerender(<TimelineDock view={placedView()} viewportWidthPx={1000} playbackSec={6} onUpdatePlacements={onUpdatePlacements} />);
+    fireEvent.click(screen.getByRole("button", { name: "영상 트랙 잠금" }));
+    fireEvent.keyDown(window, { key: "w" });
+    expect(onUpdatePlacements).not.toHaveBeenCalled();
+    expect(screen.getByRole("status", { name: "자르기 안내" })).toHaveTextContent("잠긴 트랙이에요.");
+  });
+
+  it("ArrowDown·ArrowUp은 다음·앞 자른 자리(클립·빈 구간·캡션 경계)로 재생 위치만 옮긴다", () => {
+    const onTrimNarration = vi.fn();
+    const onUpdatePlacements = vi.fn();
+    render(<TimelineDock view={twoNarrationView} viewportWidthPx={1000} playbackSec={1.5} onTrimNarration={onTrimNarration} onUpdatePlacements={onUpdatePlacements} />);
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    expect(playhead()).toBe("2");
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    expect(playhead()).toBe("3");   // 빈 구간 시작
+    fireEvent.keyDown(window, { key: "ArrowUp" });
+    expect(playhead()).toBe("2");
+    fireEvent.keyDown(window, { key: "ArrowUp" });
+    expect(playhead()).toBe("1");
+    fireEvent.keyDown(window, { key: "ArrowUp" });
+    expect(playhead()).toBe("0");
+    fireEvent.keyDown(window, { key: "ArrowUp" });
+    expect(playhead()).toBe("0");   // 더 앞이 없으면 그대로
+    expect(onTrimNarration).not.toHaveBeenCalled();
+    expect(onUpdatePlacements).not.toHaveBeenCalled();
+  });
+
+  it("마지막 자른 자리 뒤에서는 영상 끝으로 간다", () => {
+    render(<TimelineDock view={twoNarrationView} viewportWidthPx={1000} playbackSec={19} />);
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    expect(playhead()).toBe("20");
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    expect(playhead()).toBe("20");
+  });
+
+  it("본문에서 End는 영상 끝, Home은 처음으로 간다. 타임라인 면 안에서도 한 번만 간다", () => {
+    render(<TimelineDock view={twoNarrationView} viewportWidthPx={1000} playbackSec={1.5} />);
+    fireEvent.keyDown(window, { key: "End" });
+    expect(playhead()).toBe("20");
+    fireEvent.keyDown(window, { key: "Home" });
+    expect(playhead()).toBe("0");
+    const timeline = screen.getByRole("region", { name: "타임라인" });
+    fireEvent.keyDown(timeline, { key: "End" });
+    expect(playhead()).toBe("20");
+  });
+
+  it("Shift+Z는 Ctrl+0과 같은 맞춤 배율이다", () => {
+    render(<TimelineDock view={twoNarrationView} viewportWidthPx={1000} playbackSec={1.5} />);
+    fireEvent.keyDown(window, { key: "=", ctrlKey: true });
+    const zoomed = timelinePixelsPerSecond();
+    fireEvent.keyDown(window, { key: "0", ctrlKey: true });
+    const fit = timelinePixelsPerSecond();
+    expect(fit).not.toBeCloseTo(zoomed, 3);
+    fireEvent.keyDown(window, { key: "=", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "Z", shiftKey: true });
+    expect(timelinePixelsPerSecond()).toBeCloseTo(fit, 6);
+    fireEvent.keyDown(window, { key: "=", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "z" });
+    expect(timelinePixelsPerSecond()).not.toBeCloseTo(fit, 3);
+  });
+
+  it("소유자가 준 재생 위치는 도로 올려보내지 않고, 사람이 옮긴 것만 올려보낸다 (키 연타에서 낡은 값이 새 값을 덮던 결함)", () => {
+    const onPlaybackSeek = vi.fn();
+    const { rerender } = render(<TimelineDock view={twoNarrationView} viewportWidthPx={1000} playbackSec={1} onPlaybackSeek={onPlaybackSeek} />);
+    onPlaybackSeek.mockClear();
+    rerender(<TimelineDock view={twoNarrationView} viewportWidthPx={1000} playbackSec={1.04} onPlaybackSeek={onPlaybackSeek} />);
+    expect(playhead()).toBe("1.04");               // 받아들였다
+    expect(onPlaybackSeek).not.toHaveBeenCalled(); // 되돌려 올려보내지 않는다
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    expect(onPlaybackSeek).toHaveBeenLastCalledWith(2); // 사람이 옮긴 것은 올려보낸다
+  });
+
+  it("전체 보기 단추 설명에 새 키가 적혀 있다", () => {
+    render(<TimelineDock view={twoNarrationView} viewportWidthPx={1000} />);
+    expect(screen.getByRole("button", { name: "타임라인 전체 보기" })).toHaveAttribute("title", "영상 전체가 한 화면에 들어오게 (Shift와 Z 키, Ctrl과 0 키)");
+  });
+});

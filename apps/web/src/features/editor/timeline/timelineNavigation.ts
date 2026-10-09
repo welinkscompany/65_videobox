@@ -281,6 +281,20 @@ export function navigationKeyAction(
   }
 }
 
+/** 재생 위치 바로 앞/뒤의 자른 자리. 반 프레임 안은 "지금 자리"로 보고 건너뛴다. 없으면 null. */
+export function adjacentCutPoint(times: readonly number[], playheadSec: number, direction: -1 | 1, fps: RationalFps): number | null {
+  if (!Number.isFinite(playheadSec) || !fps || !(fps.num > 0) || !(fps.den > 0)) return null;
+  const halfFrameSec = (0.5 * fps.den) / fps.num;
+  let best: number | null = null;
+  for (const time of times) {
+    if (!Number.isFinite(time)) continue;
+    if (direction === 1) {
+      if (time > playheadSec + halfFrameSec && (best === null || time < best)) best = time;
+    } else if (time < playheadSec - halfFrameSec && (best === null || time > best)) best = time;
+  }
+  return best;
+}
+
 export function projectVisibleTimelineClips(input: TimelineProjectionInput): ClipRect[] {
   if (!input) {
     throw new RangeError("Timeline projection input is required");

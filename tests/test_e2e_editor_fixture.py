@@ -70,3 +70,15 @@ def test_shortcuts_fixture_is_a_separate_thirty_second_project(tmp_path: Path) -
     assert [(s["segment_id"], s["start_sec"], s["end_sec"]) for s in session["segments"]] == list(PLAYBACK_SCENES)
     assert SHORTCUTS_PROJECT_NAME == "단축키 시험"
     assert store.get_project(project_id=ids["shortcuts"]["project_id"])["name"] == SHORTCUTS_PROJECT_NAME
+
+
+def test_shortcuts_fixture_carries_one_broll_placement_and_playback_stays_narration_only(tmp_path: Path) -> None:
+    """Q·W가 영상 배치에도 닿는지 재려고 shortcuts에만 영상 한 칸(장면 3)을 얹는다. 재생 측정 프로젝트는 그대로다."""
+    from scripts.e2e_editor_fixture import SHORTCUTS_BROLL_SCENE
+    ids = seed_editor_fixtures(projects_root=tmp_path / "projects", media_dir=tmp_path / "media")
+    store = LocalProjectStore(tmp_path / "projects")
+    shortcuts = store.get_editing_session(project_id=ids["shortcuts"]["project_id"], session_id=ids["shortcuts"]["session_id"])
+    with_broll = [s["segment_id"] for s in shortcuts["segments"] if s.get("broll_override")]
+    assert with_broll == [SHORTCUTS_BROLL_SCENE] == ["scene-3"]
+    playback = store.get_editing_session(project_id=ids["playback"]["project_id"], session_id=ids["playback"]["session_id"])
+    assert not [s for s in playback["segments"] if s.get("broll_override")]

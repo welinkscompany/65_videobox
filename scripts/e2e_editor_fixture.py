@@ -242,7 +242,13 @@ def _seed_no_narration(store: LocalProjectStore, media: dict[str, Any]) -> dict[
     return {"project_id": project.project_id, "session_id": session["session_id"], "timeline_id": timeline["timeline_id"]}
 
 
-def _seed_playback(store: LocalProjectStore, media: dict[str, Any], *, name: str = PLAYBACK_PROJECT_NAME) -> dict[str, str]:
+#: 캡컷 키 시험(Q·W)이 영상 배치에도 닿는지 재려고 `shortcuts` 프로젝트에만 영상 한 칸을 얹는 장면(15~22.5초).
+SHORTCUTS_BROLL_SCENE = "scene-3"
+
+
+def _seed_playback(
+    store: LocalProjectStore, media: dict[str, Any], *, name: str = PLAYBACK_PROJECT_NAME, with_broll: bool = False
+) -> dict[str, str]:
     project = store.bootstrap_project(name=name)
     narration = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=media["narration_30"])
     clips = [
@@ -252,10 +258,18 @@ def _seed_playback(store: LocalProjectStore, media: dict[str, Any], *, name: str
     timeline = store.save_timeline_run(
         project_id=project.project_id, output_mode="landscape", timeline_payload=_timeline_payload(clips)
     )
+    broll = (
+        store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=media["brolls"][2])
+        if with_broll else None
+    )
     segments = [
         {
             "segment_id": sid, "start_sec": start, "end_sec": end, "caption_text": f"재생 시험 {i}",
             "cut_action": "keep", "review_required": False, "visual_overlays": [],
+            **(
+                {"broll_override": {"asset_id": broll.asset_id, "asset_uri": broll.storage_uri, "media_controls": {}}}
+                if broll is not None and sid == SHORTCUTS_BROLL_SCENE else {}
+            ),
         }
         for i, (sid, start, end) in enumerate(PLAYBACK_SCENES, start=1)
     ]
@@ -275,5 +289,5 @@ def seed_editor_fixtures(*, projects_root: Path, media_dir: Path) -> dict[str, d
         "duplicated_overlays": _seed_duplicated(store, media),
         "no_narration": _seed_no_narration(store, media),
         "playback": _seed_playback(store, media),
-        "shortcuts": _seed_playback(store, media, name=SHORTCUTS_PROJECT_NAME),
+        "shortcuts": _seed_playback(store, media, name=SHORTCUTS_PROJECT_NAME, with_broll=True),
     }

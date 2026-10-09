@@ -704,3 +704,5 @@
   /* 클립 위, 재생 머리(3)·가장자리 손잡이(4) 아래. */
   z-index: 2;
 }
+/* Q·W를 눌렀는데 못 한 이유 한 줄(4초). 머리의 다른 안내보다 눈에 띄게만 한다. */
+.vb-editor-workbench__timeline-head p[role="status"] { color: var(--foreground); }

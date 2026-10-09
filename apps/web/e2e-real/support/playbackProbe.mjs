@@ -36,7 +36,7 @@ export async function withLongPreview(page, mp4Path = LONG_PREVIEW_MP4) {
     body.exact_preview = {
       status: "current", url: "/__e2e/long-preview.mp4", source_session_id: body.session_id,
       source_session_revision: body.session_revision, generation_id: "e2e", timeline_start_sec: 0,
-      timeline_end_sec: body.output.duration_sec, artifact_revision: 1,
+      timeline_end_sec: body.output.duration_sec, artifact_revision: body.session_revision,
     };
     await route.fulfill({ response, json: body });
   });

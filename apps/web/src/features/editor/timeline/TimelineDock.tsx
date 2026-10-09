@@ -14,6 +14,7 @@ import { TIMELINE_LANES, type ClipRect, type TimelineLane } from "./timeline-geo
 import { deriveNarrationTrim, reorderNarrationLayout, type NarrationSegment, type NarrationReorderLayout } from "./narrationMutation";
 import { derivePlacementMove, derivePlacementTrim, type TimelinePlacement, type TimelinePlacementKind } from "./placementMutation";
 import {
+  adjacentCutPoint,
   createTimelineNavigation,
   navigationKeyAction,
   projectVisibleTimelineClips,
@@ -23,7 +24,8 @@ import {
 } from "./timelineNavigation";
 import type { PlaybackClock, PlaybackClockReading } from "../preview/playbackClock";
 import { fitPixelsPerSecond, initialPixelsPerSecond, pixelsPerSecondBounds } from "./timelineZoomScale";
-import { timelineZoomShortcutFor, type TimelineZoomCommand } from "./timelineZoomShortcuts";
+import { type TimelineZoomCommand } from "./timelineZoomShortcuts";
+import { editorShortcutFor, ownerOf, type EditorShortcutId } from "../editorShortcuts";
 import { timelineWheelGestureFor } from "./timelineWheelGesture";
 import { isTypingTarget } from "../preview/playbackShortcuts";
 
@@ -311,6 +313,15 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   // 지금 어느 장면 위에 떠 있는지. 받을 자리를 보여 주지 않으면 어디에 놓이는지 모른다.
   const [dragOverClipId, setDragOverClipId] = useState<string | null>(null);
   const [selectedPlacementIds, setSelectedPlacementIds] = useState<readonly string[]>([]);
+  // 키로 눌렀는데 못 한 일의 이유를 타임라인 머리에 한 줄로, 4초만 보여 준다(Q·W).
+  const [keyNotice, setKeyNotice] = useState<string | null>(null);
+  const keyNoticeTimerRef = useRef<number | undefined>(undefined);
+  const showKeyNotice = (text: string) => {
+    window.clearTimeout(keyNoticeTimerRef.current);
+    setKeyNotice(text);
+    keyNoticeTimerRef.current = window.setTimeout(() => setKeyNotice(null), 4000);
+  };
+  useEffect(() => () => window.clearTimeout(keyNoticeTimerRef.current), []);
   // **트랙 잠금**(owner 지시 2026-08-22, `capcut-observed` 기록 §2: "트랙마다
   // 왼쪽에 잠금·눈·음소거"). 우리는 **음소거만 만들지 않는다** -- 미리보기가
   // 서버가 미리 렌더링한 파일 하나라 트랙을 눌러도 그 순간 아무것도 안 바뀌고,
@@ -391,8 +402,15 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   const readoutRef = useRef<HTMLSpanElement | null>(null);
   const userScrolledRef = useRef(false);
   const followIssuedForStartRef = useRef<number | null>(null);
+  // 소유자가 준 값을 우리가 받아들여 생긴 변화인지. 그것을 도로 올려보내면 안 된다: 키를 거의 동시에 여러 번
+  // 누르면(2026-10-09 실측: ArrowRight 30번을 0ms 간격으로) 받아들인 낡은 값이 그새 소유자가 올려받은 더 새 값을
+  // 덮어써서 미리보기가 되감겼고, 그 뒤로 초당 230번씩 두 값 사이를 오갔다.
+  const adoptedFromOwnerRef = useRef<number | null>(null);
   useEffect(() => {
+    const adopted = adoptedFromOwnerRef.current === state.playheadSec;
+    adoptedFromOwnerRef.current = null;
     reportedPlayheadRef.current = state.playheadSec;
+    if (adopted) return;
     onPlaybackSeekRef.current?.(state.playheadSec);
   }, [state.playheadSec]);
   useEffect(() => {
@@ -409,6 +427,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   useEffect(() => {
     if (playbackSec === undefined || !Number.isFinite(playbackSec)) return;
     if (playbackSec === reportedPlayheadRef.current) return;
+    adoptedFromOwnerRef.current = playbackSec;
     dispatch({ type: "seek", seconds: playbackSec });
   }, [playbackSec]);
   // 재생 머리가 보이는 구간을 벗어나면 뷰포트를 그 자리로 넘긴다. 확대해 놓고
@@ -594,12 +613,34 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   // 이미 같은 방식으로 창 전체에서 듣는다(`EditorWorkbench.tsx`).
   const runZoomRef = useRef(runZoom);
   runZoomRef.current = runZoom;
+  // 캡컷 키(Q·W·위아래·Home·End·Shift+Z)와 줌 키는 **같은 문지기**(`editorShortcutFor`)가 고르고 여기서 실행한다.
+  // 최신 상태(재생 위치·잠금·고른 장면)를 보려고 `runZoomRef`와 같은 ref 패턴을 쓴다.
+  const runShortcutRef = useRef<(id: EditorShortcutId) => void>(() => undefined);
+  runShortcutRef.current = (id) => {
+    switch (id) {
+      case "zoom-in": runZoom("in"); return;
+      case "zoom-out": runZoom("out"); return;
+      case "zoom-fit": runZoom("fit"); return;
+      case "trim-left": trimSelectedToPlayhead("start"); return;
+      case "trim-right": trimSelectedToPlayhead("end"); return;
+      case "prev-cut":
+      case "next-cut": {
+        const times = [0, view.output.durationSec, ...snapCandidates.map((candidate) => candidate.timeSec)];
+        const target = adjacentCutPoint(times, currentPlayheadSec(), id === "prev-cut" ? -1 : 1, view.fps);
+        if (target !== null) dispatch({ type: "seek", seconds: target });
+        return;
+      }
+      case "go-start": dispatch({ type: "seek", seconds: 0 }); return;
+      case "go-end": dispatch({ type: "seek", seconds: view.output.durationSec }); return;
+      default: return;
+    }
+  };
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      const command = timelineZoomShortcutFor(event, isEditableTarget(event.target));
-      if (!command) return;
+      const id = editorShortcutFor(event);
+      if (!id || ownerOf(id) !== "timeline") return;
       event.preventDefault();
-      runZoomRef.current(command);
+      runShortcutRef.current(id);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -1059,6 +1100,32 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     else if (pointerDraft?.kind === "reorder") endReorder(event);
     else endPlacement(event);
   };
+  /** 재생 중이면 시계가 앞서 있다 -- 키를 누른 순간의 자리는 시계가 안다. */
+  const currentPlayheadSec = (): number => {
+    const reading = playbackClock?.read();
+    return reading?.playing && Number.isFinite(reading.seconds) ? reading.seconds : state.playheadSec;
+  };
+  /** 캡컷 Q·W: 고른 장면(또는 고른 배치 하나)의 시작·끝을 재생 위치까지 잘라 낸다. 빈자리는 서버 정책대로 그대로 둔다. */
+  const trimSelectedToPlayhead = (edge: "start" | "end"): void => {
+    if (isSaving) return;
+    const placement = selectedPlacementIds.length === 1 ? placementsByClipId.get(selectedPlacementIds[0]) : undefined;
+    const clip = placement ? undefined : narration.find((segment) => segment.segmentId === selectedSegmentId);
+    if (!placement && !clip) { showKeyNotice("장면을 먼저 골라 주세요."); return; }
+    if (lockedLanes.has(placement ? placement.kind : "narration")) { showKeyNotice("잠긴 트랙이에요."); return; }
+    const target = (placement ?? clip) as { startSec: number; endSec: number };
+    const at = currentPlayheadSec();
+    const halfFrameSec = (0.5 * view.fps.den) / view.fps.num;
+    if (!(at > target.startSec + halfFrameSec && at < target.endSec - halfFrameSec)) { showKeyNotice("재생 위치를 고른 장면 안으로 옮겨 주세요."); return; }
+    const proposedSec = frameToSeconds(secondsToFrameHalfUp(at, view.fps), view.fps);
+    if (placement) {
+      const bounds = derivePlacementTrim({ placement, edge, proposedSec, durationSec: view.output.durationSec, fps: view.fps });
+      updatePlacement(placement, bounds);
+      return;
+    }
+    const bounds = deriveNarrationTrim({ clip: clip as NarrationSegment, edge, proposedSec, narration, durationSec: view.output.durationSec, fps: view.fps });
+    const result = { segmentId: (clip as NarrationSegment).segmentId, ...bounds };
+    if (result.startSec !== (clip as NarrationSegment).startSec || result.endSec !== (clip as NarrationSegment).endSec) onTrimNarration?.(result);
+  };
   const keyboardTrim = (event: KeyboardEvent<HTMLButtonElement>, clip: NarrationSegment, edge: "start" | "end") => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     if (lockedLanes.has("narration")) return;
@@ -1132,6 +1199,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
           눌러 보면 안다. 캡컷 타임라인에도 이런 안내가 없다. */}
       {/* 확대·축소는 `+`/`-` 키로만 됐다. 안내에 적어 두어도 **눈에 보이는 단추가
           없으면 안 쓰는 기능**이다 -- 2026-08-17에 컷 도구가 정확히 그랬다. */}
+      {keyNotice ? <p role="status" aria-label="자르기 안내">{keyNotice}</p> : null}
       {editToolbar}
       {/* 단추·키·바퀴가 **같은 표**를 본다(`zoomControls`). 잠김도 같이 온다. */}
       <span className="vb-editor-workbench__timeline-zoom">
@@ -1139,7 +1207,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
             2026-08-17에 컷 도구가 정확히 그랬다. 옆으로 미는 것은 `Shift`와 바퀴다. */}
         <button data-native-control="timeline-zoom-out" type="button" aria-label="타임라인 축소" title="줄이기 (Ctrl과 - 키, Ctrl과 바퀴)" disabled={!zoomControls.out.enabled} onClick={() => runZoom("out")}>−</button>
         <button data-native-control="timeline-zoom-in" type="button" aria-label="타임라인 확대" title="늘리기 (Ctrl과 = 키, Ctrl과 바퀴)" disabled={!zoomControls.in.enabled} onClick={() => runZoom("in")}>+</button>
-        <button data-native-control="timeline-fit" type="button" aria-label="타임라인 전체 보기" title="영상 전체가 한 화면에 들어오게 (Ctrl과 0 키)" disabled={!zoomControls.fit.enabled} onClick={() => runZoom("fit")}>전체</button>
+        <button data-native-control="timeline-fit" type="button" aria-label="타임라인 전체 보기" title="영상 전체가 한 화면에 들어오게 (Shift와 Z 키, Ctrl과 0 키)" disabled={!zoomControls.fit.enabled} onClick={() => runZoom("fit")}>전체</button>
       </span>
     </div>
     {/* 캡컷처럼 눈금과 트랙을 한 좌표계에 놓고, 그 위에 재생 위치 선을 관통시킨다.
