@@ -178,9 +178,12 @@ const FIRST_PAGE = 8;
  * 쓰고(`editorAssetProjection`), 단추로만 거른다.
  */
 const CHIP_TAG_MAX_LENGTH = 20;
+/** 자산 종류 낱말은 분위기가 아니다(`music` 태그가 `분위기 music` 단추가 되던 것). */
+const KIND_WORD_TAGS = new Set(["music", "sfx", "bgm", "broll", "image", "video"]);
 function isChipTag(tag: string): boolean {
   const trimmed = tag.trim();
   return Boolean(trimmed)
+    && !KIND_WORD_TAGS.has(trimmed.toLowerCase())
     && trimmed.length <= CHIP_TAG_MAX_LENGTH
     && !/[.:;!?。,，\n]/.test(trimmed)
     // 실화면(2026-10-01)에 `+` 하나만 남은 조각과 `+`로 시작하는 이어짐 조각이 남았다.
@@ -505,7 +508,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
               줄이 카드보다 길어졌다(2026-08-23 실측 325px). 창작자에게 필요한
               것은 URL이 아니라 **표기가 필요한지**이므로, 줄에서는 짧은 쪽만
               보이고 URL을 포함한 전체 문구는 `title`로 남긴다. */}
-          <p className="vb-editor-assets__detail vb-editor-assets__status">{card.status}</p>
+          {card.status ? <p className="vb-editor-assets__detail vb-editor-assets__status">{card.status}</p> : null}
           <p className="vb-editor-assets__detail vb-editor-assets__audio-presence">{card.audioPresence}</p>
           <p className="vb-editor-assets__detail vb-editor-assets__license">{card.license}</p>
           <p className="vb-editor-assets__detail vb-editor-assets__attribution" title={card.license}>

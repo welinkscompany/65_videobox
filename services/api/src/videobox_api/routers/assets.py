@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import subprocess
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from uuid import uuid4
 
@@ -85,6 +86,24 @@ def _ensure_registration_source_path_allowed(
         )
 
 
+def _with_library_title(asset: dict, lookup: Callable[[str], str | None] | None) -> dict:
+    """제목이 없고 자료실에서 온 자산이면 자료실 파일 이름(확장자 뗀 앞 60자)을 제목으로 얹은 사본."""
+    metadata = asset.get("metadata")
+    if lookup is None or not isinstance(metadata, dict) or str(metadata.get("title") or "").strip():
+        return asset
+    library_id = str(metadata.get("source_library_asset_id") or "")
+    if not library_id:
+        return asset
+    try:
+        filename = lookup(library_id)
+    except Exception:  # 이름을 못 찾아도 목록은 열려야 한다 -- 옛 `자료 N` 그대로.
+        return asset
+    stem = Path(str(filename or "")).stem.strip()[:60]
+    if not stem:
+        return asset
+    return {**asset, "metadata": {**metadata, "title": stem}}
+
+
 def _repaired_asset_response(asset: dict) -> "AssetArchiveItemResponse":
     """자산 한 건을 화면이 읽을 모양으로. 깨진 한글 이름은 여기서 되살린다.
 
@@ -131,6 +150,9 @@ def build_assets_router(
     # 비면 프로젝트 자신의 폴더만 허용한다 -- `library_assets.py`의
     # `allowed_ingest_roots`와 같은 기본값(설정이 빠지면 닫힌 채로 있는다).
     allowed_source_roots: tuple[Path, ...] | None = None,
+    # 자료실 자산 번호 -> 그 파일 이름. 예전에 가져와 `metadata.title`이 없는 카드가
+    # `자료 N`으로 보이지 않게, 목록 **응답에만** 이름을 싣는다(저장은 안 바꾼다).
+    library_filename_lookup: Callable[[str], str | None] | None = None,
 ) -> APIRouter:
     router = APIRouter()
     _extra_roots = tuple(allowed_source_roots or ())
@@ -256,7 +278,9 @@ def build_assets_router(
             assets = orchestrator.list_broll_assets(project_id=project_id)
         except Exception as exc:
             raise _http_error(exc) from exc
-        return AssetListResponse(assets=[_repaired_asset_response(asset) for asset in assets])
+        return AssetListResponse(
+            assets=[_repaired_asset_response(_with_library_title(asset, library_filename_lookup)) for asset in assets]
+        )
 
     @router.post("/api/projects/{project_id}/assets/broll-video/batch", status_code=status.HTTP_201_CREATED)
     def register_broll_assets_batch(

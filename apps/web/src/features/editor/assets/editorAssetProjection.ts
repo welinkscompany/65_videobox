@@ -78,6 +78,14 @@ function intakeDurationLabel(metadata: Readonly<Record<string, unknown>>): strin
   return durationLabel(value);
 }
 
+/**
+ * 자료 카드의 상태 줄. **실제로 받은 정보만** 말한다.
+ *
+ * 예전에는 분석 정보도 검토 표시도 없을 때 `확인 중 · 검토 상태 확인 중`을 그렸다.
+ * 프로젝트 영상 자산에는 두 값을 쓰는 곳이 없어서(2026-10-09 grep: 쓰는 곳 0)
+ * 그 줄은 아무것도 확인하지 않는 거짓 진행 표시였다. 정보가 없으면 빈 문자열이고
+ * 카드는 줄을 그리지 않는다.
+ */
 function brollStatus(metadata: Readonly<Record<string, unknown>>): string {
   const analysis = metadata.analysis_status;
   const base = analysis === "succeeded"
@@ -86,13 +94,13 @@ function brollStatus(metadata: Readonly<Record<string, unknown>>): string {
       ? "준비 중"
       : analysis === "failed"
         ? "확인 필요"
-        : "확인 중";
+        : "";
   const reviewStatus = metadata.review_required === true
     ? "검토 필요"
     : metadata.review_required === false
       ? "검토 불필요"
-      : "검토 상태 확인 중";
-  return `${base} · ${reviewStatus}`;
+      : "";
+  return [base, reviewStatus].filter(Boolean).join(" · ");
 }
 
 function brollOrientation(

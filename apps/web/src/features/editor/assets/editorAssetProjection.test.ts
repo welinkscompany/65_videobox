@@ -65,7 +65,7 @@ describe("editor asset projection", () => {
       label: "기타 자료",
       title: "자료 1",
       durationLabel: "길이 확인 중",
-      status: "확인 중 · 검토 필요",
+      status: "검토 필요",
       canApply: false,
       previewUrl: "/api/projects/p/assets/other-1/content",
     });
@@ -89,10 +89,10 @@ describe("editor asset projection", () => {
     });
 
     expect(cards.slice(0, 4).map((card) => [card.id, card.label, card.status])).toEqual([
-      ["broll:video-1", "영상", "확인 중 · 검토 필요"],
-      ["broll:audio-1", "오디오", "확인 중 · 검토 불필요"],
-      ["broll:unknown-1", "그림", "확인 중 · 검토 상태 확인 중"],
-      ["broll:unknown-2", "그림", "확인 중 · 검토 상태 확인 중"],
+      ["broll:video-1", "영상", "검토 필요"],
+      ["broll:audio-1", "오디오", "검토 불필요"],
+      ["broll:unknown-1", "그림", ""],
+      ["broll:unknown-2", "그림", ""],
     ]);
     expect(cards.slice(4)).toEqual([
       expect.objectContaining({ id: "library:music-1", assetId: "starter-music", libraryAssetId: "music-1", previewUrl: "/api/media-library/assets/music-1/preview", canApply: true, license: "라이선스: https://license.invalid/music · 출처 표기 필요: Creator 표기" }),
@@ -317,5 +317,17 @@ describe("thumbnails on b-roll cards", () => {
     });
 
     expect(cards.map((card) => card.title)).toEqual(["자료 1"]);
+  });
+
+  it("상태 줄은 받은 정보만 말한다 -- 없으면 빈 문자열", () => {
+    const status = (metadata: Record<string, unknown>) => projectEditorAssets({
+      projectId: "p",
+      brollAssets: [{ asset_id: "a", asset_type: "broll_video", storage_uri: "x", created_at: "now", metadata }],
+      libraryAssets: [],
+    })[0].status;
+    expect(status({})).toBe("");
+    expect(status({ analysis_status: "succeeded" })).toBe("준비됨");
+    expect(status({ review_required: true })).toBe("검토 필요");
+    expect(status({ analysis_status: "succeeded", review_required: true })).toBe("준비됨 · 검토 필요");
   });
 });

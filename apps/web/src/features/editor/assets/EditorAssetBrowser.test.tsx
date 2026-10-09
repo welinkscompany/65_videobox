@@ -513,6 +513,23 @@ describe("유진에게 알려 주는 자산 취향", () => {
     expect(screen.queryAllByRole("button", { name: /분위기 .* 빼기/ })).toHaveLength(1);
   });
 
+  it("자산 종류 낱말은 분위기 단추로 만들지 않는다", async () => {
+    vi.spyOn(apiModule.api, "getDirectorPreferences").mockResolvedValue(saved as never);
+    const tagged: EditorAssetCard = {
+      ...cards[0]!,
+      sourceMetadata: { ...cards[0]!.sourceMetadata, tags: ["music", "잔잔한"] },
+    };
+    render(<EditorAssetBrowser cards={[tagged]} projectId="project-a" target={null} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} />);
+
+    expect(await screen.findByRole("button", { name: "제품 사진의 분위기 잔잔한 빼기" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "제품 사진의 분위기 music 빼기" })).toBeNull();
+  });
+
+  it("상태 정보가 없는 카드는 상태 줄을 그리지 않는다", () => {
+    const { container } = render(<EditorAssetBrowser cards={[{ ...cards[0]!, status: "" }]} target={null} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} />);
+    expect(container.querySelector(".vb-editor-assets__status")).toBeNull();
+  });
+
   it("저장에 실패하면 눌린 상태를 되돌리고 그렇게 말한다", async () => {
     vi.spyOn(apiModule.api, "getDirectorPreferences").mockResolvedValue(saved as never);
     vi.spyOn(apiModule.api, "updateDirectorPreferences").mockRejectedValue(new Error("nope"));

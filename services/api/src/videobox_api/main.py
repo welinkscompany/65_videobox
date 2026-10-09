@@ -368,6 +368,18 @@ def _build_music_library_hooks(
     return search, resolve
 
 
+def _library_filename_lookup(library_store) -> Callable[[str], str | None]:
+    """자료실 자산 번호 -> 올린 파일 이름. 프로젝트 카드가 `자료 N` 대신 이름을 쓰게 한다."""
+
+    def lookup(library_asset_id: str) -> str | None:
+        asset = library_store.user_asset_store.get_asset(library_asset_id)
+        if asset is None:
+            return None
+        return str(asset.user_metadata.get("filename") or "") or None
+
+    return lookup
+
+
 def _index_library_footage(app: FastAPI) -> None:
     """드롭 폴더에 쌓인 촬영본을 찾을 수 있는 자산으로 만든다.
 
@@ -1522,6 +1534,7 @@ def create_app(
             orchestrator,
             store,
             app.state.asset_browser_preview_service,
+            library_filename_lookup=_library_filename_lookup(resolved_media_library_store),
             # 경로로 등록하는 문이 프로젝트 밖에서 받아 줄 폴더 (코드리뷰
             # 2026-09-07). 자료실 경로 문과 같은 드롭 폴더 하나만 준다 --
             # 그 문의 이유(§1-1)와 같다: 넓게 열어 두는 것보다 안 켜진 것이 안전하다.
