@@ -2640,7 +2640,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       <dt>대상 구간 수</dt><dd>{activePartial.result.segment_ids.length}</dd>
       <dt>다시 만든 항목</dt><dd>{activePartial.result.fields.map(partialFieldLabel).join(", ")}</dd>
     </dl> : null}
-    {variants.key === requestKey && variants.message ? <p role="status">{variants.message}</p> : null}
+
     <EditorWorkbench
     assetCards={assetCards}
     isSavingTimeline={mutation.isSaving}
@@ -2690,6 +2690,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     onVariantRemakeShortForm={makeShortForm}
     onVariantUnfoldShortForm={unfoldShortForm}
     variantBusy={variants.key === requestKey && variants.busy}
+    variantNotice={variants.key === requestKey ? variants.message : null}
     view={stageView}
     zoomCommand={timelineZoomCommand}
     />

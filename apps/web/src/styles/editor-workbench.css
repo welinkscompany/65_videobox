@@ -461,7 +461,8 @@
   background: var(--card);
 }
 .vb-editor-variants[data-collapsed="true"] { max-height: none; padding: var(--vb-space-1) var(--vb-space-4); }
-.vb-editor-variants[data-collapsed="true"] .vb-editor-variants__header h2 { margin: 0; }
+.vb-editor-variants[data-collapsed="true"] .vb-editor-variants__notice { flex: 1 1 0; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); font-size: var(--vb-text-sm); }
+.vb-editor-variants__header h2 { margin: 0; }
 .vb-editor-variants__header, .vb-editor-variants__pane header {
   display: flex;
   align-items: center;

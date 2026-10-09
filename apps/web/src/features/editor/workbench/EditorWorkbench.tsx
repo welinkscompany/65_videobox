@@ -124,6 +124,8 @@ type EditorWorkbenchProps = Readonly<{
    *  한 장면을 고칠 자리가 없어 그 편집이 원본 영상에도 걸린다. */
   onVariantUnfoldShortForm?: (variant: OutputVariant) => void | Promise<void>;
   variantBusy?: boolean;
+  /** 가로·세로 버전 안내 한 줄. 작업판 안의 비교 머리줄에 말줄임으로 서므로 줄이 생겨도 작업판을 밀지 않는다. */
+  variantNotice?: string | null;
   /** 유진 채팅에서 온 확대·축소 명령(task-3-brief.md). `TimelineDock`에
    *  그대로 흘려준다 -- 이 컴포넌트는 중간에서 판단하지 않는다. */
   zoomCommand?: Readonly<{ command: TimelineZoomCommand; requestId: number }> | null;
@@ -169,6 +171,7 @@ function EditorWorkbenchInstance({
   onVariantRemakeShortForm,
   onVariantUnfoldShortForm,
   variantBusy = false,
+  variantNotice = null,
   zoomCommand = null,
 }: EditorWorkbenchProps) {
   const viewRouteKey = `${view.projectId}:${view.sessionId}`;
@@ -781,7 +784,7 @@ function EditorWorkbenchInstance({
       />
     </div>
     <section className="vb-editor-variants" aria-label="가로·세로 비교" data-collapsed={variantsCollapsed}>
-      <div className="vb-editor-variants__header"><div><h2>가로·세로 비교</h2></div><Button type="button" variant="outline" aria-expanded={!variantsCollapsed} onClick={toggleVariantsCollapsed}>{variantsCollapsed ? "가로·세로 비교 펼치기" : "가로·세로 비교 접기"}</Button></div>
+      <div className="vb-editor-variants__header"><div><h2>가로·세로 비교</h2></div>{variantNotice ? <p role="status" className="vb-editor-variants__notice" title={variantNotice}>{variantNotice}</p> : null}<Button type="button" variant="outline" aria-expanded={!variantsCollapsed} onClick={toggleVariantsCollapsed}>{variantsCollapsed ? "가로·세로 비교 펼치기" : "가로·세로 비교 접기"}</Button></div>
       {!variantsCollapsed ? <><span className="vb-editor-variants__hint">편집은 마스터 하나, 가로·세로는 따로 내보내기</span>
       <VariantSelector selected={variantMode} onSelect={setVariantMode} />
       {variantMode === "master" ? <p className="vb-editor-variants__master-note">마스터 편집본 기준으로 가로·세로를 봐요.</p> : <>
