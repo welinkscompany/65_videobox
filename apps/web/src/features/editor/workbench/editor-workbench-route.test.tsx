@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { startTransition, StrictMode, Suspense, useState } from "react";
 
-import { ApiConflictError, DirectorProposalBlockedError, api } from "../../../api";
+import { ApiConflictError, ApiRequestError, DirectorProposalBlockedError, api } from "../../../api";
 import { EditorWorkbenchRoute, affectedAreaLabel, findHermesRunProposalId, partialStatusLabel, prepareProjectAssetBrowserPreview, yujinSceneChangeNotice } from "./EditorWorkbenchRoute";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
@@ -2188,6 +2188,13 @@ describe("EditorWorkbenchRoute", () => {
     resolveB(manifest("project-b", "session-b"));
     await expectEditorRevision(1);
     expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it("says the edit cannot be opened, with a way back to the project list, when its timeline is gone", async () => {
+    vi.spyOn(api, "getEditorPlaybackManifest").mockRejectedValue(new ApiRequestError("'Timeline not found: timeline-longform'", 404, "/x"));
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    expect(await screen.findByText("이 편집본에 연결된 타임라인을 찾지 못했어요. 이 편집본은 열 수 없어요.")).toBeVisible();
+    expect(screen.getByRole("link", { name: "프로젝트 목록으로" })).toHaveAttribute("href", "/projects");
   });
 
   it("fails closed for missing or mismatched session identity", async () => {

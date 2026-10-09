@@ -1036,6 +1036,18 @@ describe("AppRouter URL ownership", () => {
     expect(split).not.toHaveBeenCalled();
   });
 
+  it("tells the creator the saved edit could not be read, and still offers the blank board, when the server fails", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue([{ project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" }]);
+    vi.spyOn(api, "getLatestEditingSession").mockRejectedValue(new Error("Request failed: /api/projects/project_a/editing-sessions/latest (500)"));
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/editor"] }));
+
+    render(<AppRouter router={router} />);
+
+    expect(await screen.findByText("편집본을 읽지 못했어요. 다시 해도 같으면 빈 편집판으로 시작할 수 있어요.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "빈 편집판으로 시작" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "영상 정하러 가기" })).not.toBeInTheDocument();
+  });
+
   /** **시작하는 문을 하나로 합쳤다**(owner 승인 2026-09-05: "하나로 합치기").
    *  2026-08-28에 지름길 둘을 더했는데, 재어 보니 **셋이 전부 같은 곳(편집기)으로
    *  가고 있었다** -- 다른 점은 이름을 지금 쓰느냐 자동으로 붙느냐뿐이었다.

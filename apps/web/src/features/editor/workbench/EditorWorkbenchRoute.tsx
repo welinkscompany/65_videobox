@@ -12,6 +12,8 @@ import { repickShortFormWithProgress } from "./shortFormRepickProgress";
 import { ApiConflictError, ApiRequestError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type LibraryAsset, type MediaLibraryAsset, type OutputVariant, type YujinEditingProposalPreview, type OutputVariantPatch, type ShortFormScenePick, type PartialRegenerationJob, type PartialRegenerationPreflight, type SceneTransitionSuggestion, type YujinEditingProposal, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
 import { runPartialRegenerationWithProgress, type PartialRegenerationOutcome } from "../partialRegenerationProgress";
 import { longWaitNotice, useWaitElapsedSeconds } from "../waitingNotice";
+
+const MISSING_TIMELINE_MESSAGE = "이 편집본에 연결된 타임라인을 찾지 못했어요. 이 편집본은 열 수 없어요.";
 import { Button } from "../../../components/ui/button";
 import { findLatestSucceededJob } from "../../../lib/formatters";
 import { EXACT_PREVIEW_UNREACHABLE, EXACT_PREVIEW_WATCH_ERROR_COPY, watchExactPreview } from "../preview/exactPreviewWatch";
@@ -460,7 +462,9 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       setWatchedPreview((current) => current?.settled ? null : current);
       const message = error instanceof Error && error.message === "editor_snapshot_identity_mismatch"
           ? "편집 내용이 맞지 않아요. 다시 열어 주세요."
-          : "재생 내용을 불러오지 못했어요. 새로고침 후 다시 확인해 주세요.";
+          : error instanceof ApiRequestError && error.status === 404 && (error.detail ?? "").includes("Timeline not found")
+            ? MISSING_TIMELINE_MESSAGE
+            : "재생 내용을 불러오지 못했어요. 새로고침 후 다시 확인해 주세요.";
       const identityMismatch = error instanceof Error && error.message === "editor_snapshot_identity_mismatch";
       setState((current) => !identityMismatch && current.key === requestKey && current.view && current.session
         ? { ...current, error: message }
@@ -836,7 +840,10 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const mutationElapsedSec = useWaitElapsedSeconds(mutation.isSaving);
   const mutationWaitNotice = mutation.isSaving ? longWaitNotice(mutationElapsedSec) : null;
   if (state.key !== requestKey) return <section aria-live="polite"><p>편집 내용을 불러오는 중이에요.</p></section>;
-  if (!state.view) return <section aria-live="polite"><p>{state.error ?? "편집 내용을 불러오는 중이에요."}</p></section>;
+  if (!state.view) return <section aria-live="polite">
+    <p>{state.error ?? "편집 내용을 불러오는 중이에요."}</p>
+    {state.error === MISSING_TIMELINE_MESSAGE ? <a href="/projects">프로젝트 목록으로</a> : null}
+  </section>;
   // 지켜보는 동안에는 편집 직후의 `stale` 문구("새로 만들어 주세요") 대신 "만드는 중"으로 보인다.
   const stageView = generationToWatch && !["current", "succeeded", "pending", "running"].includes(state.view.playback.exactPreview.status)
     ? { ...state.view, playback: { ...state.view.playback, exactPreview: { ...state.view.playback.exactPreview, status: "running" as const, url: null } } }

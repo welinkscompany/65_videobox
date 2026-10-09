@@ -890,6 +890,7 @@ function CanonicalEditorEntry({ projectId, onNavigate }: { projectId: string; on
   const navigate = useNavigate();
   const [message, setMessage] = useState("편집할 초안을 불러오는 중이에요.");
   const [hasNoDraft, setHasNoDraft] = useState(false);
+  const [canStartBlank, setCanStartBlank] = useState(false);
   const [isOpeningBlank, setIsOpeningBlank] = useState(false);
   const [blankError, setBlankError] = useState<string | null>(null);
   const openBlankBoard = async () => {
@@ -925,15 +926,23 @@ function CanonicalEditorEntry({ projectId, onNavigate }: { projectId: string; on
         search: { session_id: session.session_id },
         replace: true,
       });
-    }).catch(() => {
-      if (!cancelled) setMessage("초안을 불러오지 못했어요. 다시 시도해 주세요.");
+    }).catch((error: unknown) => {
+      if (cancelled) return;
+      // 서버가 편집본을 읽다 실패(5xx)하면 다시 해도 같을 수 있다 -- 막다른 길로 두지 않고
+      // 이미 있는 빈 편집판 길을 같이 보여 준다.
+      if (error instanceof Error && /\(5\d\d\)$/.test(error.message)) {
+        setMessage("편집본을 읽지 못했어요. 다시 해도 같으면 빈 편집판으로 시작할 수 있어요.");
+        setCanStartBlank(true);
+        return;
+      }
+      setMessage("초안을 불러오지 못했어요. 다시 시도해 주세요.");
     });
     return () => { cancelled = true; };
   }, [navigate, projectId]);
   return <div aria-live="polite">
     <p>{message}</p>
-    {hasNoDraft ? <>
-      <Button type="button" onClick={() => onNavigate(projectId, "plan")}>영상 정하러 가기</Button>
+    {hasNoDraft || canStartBlank ? <>
+      {hasNoDraft ? <Button type="button" onClick={() => onNavigate(projectId, "plan")}>영상 정하러 가기</Button> : null}
       {/* 캡컷은 열면 바로 빈 편집판이다. 기획을 건너뛰고 여기서 시작할 수 있어야 한다. */}
       {/* "먼저 미디어부터 모으기" 버튼은 지웠다(2026-09-01, 독립 "미디어" 단계
           화면을 편집기로 접으면서) -- 편집기 도크가 이미 미디어 탭 기본값이라

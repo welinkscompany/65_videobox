@@ -1688,8 +1688,10 @@ class EditingSessionSegmentResponse(BaseModel):
     caption_translations: dict[str, str] = Field(default_factory=dict, exclude_if=lambda value: not value)
     start_sec: float
     end_sec: float
-    cut_action: str
-    review_required: bool
+    # 옛 모양 장면은 이 두 칸이 아예 없다. 저장 계층의 관용과 같은 기본값을 쓴다
+    # (아래 validator와 같은 이유 -- 2026-10-09, 열면 500이던 시험 프로젝트 둘).
+    cut_action: str = "keep"
+    review_required: bool = False
 
     @field_validator("cut_action", mode="before")
     @classmethod
