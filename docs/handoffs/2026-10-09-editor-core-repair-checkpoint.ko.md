@@ -1,5 +1,7 @@
 # 편집기 핵심 수리 중간 점검 — 계획 H Task 0~12 + 실기 점검 고침 (2026-10-09)
 
+**대체됨:** `docs/handoffs/2026-10-09-editor-playback-p.ko.md`
+
 **이어받는 문서:** `2026-10-08-motion-graphics-step2.ko.md`
 계획서: `docs/superpowers/plans/2026-10-08-editor-core-repair-h.ko.md` (Task 0~12까지 끝, **Task 13~18 남음**)
 점검 기준 문서: `docs/superpowers/2026-10-08-editor-ui-audit.ko.md`, `docs/superpowers/2026-10-08-timeline-adoption-spike.ko.md`
