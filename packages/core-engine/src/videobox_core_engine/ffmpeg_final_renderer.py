@@ -64,6 +64,10 @@ class FinalRenderError(RuntimeError):
     pass
 
 
+class FinalRenderAudioShortError(FinalRenderError):
+    """ffmpeg가 오디오만 일찍 끝내고 0으로 종료한 알려진 일시 실패. 미리보기 작업만 한 번 다시 시도한다."""
+
+
 
 """이 아래로는 들리지 않는 것으로 본다. 완전 무음은 -91dB로 측정된다."""
 AUDIBLE_PEAK_DBFS = -60.0
@@ -1906,7 +1910,7 @@ class FfmpegFinalRenderer:
         audio_duration = self._probe_audio_stream_duration(output_path)
         if audio_duration is None or audio_duration + 0.75 < duration:
             measured = "missing" if audio_duration is None else f"{audio_duration:.2f}s"
-            raise FinalRenderError(
+            raise FinalRenderAudioShortError(
                 f"Rendered audio track is shorter than the timeline ({measured} < {duration:.2f}s). Retry the render."
             )
         return output_path

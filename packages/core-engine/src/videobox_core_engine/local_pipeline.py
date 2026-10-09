@@ -40,6 +40,7 @@ from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.capcut_handoff import CapCutHandoffError, CapCutHandoffService
 from videobox_core_engine.ffmpeg_auto_cut_executor import FfmpegAutoCutExecutor
 from videobox_core_engine.ffmpeg_final_renderer import (
+    FinalRenderAudioShortError,
     FinalRenderError,
     FfmpegFinalRenderer,
     rendered_audio_has_sound,
@@ -77,6 +78,9 @@ from videobox_core_engine.thumbnail_generator import ThumbnailGenerationError, g
 
 
 _logger = logging.getLogger(__name__)
+
+#: 미리보기 렌더 시도 횟수 상한(첫 시도 포함). 오디오 조기 종료 하나에만 쓴다.
+_EXACT_PREVIEW_MAX_RENDER_ATTEMPTS = 2
 
 # 실패 이유를 자산에 붙여 둔다. 로그는 흘러가지만 이건 남아서, 어떤 자산이 왜
 # 정보 없이 등록됐는지 나중에 찾을 수 있다.
@@ -280,6 +284,8 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         library_store: Any | None = None,
     ) -> None:
         self.store = store
+        #: 미리보기 생성분별 렌더 시도 횟수(프로세스 메모리, 진단용). 재시도가 일어났는지 시험·로그가 읽는다.
+        self.last_exact_preview_attempts: dict[str, int] = {}
         # 자료실 색인이 적어 둔 설명을 장면 후보에 실어 주는 데만 쓴다
         # (`broll_scene_candidates`). 없으면 후보는 그대로 나오고 설명만 빠진다.
         self.library_store = library_store
@@ -648,6 +654,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
     def run_exact_preview(self, *, project_id: str, generation_id: str) -> None:
         record = self.store.get_exact_preview(project_id=project_id, generation_id=generation_id)
         owner_token = f"exact-preview-worker:{self.store.exact_preview_process_epoch}:{uuid.uuid4().hex}"
+        attempts = 0
         if not self.store.claim_exact_preview(project_id=project_id, generation_id=generation_id, owner_token=owner_token):
             return
         try:
@@ -677,10 +684,27 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     encoding="utf-8",
                 )
                 output_path = raw / "exact-preview.mp4"
-                self.final_renderer.render_exact_preview_to_mp4(
-                    project_id=project_id, composition_plan=plan, timeline_context=timeline,
-                    output_path=output_path, subtitle_ass_path=ass_path,
-                )
+                for attempt in range(1, _EXACT_PREVIEW_MAX_RENDER_ATTEMPTS + 1):
+                    attempts = attempt
+                    try:
+                        self.final_renderer.render_exact_preview_to_mp4(
+                            project_id=project_id, composition_plan=plan, timeline_context=timeline,
+                            output_path=output_path, subtitle_ass_path=ass_path,
+                        )
+                        break
+                    except FinalRenderAudioShortError as exc:
+                        # 알려진 일시 실패(부하에서 ffmpeg가 오디오만 일찍 끝냄) 하나만 다시 시도한다.
+                        # 다른 오류는 여기 오지 않고 아래 바깥 except로 바로 간다.
+                        _logger.warning(
+                            "exact_preview_audio_short(attempt=%s/%s generation=%s): %s",
+                            attempt, _EXACT_PREVIEW_MAX_RENDER_ATTEMPTS, generation_id, exc,
+                        )
+                        if attempt >= _EXACT_PREVIEW_MAX_RENDER_ATTEMPTS:
+                            raise
+                        output_path.unlink(missing_ok=True)
+                if len(self.last_exact_preview_attempts) > 256:
+                    self.last_exact_preview_attempts.clear()
+                self.last_exact_preview_attempts[generation_id] = attempts
                 # Rendering can take long enough for media bytes or session
                 # materialization to change.  Rebuild immediately before the
                 # durable publish and never publish a mismatched proxy.
@@ -698,8 +722,11 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 ):
                     return
         except Exception as exc:
+            message = safe_job_error_message(exc)
+            if isinstance(exc, FinalRenderAudioShortError):
+                message = f"{message} (attempts={attempts})"
             self.store.fail_exact_preview(
-                project_id=project_id, generation_id=generation_id, owner_token=owner_token, error_message=safe_job_error_message(exc)
+                project_id=project_id, generation_id=generation_id, owner_token=owner_token, error_message=message
             )
         finally:
             self._best_effort_cleanup_exact_previews(project_id=project_id)
