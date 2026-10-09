@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { PreviewStage } from "./preview-stage";
+import { createPlaybackClock } from "./playbackClock";
 
 beforeEach(() => { vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
@@ -594,5 +595,101 @@ describe("PreviewStage", () => {
     expect(pause.mock.calls.length).toBeGreaterThan(2);
     unmount();
     expect(pause.mock.calls.length).toBeGreaterThan(3);
+  });
+
+  describe("재생 시계(2026-10-09 계획 P Task 2)", () => {
+    // rAF를 직접 잡아 부른다 -- 고리가 멈추면 예약된 콜백이 남지 않아야 한다.
+    const pending = new Map<number, FrameRequestCallback>();
+    let nextId = 1;
+    beforeEach(() => {
+      pending.clear(); nextId = 1;
+      vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => { const id = nextId++; pending.set(id, callback); return id; });
+      vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => { pending.delete(id); });
+    });
+    const runFrame = () => { const entries = [...pending.entries()]; pending.clear(); for (const [, callback] of entries) callback(0); };
+    const playerAt = (seconds: number, state: { paused?: boolean; seeking?: boolean; ended?: boolean } = {}) => {
+      const clock = createPlaybackClock();
+      const view = render(<PreviewStage {...current} playbackClock={clock} playbackSec={0} durationSec={12} />);
+      const media = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+      const flags = { paused: false, seeking: false, ended: false, time: seconds, ...state };
+      Object.defineProperty(media, "currentTime", { configurable: true, get: () => flags.time, set: (value: number) => { flags.time = value; } });
+      Object.defineProperty(media, "paused", { configurable: true, get: () => flags.paused });
+      Object.defineProperty(media, "seeking", { configurable: true, get: () => flags.seeking });
+      Object.defineProperty(media, "ended", { configurable: true, get: () => flags.ended });
+      return { clock, media, flags, ...view };
+    };
+    it("재생이 시작되면 화면 프레임마다 재생기 시각을 시계에 알린다", () => {
+      const { clock, media, flags } = playerAt(3.2);
+      fireEvent.play(media);
+      runFrame();
+      expect(clock.read()).toEqual({ seconds: 3.2, playing: true });
+      flags.time = 3.25;
+      runFrame();
+      expect(clock.read()).toEqual({ seconds: 3.25, playing: true });
+      expect(pending.size).toBe(1);
+    });
+    it("일시정지하면 멈춘 시각을 알리고 프레임 고리를 멈춘다", () => {
+      const { clock, media, flags } = playerAt(3.2);
+      fireEvent.play(media);
+      runFrame();
+      flags.paused = true; flags.time = 3.3;
+      fireEvent.pause(media);
+      expect(clock.read()).toEqual({ seconds: 3.3, playing: false });
+      expect(pending.size).toBe(0);
+    });
+    it("끝까지 가면 고리를 멈춘다", () => {
+      const { clock, media, flags } = playerAt(11.9);
+      fireEvent.play(media);
+      runFrame();
+      flags.paused = true; flags.ended = true; flags.time = 12;
+      fireEvent.ended(media);
+      expect(clock.read()).toEqual({ seconds: 12, playing: false });
+      expect(pending.size).toBe(0);
+    });
+    it("옮기는 중(seeking)에는 시계를 건드리지 않는다", () => {
+      const { clock, media, flags } = playerAt(3.2);
+      fireEvent.play(media);
+      runFrame();
+      flags.seeking = true; flags.time = 9;
+      runFrame();
+      expect(clock.read().seconds).toBe(3.2);
+      expect(pending.size).toBe(1);
+    });
+    it("재생 중에 옮김이 끝나면(seeked) 새 자리를 알리고 고리는 계속 돈다", () => {
+      const { clock, media, flags } = playerAt(3.2);
+      fireEvent.play(media);
+      runFrame();
+      flags.time = 9;
+      fireEvent.seeked(media);
+      expect(clock.read()).toEqual({ seconds: 9, playing: true });
+      expect(pending.size).toBe(1);
+    });
+    it("재생 중에 사라지면 프레임 예약을 거두고 멈춤으로 알린다", () => {
+      const { clock, media, unmount } = playerAt(3.2);
+      fireEvent.play(media);
+      runFrame();
+      expect(pending.size).toBe(1);
+      unmount();
+      expect(pending.size).toBe(0);
+      expect(clock.read().playing).toBe(false);
+    });
+    it("재생 중이 아니면 프레임을 예약하지 않는다", () => {
+      const { media } = playerAt(3.2, { paused: true });
+      fireEvent.pause(media);
+      fireEvent.seeked(media);
+      expect(pending.size).toBe(0);
+    });
+    it("시계가 시각을 알리면 시간 글자만 직접 고친다(React 상태 없이)", () => {
+      const { clock } = playerAt(0);
+      const output = () => document.querySelector(".vb-preview-stage__playback output") as HTMLElement;
+      expect(output().textContent).toBe("타임라인 0.0 / 12.0초");
+      clock.publish(4.26, true);
+      expect(output().textContent).toBe("타임라인 4.3 / 12.0초");
+      expect(output().getAttribute("aria-live")).toBe("off");
+    });
+    it("시계 없이도 시간 글자는 예전과 같다", () => {
+      render(<PreviewStage {...current} durationSec={12} playbackSec={2} />);
+      expect(document.querySelector(".vb-preview-stage__playback output")?.textContent).toBe("타임라인 2.0 / 12.0초");
+    });
   });
 });

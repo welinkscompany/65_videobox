@@ -26,4 +26,7 @@ test("1배로 틀면 미리보기가 스스로 되감지 않고 실제 속도로
   expect(median(runs.map((r) => r.rvfcGapMax))).toBeLessThanOrEqual(250);          // 눈에 보이는 멈춤 없음(정상 50)
   for (const run of runs) expect(run.longTasksOver100).toBeLessThanOrEqual(1);      // 실측 0
   expect(median(runs.map((r) => r.reactCommitsPerSec))).toBeLessThanOrEqual(12);   // 실측 7 — 프레임마다 그리기로 바뀌면 잡는다
+  // 재생 머리·시간 글자는 timeupdate(≈4Hz)가 아니라 화면 프레임마다 흐른다(계획 P Task 2).
+  expect(median(runs.map((r) => r.playheadGapP95))).toBeLessThanOrEqual(100);      // 실측 고장 p50 300·p95 400
+  expect(median(runs.map((r) => r.readoutGapP95))).toBeLessThanOrEqual(150);       // 0.1초 글자라 100ms 단위로 바뀐다(프레임 어림 포함 실측 107~118, 고장 276~280)
 });

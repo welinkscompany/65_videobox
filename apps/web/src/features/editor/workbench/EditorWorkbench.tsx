@@ -11,6 +11,7 @@ import type { EditorSessionSnapshot } from "../editorSnapshot";
 import type { EditorAssetCard } from "../assets/editorAssetProjection";
 import { editorAssetPanes, type EditorAssetPreviewState, type LeftPane } from "../assets/EditorAssetBrowser";
 import type { ApprovedTtsCandidate, InspectorAction, PartialRegenerationControls, VoiceSampleChoice } from "../inspector/InspectorControls";
+import { createPlaybackClock } from "../preview/playbackClock";
 import { PreviewStage, type AuditionRequest, type AuditionSource } from "../preview/preview-stage";
 import { sceneNumbersBySegmentId } from "../sceneNames";
 import { TimelineDock } from "../timeline/TimelineDock";
@@ -208,6 +209,8 @@ function EditorWorkbenchInstance({
   const resizeTimeline = (deltaRem: number) => setTimelineRem((ui.timelineRem ?? 20) + deltaRem);
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(view.local.selectedSegmentId);
   const [playbackSec, setPlaybackSec] = useState(view.local.seekSec);
+  // 재생 중 재생 머리·시간 글자를 화면 프레임마다 움직이는 시계. React 상태(`playbackSec`)는 그대로 timeupdate 빈도다.
+  const [playbackClock] = useState(() => createPlaybackClock(view.local.seekSec));
   const [requestedSegmentFocusEpoch, setRequestedSegmentFocusEpoch] = useState(0);
   const [auditionState, setAuditionState] = useState<Readonly<{
     routeKey: string;
@@ -284,6 +287,7 @@ function EditorWorkbenchInstance({
   useEffect(() => {
     if (viewRouteKeyRef.current !== viewRouteKey) {
       viewRouteKeyRef.current = viewRouteKey;
+      playbackClock.publish(clampPlaybackSeconds(view.local.seekSec, view.output.durationSec), false);
       activeRequestedSegmentKey.current = null;
       setSelectedSegmentId(view.local.selectedSegmentId);
       setPlaybackSec(clampPlaybackSeconds(view.local.seekSec, view.output.durationSec));
@@ -590,7 +594,7 @@ function EditorWorkbenchInstance({
         : api.assetThumbnailUrl(view.projectId, clip.assetId)] as const]
       : [])),
   );
-  const stage = <PreviewStage key={`${view.projectId}:${view.sessionId}`} auditionRequest={auditionRequest} durationSec={view.output.durationSec} expectedRevision={view.expectedRevision} exactPreview={view.playback.exactPreview} captions={view.captions} fps={view.fps} loopRange={assetTarget} onPlaybackTimeChange={seekPlayback} playbackSec={playbackSec} sources={sources} onRefresh={onPreviewRefresh} projectIsEmpty={view.tracks.length === 0} />;
+  const stage = <PreviewStage key={`${view.projectId}:${view.sessionId}`} auditionRequest={auditionRequest} durationSec={view.output.durationSec} expectedRevision={view.expectedRevision} exactPreview={view.playback.exactPreview} captions={view.captions} fps={view.fps} loopRange={assetTarget} onPlaybackTimeChange={seekPlayback} playbackClock={playbackClock} playbackSec={playbackSec} sources={sources} onRefresh={onPreviewRefresh} projectIsEmpty={view.tracks.length === 0} />;
   const variantMaster = {
     variantId: "master",
     label: "마스터" as const,
@@ -824,6 +828,7 @@ function EditorWorkbenchInstance({
       onUpdateTrackStates={onUpdateTrackStates}
       onTrimNarration={onTrimNarration}
       onPlaybackSeek={seekPlayback}
+      playbackClock={playbackClock}
       onSelectSegment={selectSegment}
       playbackSec={playbackSec}
       selectionResetKey={requestedSegmentFocusEpoch}

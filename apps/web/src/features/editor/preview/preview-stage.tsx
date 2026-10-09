@@ -4,13 +4,14 @@ import { toExactPreviewState, type ExactPreviewInput } from "./exact-preview-sta
 import { PreviewCoordinator, type AuditionMedia, type PreviewMode, type TimelineRange } from "./preview-coordinator";
 import { isAllowedLocalUrl } from "../../../lib/network-guard";
 import { capturePreviewStill } from "./previewStill";
+import type { PlaybackClock } from "./playbackClock";
 
 export type AuditionSource = AuditionMedia & Readonly<{ label: string }>;
 export type AuditionRequest = Readonly<{ requestId: number; source: AuditionSource }>;
 export type PreviewCaption = Readonly<{ text: string; startSec: number; endSec: number }>;
 type MediaNode = HTMLVideoElement | HTMLAudioElement;
 
-export function PreviewStage({ expectedRevision, exactPreview, captions = [], sources, auditionRequest, onRefresh, playbackSec, onPlaybackTimeChange, fps, loopRange, durationSec, projectIsEmpty = false }: {
+export function PreviewStage({ expectedRevision, exactPreview, captions = [], sources, auditionRequest, onRefresh, playbackSec, onPlaybackTimeChange, fps, loopRange, durationSec, projectIsEmpty = false, playbackClock }: {
   expectedRevision: number;
   /** 타임라인에 아직 아무것도 없는가. 참이면 미리보기 자리에 실패 대신 다음에
    *  할 일을 안내한다 -- 갓 만든 프로젝트의 첫인상이 오류가 되지 않게. */
@@ -32,6 +33,8 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
    *  다른 단위를 쓰면 두 표기가 섞인다. 없으면(길이를 모르면) 예전처럼 재생
    *  위치만 보인다. */
   durationSec?: number;
+  /** 재생 중 화면 프레임마다 재생기 시각을 알리는 곳. 없으면 예전과 똑같이 `timeupdate`로만 움직인다. */
+  playbackClock?: PlaybackClock;
 }) {
   const exact = toExactPreviewState(exactPreview, expectedRevision);
   const localSources = sources.filter((source) => isAllowedLocalUrl(source.url));
@@ -91,6 +94,45 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
     if (attempt && typeof attempt.catch === "function") void attempt.catch(() => undefined);
   };
   const frameSec = fps && fps.num > 0 && fps.den > 0 ? fps.den / fps.num : 1 / 30;
+
+  // 재생 시계: 재생 중에만 화면 프레임마다 재생기 시각을 읽어 알린다. 멈추면 고리도 멈춘다(rAF를 남겨 두지 않는다).
+  // React 상태는 건드리지 않는다 -- 재생 머리·시간 글자가 시계를 듣고 DOM만 직접 고친다.
+  const clockFrameRef = useRef<number | null>(null);
+  const clockLoop = useRef<() => void>(() => undefined);
+  const stopClockLoop = () => {
+    if (clockFrameRef.current !== null) window.cancelAnimationFrame(clockFrameRef.current);
+    clockFrameRef.current = null;
+  };
+  clockLoop.current = () => {
+    clockFrameRef.current = null;
+    const media = mediaRef.current;
+    if (!playbackClock || !media) return;
+    if (media.paused || media.ended) { publishClock(media); return; }
+    // 옮기는 중에는 재생기가 옛 자리나 새 자리를 오락가락 알려 준다 -- 건너뛰고 가라앉은 뒤 읽는다.
+    if (!media.seeking) playbackClock.publish(coordinatorRef.current.timelineTime(media.currentTime), true);
+    clockFrameRef.current = window.requestAnimationFrame(() => clockLoop.current());
+  };
+  /** 재생기의 지금 상태를 시계에 맞춘다. 재생 중이면 고리를 돌리고, 아니면 멈춘 시각을 알리고 고리를 거둔다. */
+  const publishClock = (media: MediaNode) => {
+    if (!playbackClock) return;
+    const playing = !media.paused && !media.ended;
+    if (!media.seeking || !playing) playbackClock.publish(coordinatorRef.current.timelineTime(media.currentTime), playing);
+    if (!playing) { stopClockLoop(); return; }
+    if (clockFrameRef.current === null) clockFrameRef.current = window.requestAnimationFrame(() => clockLoop.current());
+  };
+  useEffect(() => () => {
+    stopClockLoop();
+    playbackClock?.publish(playbackClock.read().seconds, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playbackClock]);
+  // 시간 글자: React는 이 `<span>`을 자식 없이 그려 두고, 글자는 여기서만 쓴다. 재생 중에는 시계가, 그 밖에는 렌더마다 상태가 정답이다.
+  const readoutRef = useRef<HTMLSpanElement>(null);
+  const writeReadout = (text: string) => { const node = readoutRef.current; if (node && node.textContent !== text) node.textContent = text; };
+  useLayoutEffect(() => {
+    const reading = playbackClock?.read();
+    writeReadout((reading?.playing ? reading.seconds : timelineTime).toFixed(1));
+  });
+  useEffect(() => playbackClock?.subscribe((reading) => writeReadout(reading.seconds.toFixed(1))), [playbackClock]);
 
   const stopActiveMedia = () => {
     lastReportedTimelineSecRef.current = null;
@@ -314,8 +356,8 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
         // 컨트롤은 끈다. **다만 기본 컨트롤 안에만 있던 음소거는 옮겨 받지
         // 못해 소리 끌 방법이 통째로 사라졌었다**(2026-08-28 코드리뷰로
         // 발견) -- `muted` state와 아래 음소거 단추로 되살렸다.
-        ? <audio ref={mediaRef as RefObject<HTMLAudioElement>} aria-label={mediaLabel} src={currentMedia.url} preload="metadata" muted={muted} onTimeUpdate={(event) => updateTimeline(event.currentTarget)} onSeeking={(event) => updateTimeline(event.currentTarget)} onSeeked={(event) => updateTimeline(event.currentTarget)} />
-        : <video ref={mediaRef as RefObject<HTMLVideoElement>} aria-label={mediaLabel} src={currentMedia.url} preload="metadata" playsInline muted={muted} onLoadedMetadata={(event) => checkAuditionVideo(event.currentTarget)} onLoadedData={(event) => rememberStill(event.currentTarget)} onPause={(event) => rememberStill(event.currentTarget)} onTimeUpdate={(event) => updateTimeline(event.currentTarget)} onSeeking={(event) => updateTimeline(event.currentTarget)} onSeeked={(event) => { updateTimeline(event.currentTarget); rememberStill(event.currentTarget); }} />)}
+        ? <audio ref={mediaRef as RefObject<HTMLAudioElement>} aria-label={mediaLabel} src={currentMedia.url} preload="metadata" muted={muted} onTimeUpdate={(event) => updateTimeline(event.currentTarget)} onSeeking={(event) => updateTimeline(event.currentTarget)} onSeeked={(event) => { updateTimeline(event.currentTarget); publishClock(event.currentTarget); }} onPlay={(event) => publishClock(event.currentTarget)} onPause={(event) => publishClock(event.currentTarget)} onEnded={(event) => publishClock(event.currentTarget)} />
+        : <video ref={mediaRef as RefObject<HTMLVideoElement>} aria-label={mediaLabel} src={currentMedia.url} preload="metadata" playsInline muted={muted} onLoadedMetadata={(event) => checkAuditionVideo(event.currentTarget)} onLoadedData={(event) => rememberStill(event.currentTarget)} onPause={(event) => { rememberStill(event.currentTarget); publishClock(event.currentTarget); }} onPlay={(event) => publishClock(event.currentTarget)} onEnded={(event) => publishClock(event.currentTarget)} onTimeUpdate={(event) => updateTimeline(event.currentTarget)} onSeeking={(event) => updateTimeline(event.currentTarget)} onSeeked={(event) => { updateTimeline(event.currentTarget); rememberStill(event.currentTarget); publishClock(event.currentTarget); }} />)}
       {/* **아직 아무것도 안 넣었으면 실패라고 말하지 않는다(2026-09-04).**
           owner가 제일 먼저 막힌 자리다 -- "처음에 뭘 어떤걸 눌러야할지도
           모르겠고". 갓 만든 프로젝트를 열면 첫 화면이 "미리보기를 만들지
@@ -340,7 +382,7 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
         보였다** -- 왜인지 알 방법이 없었다. 캡컷은 재생 단추가 늘 있다.
         눌리지 않는 단추라도 있는 편이 낫다: 없으면 고장인지 내 잘못인지 모른다.
         (실시간 타임라인 재생은 별개의 큰 일이라 이번 범위가 아니다.) */}
-    {!isImageAudition && !visibleAuditionIssue && <div className="vb-preview-stage__playback" data-idle={currentMedia ? undefined : "true"}><div className="vb-preview-stage__transport"><button data-native-control="step-back" type="button" disabled={!currentMedia} onClick={() => stepFrame(-1)} aria-label="이전 프레임">◀｜</button><button data-native-control="toggle-playback" type="button" disabled={!currentMedia} onClick={togglePlayback} aria-label="재생 또는 일시정지">재생 / 일시정지</button><button data-native-control="step-forward" type="button" disabled={!currentMedia} onClick={() => stepFrame(1)} aria-label="다음 프레임">｜▶</button><button data-native-control="toggle-mute" type="button" disabled={!currentMedia} onClick={() => setMuted((current) => !current)} aria-label={muted ? "음소거 해제" : "음소거"} aria-pressed={muted}>{muted ? "음소거 해제" : "음소거"}</button>{loopRange && <button data-native-control="toggle-repeat" type="button" onClick={() => setRepeating((current) => !current)} aria-label="선택한 장면 반복" aria-pressed={repeating}>반복</button>}<button data-native-control="toggle-fullscreen" type="button" disabled={!currentMedia} onClick={toggleFullscreen} aria-label="미리보기 전체화면" aria-pressed={isFullscreen}>전체화면</button></div>{currentMedia ? <output aria-live="off">타임라인 {timelineTime.toFixed(1)}{timelineTimeSuffix}</output> : <output aria-live="off">아직 재생할 영상이 없어요</output>}</div>}
+    {!isImageAudition && !visibleAuditionIssue && <div className="vb-preview-stage__playback" data-idle={currentMedia ? undefined : "true"}><div className="vb-preview-stage__transport"><button data-native-control="step-back" type="button" disabled={!currentMedia} onClick={() => stepFrame(-1)} aria-label="이전 프레임">◀｜</button><button data-native-control="toggle-playback" type="button" disabled={!currentMedia} onClick={togglePlayback} aria-label="재생 또는 일시정지">재생 / 일시정지</button><button data-native-control="step-forward" type="button" disabled={!currentMedia} onClick={() => stepFrame(1)} aria-label="다음 프레임">｜▶</button><button data-native-control="toggle-mute" type="button" disabled={!currentMedia} onClick={() => setMuted((current) => !current)} aria-label={muted ? "음소거 해제" : "음소거"} aria-pressed={muted}>{muted ? "음소거 해제" : "음소거"}</button>{loopRange && <button data-native-control="toggle-repeat" type="button" onClick={() => setRepeating((current) => !current)} aria-label="선택한 장면 반복" aria-pressed={repeating}>반복</button>}<button data-native-control="toggle-fullscreen" type="button" disabled={!currentMedia} onClick={toggleFullscreen} aria-label="미리보기 전체화면" aria-pressed={isFullscreen}>전체화면</button></div>{currentMedia ? <output aria-live="off">타임라인 <span ref={readoutRef} />{timelineTimeSuffix}</output> : <output aria-live="off">아직 재생할 영상이 없어요</output>}</div>}
     {showsADifferentMoment && <p role="status" aria-label="미리보기 위치 안내" aria-live="polite" className="vb-preview-stage__elsewhere">지금 화면은 타임라인 {timelineTime.toFixed(1)}초 모습이에요. 재생 위치는 아직 미리보기 밖이에요.</p>}
     {mode.kind === "exact" && <p role="status" aria-label="현재 캡션" aria-live="polite" aria-atomic="true" className="vb-preview-stage__caption-transcript vb-preview-stage__visually-hidden">{activeCaption ? `현재 캡션: ${activeCaption.text}` : "현재 캡션 없음"}</p>}
     <p role="status" aria-live="polite" className="vb-preview-stage__status">{mode.kind === "exact" ? `캡션도 함께 재생돼요. ${exact.copy} 타임라인 ${timelineTime.toFixed(1)}초` : mode.kind === "audition" ? isImageAudition ? "원본 그림 미리보기" : `원본 미리보기 · 타임라인 ${timelineTime.toFixed(1)}초` : `${projectIsEmpty ? "아직 넣은 영상이 없어요." : exact.copy} 타임라인 ${timelineTime.toFixed(1)}초`}</p>

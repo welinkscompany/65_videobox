@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 
 import type { EditorViewModel } from "../editorViewModel";
 import { gapReasonLabel, TimelineDock } from "./TimelineDock";
+import { createPlaybackClock } from "../preview/playbackClock";
 
 afterEach(cleanup);
 
@@ -1961,5 +1962,82 @@ describe("눈금 간격 (스파이크 H-e)", () => {
     fireEvent.click(timelineClipSelection("b-zzz"));
     fireEvent.click(timelineClipSelection("b-aaa"));
     expect(onSelectSegment.mock.calls.map((call) => call[0])).toEqual(["segment-2", "segment-1"]);
+  });
+
+  describe("재생 시계(2026-10-09 계획 P Task 2)", () => {
+    const pxPerSec = () => Number(screen.getByRole("region", { name: "타임라인" }).getAttribute("data-pixels-per-second"));
+    it("재생 중 시계가 흐르면 재생 머리는 transform만 움직이고 left는 React 상태를 따른다", () => {
+      const clock = createPlaybackClock(2);
+      render(<TimelineDock playbackClock={clock} playbackSec={2} view={view} viewportWidthPx={1000} />);
+      const playhead = screen.getByTestId("timeline-playhead");
+      const left = playhead.style.left;
+      act(() => clock.publish(2.5, true));
+      expect(playhead.style.transform).toBe(`translateX(${0.5 * pxPerSec()}px)`);
+      expect(playhead.style.left).toBe(left);
+      expect(playhead).toHaveAttribute("data-seconds", "2");
+    });
+    it("멈춘 뒤 React가 새 재생 위치로 다시 그리면 transform은 지워지고 left가 새 값이다", () => {
+      const clock = createPlaybackClock(2);
+      const { rerender } = render(<TimelineDock playbackClock={clock} playbackSec={2} view={view} viewportWidthPx={1000} />);
+      const playhead = screen.getByTestId("timeline-playhead");
+      act(() => clock.publish(2.5, true));
+      act(() => clock.publish(2.5, false));
+      rerender(<TimelineDock playbackClock={clock} playbackSec={2.5} view={view} viewportWidthPx={1000} />);
+      expect(playhead.style.transform).toBe("");
+      expect(playhead.style.left).toBe(`${2.5 * pxPerSec()}px`);
+      expect(playhead).toHaveAttribute("data-seconds", "2.5");
+    });
+    it("재생 중 React가 다시 그려도(timeupdate) 시계의 앞선 만큼 transform을 바로 다시 잡는다", () => {
+      const clock = createPlaybackClock(2);
+      const { rerender } = render(<TimelineDock playbackClock={clock} playbackSec={2} view={view} viewportWidthPx={1000} />);
+      const playhead = screen.getByTestId("timeline-playhead");
+      act(() => clock.publish(2.3, true));
+      rerender(<TimelineDock playbackClock={clock} playbackSec={2.2} view={view} viewportWidthPx={1000} />);
+      expect(playhead.style.transform).toBe(`translateX(${(2.3 - 2.2) * pxPerSec()}px)`);
+    });
+    it("아래 재생 위치 글자도 재생 중에는 시계를 따르고, 멈추면 상태로 돌아온다", () => {
+      const clock = createPlaybackClock(2);
+      const { rerender } = render(<TimelineDock playbackClock={clock} playbackSec={2} view={view} viewportWidthPx={1000} />);
+      const readout = screen.getByLabelText("재생 위치");
+      expect(readout.textContent).toBe("2초");
+      act(() => clock.publish(2.5, true));
+      expect(readout.textContent).toBe("2.5초");
+      expect(readout.getAttribute("aria-live")).toBe("off");
+      act(() => clock.publish(2.5, false));
+      rerender(<TimelineDock playbackClock={clock} playbackSec={2.5} view={view} viewportWidthPx={1000} />);
+      expect(readout.textContent).toBe("2.5초");
+      expect(readout).toHaveAttribute("data-seconds", "2.5");
+    });
+    it("시계가 보이는 구간 끝을 넘으면 그 순간 그 자리로 넘긴다", () => {
+      const clock = createPlaybackClock(0);
+      render(<TimelineDock playbackClock={clock} playbackSec={0} view={scrollableView} viewportWidthPx={600} />);
+      const timeline = screen.getByRole("region", { name: "타임라인" });
+      expect(timeline).toHaveAttribute("data-viewport-start-seconds", "0");
+      act(() => clock.publish(59, true));
+      expect(timeline).toHaveAttribute("data-viewport-start-seconds", "0");
+      act(() => clock.publish(60.2, true));
+      expect(timeline).toHaveAttribute("data-viewport-start-seconds", "60.2");
+      act(() => clock.publish(60.3, true));
+      expect(timeline).toHaveAttribute("data-viewport-start-seconds", "60.2");
+    });
+    it("사용자가 옆으로 밀어 두면 다시 재생하기 전까지 시계가 구간을 끌어오지 않는다", () => {
+      const clock = createPlaybackClock(0);
+      render(<TimelineDock playbackClock={clock} playbackSec={0} view={scrollableView} viewportWidthPx={600} />);
+      const timeline = screen.getByRole("region", { name: "타임라인" });
+      act(() => clock.publish(1, true));
+      fireEvent.wheel(timeline, { deltaX: 100 });
+      const pushed = timeline.getAttribute("data-viewport-start-seconds");
+      expect(pushed).not.toBe("0");
+      act(() => clock.publish(Number(pushed) - 5, true)); // 보이는 구간 앞쪽 밖
+      act(() => clock.publish(75, true));
+      expect(timeline.getAttribute("data-viewport-start-seconds")).toBe(pushed);
+      act(() => clock.publish(75, false));
+      act(() => clock.publish(75.1, true)); // 다시 재생 시작
+      expect(timeline.getAttribute("data-viewport-start-seconds")).toBe("75.1");
+    });
+    it("시계 없이도 예전과 똑같이 동작한다(재생 머리 transform 없음)", () => {
+      render(<TimelineDock playbackSec={2} view={view} viewportWidthPx={1000} />);
+      expect(screen.getByTestId("timeline-playhead").style.transform).toBe("");
+    });
   });
 });

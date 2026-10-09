@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { Eye, EyeOff, Lock, Unlock, Volume2, VolumeX } from "lucide-react";
 import { clipContentLabel } from "./clipNames";
 
@@ -21,6 +21,7 @@ import {
   type TimelineNavigationAction,
   type TimelineNavigationState,
 } from "./timelineNavigation";
+import type { PlaybackClock, PlaybackClockReading } from "../preview/playbackClock";
 import { fitPixelsPerSecond, initialPixelsPerSecond, pixelsPerSecondBounds } from "./timelineZoomScale";
 import { timelineZoomShortcutFor, type TimelineZoomCommand } from "./timelineZoomShortcuts";
 import { timelineWheelGestureFor } from "./timelineWheelGesture";
@@ -94,6 +95,8 @@ type Props = Readonly<{
   onUpdateTrackStates?: (states: Record<string, { hidden?: boolean; muted?: boolean }>) => void | Promise<void>;
   onSelectSegment?: (segmentId: string) => void;
   onPlaybackSeek?: (seconds: number) => void;
+  /** 재생 중 화면 프레임마다 시각을 알리는 시계. 없으면 재생 머리는 예전처럼 `playbackSec`만 따른다. */
+  playbackClock?: PlaybackClock;
   selectedSegmentId?: string | null;
   selectionResetKey?: string | number | null;
   playbackSec?: number;
@@ -261,7 +264,7 @@ function navigationReducer(
   return reduceTimelineNavigation(state, action, options);
 }
 
-export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, onTrimNarration, onReorderNarration, onUpdatePlacements, onUpdateTrackStates, onSelectSegment, onPlaybackSeek, onDropAsset, selectedSegmentId = null, selectionResetKey = null, playbackSec, isSaving = false, mutationMessage, mutationWaitNotice = null, editToolbar, zoomCommand = null }: Props) {
+export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, onTrimNarration, onReorderNarration, onUpdatePlacements, onUpdateTrackStates, onSelectSegment, onPlaybackSeek, onDropAsset, selectedSegmentId = null, selectionResetKey = null, playbackSec, isSaving = false, mutationMessage, mutationWaitNotice = null, editToolbar, zoomCommand = null, playbackClock }: Props) {
   // 늘리기·줄이기의 한계는 **영상 길이와 화면 폭에서 나온다.** 줄이기는 영상
   // 전체가 한 화면에 들어온 자리에서 멈추고, 늘리기는 프레임이 보이는 자리에서
   // 멈춘다(`timelineZoomScale.ts`).
@@ -386,6 +389,10 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   // 우리가 방금 소유자에게 올려보낸 위치. 그것이 `playbackSec`으로 되돌아왔을 때
   // 다시 seek하지 않기 위한 표식이다.
   const reportedPlayheadRef = useRef<number | null>(null);
+  const playheadRef = useRef<HTMLDivElement | null>(null);
+  const readoutRef = useRef<HTMLSpanElement | null>(null);
+  const userScrolledRef = useRef(false);
+  const followIssuedForStartRef = useRef<number | null>(null);
   useEffect(() => {
     reportedPlayheadRef.current = state.playheadSec;
     onPlaybackSeekRef.current?.(state.playheadSec);
@@ -413,12 +420,56 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   // deps는 **재생 위치 하나뿐**이다. viewportStartSec까지 넣으면 편집자가 다른
   // 구간을 보려고 옆으로 밀어 둔 뷰포트를 재생 위치가 도로 끌어당긴다.
   useEffect(() => {
+    // 재생 중에 사용자가 옆으로 밀어 두었으면 다시 재생하기 전까지 끌어오지 않는다.
+    if (userScrolledRef.current && playbackClock?.read().playing) return;
     const followEndSec = resolveViewportEnd(state, view.output.durationSec, trackWidthPx);
     if (state.playheadSec >= state.viewportStartSec && state.playheadSec <= followEndSec) return;
     dispatch({ type: "scroll", seconds: state.playheadSec });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.playheadSec]);
   const viewportEndSec = resolveViewportEnd(state, view.output.durationSec, trackWidthPx);
+  // 재생 시계가 DOM을 직접 고칠 때 쓰는 최신 값. 구독을 렌더마다 다시 붙이지 않으려고 ref로 들고 간다(`runZoomRef` 패턴).
+  const clockView = useRef({ playheadSec: state.playheadSec, pixelsPerSecond: state.pixelsPerSecond, viewportStartSec: state.viewportStartSec, viewportEndSec, durationSec: view.output.durationSec });
+  clockView.current = { playheadSec: state.playheadSec, pixelsPerSecond: state.pixelsPerSecond, viewportStartSec: state.viewportStartSec, viewportEndSec, durationSec: view.output.durationSec };
+  /** 시계가 상태보다 이 초 넘게 앞서면(탐색 직후의 낡은 값 등) 믿지 않고 상태 자리에 둔다. */
+  const CLOCK_TRUST_SEC = 1.5;
+  const showClockReading = (reading: PlaybackClockReading) => {
+    const latest = clockView.current;
+    const playhead = playheadRef.current;
+    if (playhead) {
+      const delta = reading.seconds - latest.playheadSec;
+      playhead.style.transform = Math.abs(delta) < 1e-9 || Math.abs(delta) > CLOCK_TRUST_SEC ? "" : `translateX(${delta * latest.pixelsPerSecond}px)`;
+    }
+    const readout = readoutRef.current;
+    if (readout) {
+      const text = formatSeconds(Number(reading.seconds.toFixed(2)));
+      if (readout.textContent !== text) readout.textContent = text;
+    }
+  };
+  // 렌더마다: 상태가 따라왔으니 멈춘 상태면 transform을 지우고 글자를 상태로 돌린다. 재생 중이면 시계가 아직 앞선 만큼 바로 다시 잡는다
+  // (그냥 지우면 timeupdate마다 머리가 옛 자리로 한 프레임 물러난다).
+  useLayoutEffect(() => {
+    const reading = playbackClock?.read();
+    if (reading?.playing) { showClockReading(reading); return; }
+    if (playheadRef.current) playheadRef.current.style.transform = "";
+    if (readoutRef.current) readoutRef.current.textContent = formatSeconds(state.playheadSec);
+  });
+  useEffect(() => {
+    if (!playbackClock) return undefined;
+    let wasPlaying = playbackClock.read().playing;
+    return playbackClock.subscribe((reading) => {
+      if (reading.playing && !wasPlaying) userScrolledRef.current = false; // 다시 재생하면 따라가기도 다시 시작
+      wasPlaying = reading.playing;
+      showClockReading(reading);
+      if (!reading.playing || userScrolledRef.current) return;
+      const latest = clockView.current;
+      // 보이는 구간 끝을 넘은 순간 한 번만 넘긴다(넘긴 뒤 화면이 따라오기 전의 프레임들에서 다시 넘기지 않는다).
+      if (reading.seconds <= latest.viewportEndSec || reading.seconds > latest.durationSec) return;
+      if (followIssuedForStartRef.current === latest.viewportStartSec) return;
+      followIssuedForStartRef.current = latest.viewportStartSec;
+      dispatch({ type: "scroll", seconds: reading.seconds });
+    });
+  }, [playbackClock]);
   const rects = useMemo(() => projectVisibleTimelineClips({
     clips: clipSources(view),
     viewport: { startSec: state.viewportStartSec, endSec: viewportEndSec, topPx: 0, heightPx: TIMELINE_LANES.length * laneHeightPx },
@@ -586,6 +637,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
       return;
     }
     const deltaSec = pixelsToTime(gesture.deltaPx, { pixelsPerSecond: state.pixelsPerSecond, originSec: 0 });
+    userScrolledRef.current = true;
     dispatch({ type: "scroll", seconds: state.viewportStartSec + deltaSec });
   };
   // 매번 새로 만든 함수를 다시 달지 않는다. 다시 달면 그 사이에 굴린 바퀴를 놓치고,
@@ -1249,6 +1301,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
         className="vb-timeline-playhead"
         data-seconds={formatSeconds(state.playheadSec)}
         data-testid="timeline-playhead"
+        ref={playheadRef}
         style={{ left: `${playheadX}px` }}
       ><span aria-hidden="true" className="vb-timeline-playhead__grip" />{/*
         캡컷처럼 재생 머리를 잡고 문지른다. 클릭만 되던 때는 자를 자리를 찾으려면
@@ -1283,7 +1336,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
           주지 않는다 -- 화면 읽기 프로그램이 계속 떠들게 된다. 위 문장이
           이미 살아 있는 영역이다. */}
       {mutationWaitNotice ? <p aria-label="편집 기다린 시간">{mutationWaitNotice}</p> : null}
-      <output aria-label="재생 위치" data-seconds={formatSeconds(state.playheadSec)}>{formatSeconds(state.playheadSec)}초</output>
+      <output aria-label="재생 위치" aria-live="off" data-seconds={formatSeconds(state.playheadSec)}><span ref={readoutRef} />초</output>
       {draftProjection.rects.length === 0 && visibleGaps.length === 0 ? <p>타임라인이 비어 있어요.</p> : null}
     </div>
   </section>;
