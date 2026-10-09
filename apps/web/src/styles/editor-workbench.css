@@ -539,7 +539,13 @@
 .vb-preview-stage__rate-hint { position: absolute; right: 0; bottom: 100%; z-index: 1; padding: var(--vb-space-1) var(--vb-space-2); border: 1px solid var(--border); border-radius: var(--vb-radius-sm); background: var(--background); color: var(--vb-muted); font-size: var(--vb-text-sm); white-space: nowrap; pointer-events: none; }
 .vb-preview-stage__rate select { width: auto; height: 1.5rem; min-height: 0; padding: 0 var(--vb-space-2); border-radius: var(--vb-radius-sm); font-size: var(--vb-text-sm); line-height: 1.4; }
 /* 단축키 안내: 대화 상자가 아니라 재생줄 바로 아래에 펼쳐지는 작은 쪽지. 메뉴처럼 보이지 않게 단추 모양을 주지 않는다. */
-.vb-preview-stage__shortcuts { flex: 1 0 100%; padding: var(--vb-space-2) var(--vb-space-3); border: 1px solid var(--border); border-radius: var(--vb-radius-sm); font-size: var(--vb-text-sm); max-height: min(60vh, 28rem); overflow-y: auto; }
+/* 단축키 안내는 **미리보기 칸 안에 뜨는 떠 있는 안내**다(흐름에 끼지 않는다). 흐름에 끼면 재생 줄이 448px까지 커져서 375에서는 미리보기 카드가 잘라 냈고(880>812),
+   1280에서도 아래쪽이 유진 단추 밑으로 들어갔다. 이제 칸 위쪽에 붙고 키는 칸 높이에서 유진 단추 자리(--vb-yujin-toggle-clearance)를 뺀 만큼만 자라며,
+   넘치면 안에서 스크롤한다. 대화 상자가 아니다 -- 초점을 가두지 않고 키 처리도 막지 않는다. */
+.vb-preview-stage { position: relative; --vb-yujin-toggle-clearance: 3.5rem; }
+.vb-preview-stage__shortcuts { position: absolute; z-index: 21; top: var(--vb-space-2); inset-inline: var(--vb-space-2); box-sizing: border-box; padding: var(--vb-space-2) var(--vb-space-3); border: 1px solid var(--vb-border-strong); border-radius: var(--vb-radius-sm); background: var(--vb-panel); color: var(--foreground); font-size: var(--vb-text-sm); max-height: calc(100% - var(--vb-yujin-toggle-clearance) - var(--vb-space-2)); overflow-y: auto; overscroll-behavior: contain; }
+.vb-preview-stage__shortcuts-close { position: sticky; top: 0; float: right; margin-left: var(--vb-space-2); }
+.vb-preview-stage__playback[data-idle="true"]:has(#vb-playback-shortcuts) { opacity: 1; }
 .vb-preview-stage__shortcuts h3 { margin: var(--vb-space-2) 0 var(--vb-space-1); font-size: var(--vb-text-sm); font-weight: 600; }
 .vb-preview-stage__shortcuts h3:first-child { margin-top: 0; }
 .vb-preview-stage__shortcut-tag { color: var(--vb-muted); white-space: nowrap; }
