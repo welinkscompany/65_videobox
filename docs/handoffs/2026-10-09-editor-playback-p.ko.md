@@ -1,5 +1,7 @@
 # 편집기 재생 수리 마감 — 계획 P Task 0~7 (2026-10-09)
 
+**대체됨:** `docs/handoffs/2026-10-09-editor-faster-play-zoom-capcut-keys.ko.md`
+
 **이어받는 문서:** `2026-10-09-editor-core-repair-checkpoint.ko.md` (계획 H Task 0~12까지 끝, 13~18 남음)
 계획서: `docs/superpowers/plans/2026-10-09-editor-playback-p.ko.md` · 진단: `docs/superpowers/2026-10-09-playback-diagnosis.ko.md`
 작업 장부: `.superpowers/sdd/2026-10-09-editor-playback-p.ko/progress.md` · 마감 보고서: `.superpowers/sdd/playback-closeout-2026-10-09.md`
