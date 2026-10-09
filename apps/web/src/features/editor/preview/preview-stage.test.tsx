@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { PreviewStage } from "./preview-stage";
 import { createPlaybackClock } from "./playbackClock";
+import { PLAYBACK_RATE_STORAGE_KEY } from "./playbackRate";
 
 beforeEach(() => { vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
@@ -708,5 +709,154 @@ describe("PreviewStage", () => {
       render(<PreviewStage {...current} durationSec={12} playbackSec={2} />);
       expect(document.querySelector(".vb-preview-stage__playback output")?.textContent).toBe("타임라인 2.0 / 12.0초");
     });
+  });
+});
+
+describe("재생 빠르기와 J·K·L·화살표 (2026-10-09 계획 P Task 4)", () => {
+  beforeEach(() => { try { window.localStorage.removeItem(PLAYBACK_RATE_STORAGE_KEY); } catch { /* ignore */ } });
+  const player = (props: Partial<React.ComponentProps<typeof PreviewStage>> = {}, state: { paused: boolean; time?: number } = { paused: true }) => {
+    const view = render(<PreviewStage {...current} fps={{ num: 30, den: 1 }} {...props} />);
+    const media = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+    const flags = { paused: state.paused, time: state.time ?? 0 };
+    Object.defineProperty(media, "paused", { configurable: true, get: () => flags.paused });
+    Object.defineProperty(media, "currentTime", { configurable: true, get: () => flags.time, set: (value: number) => { flags.time = value; } });
+    const play = vi.spyOn(media, "play").mockImplementation(async () => { flags.paused = false; });
+    const pause = vi.spyOn(media, "pause").mockImplementation(() => { flags.paused = true; });
+    return { media, flags, play, pause, ...view };
+  };
+  const select = () => screen.getByLabelText("재생 빠르기") as HTMLSelectElement;
+  const press = (key: string, init: KeyboardEventInit = {}) => fireEvent.keyDown(document.body, { key, ...init });
+
+  it("처음에는 1배이고 재생기도 1배다", () => {
+    const { media } = player();
+    expect(select().value).toBe("1");
+    expect(media.playbackRate).toBe(1);
+    expect(select().tagName).toBe("SELECT");
+    expect([...select().options].map((option) => option.textContent)).toEqual(["0.25배", "0.5배", "0.75배", "1배", "1.5배", "2배"]);
+  });
+  it("0.5를 고르면 재생기에 바로 걸고 기억한다", () => {
+    const { media } = player();
+    fireEvent.change(select(), { target: { value: "0.5" } });
+    expect(media.playbackRate).toBe(0.5);
+    expect(media.defaultPlaybackRate).toBe(0.5);
+    expect(window.localStorage.getItem(PLAYBACK_RATE_STORAGE_KEY)).toBe("0.5");
+  });
+  it("저장된 0.75가 있으면 처음부터 0.75다", () => {
+    window.localStorage.setItem(PLAYBACK_RATE_STORAGE_KEY, "0.75");
+    const { media } = player();
+    expect(select().value).toBe("0.75");
+    fireEvent.loadedMetadata(media);
+    expect(media.playbackRate).toBe(0.75);
+  });
+  it("새 소스가 열려도 같은 빠르기를 다시 건다(소스가 바뀌면 재생기가 1배로 돌아간다)", () => {
+    const { media, rerender } = player();
+    fireEvent.change(select(), { target: { value: "0.5" } });
+    rerender(<PreviewStage {...current} fps={{ num: 30, den: 1 }} exactPreview={{ ...current.exactPreview, url: "/api/exact-2.mp4" }} />);
+    const next = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+    fireEvent.loadedMetadata(next);
+    expect(next.playbackRate).toBe(0.5);
+    expect(media.defaultPlaybackRate).toBe(0.5);
+  });
+  it("원본 보기(audition)로 바꿔도 같은 빠르기가 걸린다", () => {
+    const { rerender } = player();
+    fireEvent.change(select(), { target: { value: "2" } });
+    rerender(<PreviewStage {...current} fps={{ num: 30, den: 1 }} auditionRequest={{ requestId: 1, source: { ...current.sources[0], label: "B-roll A" } }} />);
+    const audition = screen.getByLabelText("B-roll A 원본 재생") as HTMLVideoElement;
+    fireEvent.loadedMetadata(audition);
+    expect(audition.playbackRate).toBe(2);
+  });
+  it("소리 원본(새 <audio> 요소)으로 바꿔도 같은 빠르기가 걸린다", () => {
+    const { rerender } = player();
+    fireEvent.change(select(), { target: { value: "0.5" } });
+    rerender(<PreviewStage {...current} fps={{ num: 30, den: 1 }} auditionRequest={{ requestId: 2, source: { id: "song", label: "배경 음악", url: "/api/assets/song/content", mediaKind: "audio", timelineRange: { startSec: 0, endSec: 5 } } }} />);
+    const audio = screen.getByLabelText("배경 음악 원본 재생") as HTMLAudioElement;
+    expect(audio.tagName).toBe("AUDIO");
+    expect(audio.playbackRate).toBe(0.5);
+    fireEvent.loadedMetadata(audio);
+    expect(audio.playbackRate).toBe(0.5);
+  });
+  it("재생기가 스스로 빠르기를 바꾸면(ratechange) 고르기가 따라간다", () => {
+    const { media } = player();
+    act(() => { media.playbackRate = 1.5; });
+    fireEvent.rateChange(media);
+    expect(select().value).toBe("1.5");
+  });
+  it("재생 빠르기 고르기에서 스페이스는 재생을 건드리지 않는다", () => {
+    const { play, pause } = player();
+    fireEvent.keyDown(select(), { key: " " });
+    expect(play).not.toHaveBeenCalled();
+    expect(pause).not.toHaveBeenCalled();
+  });
+  it("재생 빠르기 고르기에서는 J·K·L도 건드리지 않는다(글자 찾기용)", () => {
+    const { play } = player();
+    fireEvent.keyDown(select(), { key: "l" });
+    expect(play).not.toHaveBeenCalled();
+    expect(select().value).toBe("1");
+  });
+  it("멈춘 상태에서 L은 지금 빠르기로 재생만 한다", () => {
+    const { play } = player();
+    press("l");
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(select().value).toBe("1");
+  });
+  it("재생 중 L은 1.5 -> 2 -> 2", () => {
+    const { media } = player({}, { paused: false });
+    press("l"); expect(media.playbackRate).toBe(1.5); expect(select().value).toBe("1.5");
+    press("l"); expect(media.playbackRate).toBe(2);
+    press("l"); expect(media.playbackRate).toBe(2); expect(select().value).toBe("2");
+  });
+  it("재생 중 J는 한 단계씩 느리게(2에서 시작: 1.5 -> 1 -> 0.75 -> 0.5)", () => {
+    window.localStorage.setItem(PLAYBACK_RATE_STORAGE_KEY, "2");
+    const { media } = player({}, { paused: false });
+    const seen: number[] = [];
+    for (let i = 0; i < 4; i += 1) { press("j"); seen.push(media.playbackRate); }
+    expect(seen).toEqual([1.5, 1, 0.75, 0.5]);
+  });
+  it("멈춘 상태에서 J는 한 단계 느리게 하고 재생한다", () => {
+    const { media, play } = player();
+    press("j");
+    expect(media.playbackRate).toBe(0.75);
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+  it("K는 빠르기를 그대로 두고 멈춘다", () => {
+    window.localStorage.setItem(PLAYBACK_RATE_STORAGE_KEY, "1.5");
+    const { pause, media } = player({}, { paused: false });
+    press("k");
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(media.currentTime).toBe(0);
+    expect(select().value).toBe("1.5");
+  });
+  it("오른쪽 화살표는 멈추고 한 프레임 앞, 왼쪽은 한 프레임 뒤", () => {
+    const { pause, flags } = player({}, { paused: false, time: 2 });
+    press("ArrowRight");
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(flags.time).toBeCloseTo(2 + 1 / 30, 5);
+    press("ArrowLeft");
+    expect(flags.time).toBeCloseTo(2, 5);
+  });
+  it("타임라인 면 안의 화살표는 미리보기가 받지 않는다(타임라인이 받는다)", () => {
+    const { flags } = player({}, { paused: true, time: 2 });
+    const surface = document.createElement("div");
+    surface.setAttribute("data-timeline-surface", "true");
+    const clip = document.createElement("button");
+    surface.appendChild(clip); document.body.appendChild(surface);
+    fireEvent.keyDown(clip, { key: "ArrowRight" });
+    expect(flags.time).toBe(2);
+    surface.remove();
+  });
+  it("화살표를 쓰는 슬라이더 위에서는 한 프레임 이동을 가로채지 않는다", () => {
+    const { flags } = player({}, { paused: true, time: 2 });
+    const slider = document.createElement("div");
+    slider.setAttribute("role", "slider"); document.body.appendChild(slider);
+    fireEvent.keyDown(slider, { key: "ArrowRight" });
+    expect(flags.time).toBe(2);
+    slider.remove();
+  });
+  it("글쓰는 중에는 L이 글자 그대로다", () => {
+    const { play } = player();
+    const field = document.createElement("input"); document.body.appendChild(field);
+    fireEvent.keyDown(field, { key: "l" });
+    expect(play).not.toHaveBeenCalled();
+    field.remove();
   });
 });

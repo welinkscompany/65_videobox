@@ -91,3 +91,85 @@ test("스페이스는 영상 그림을 누른 뒤에도·타임라인을 누른 
     expect((await state()).paused).toBe(true);
   }
 });
+
+// 계획 P Task 4: 재생 빠르기 0.25~2배. 보는 속도만 바뀐다(완성 영상은 그대로).
+test("재생 빠르기 0.5배·2배가 실제로 그만큼 흐르고, 다시 열어도 기억한다", async ({ page }) => {
+  test.setTimeout(420_000);
+  await installPlaybackProbe(page);
+  await withLongPreview(page);
+  await openEditor(page, readFixture().playback);
+  await expect(page.getByLabel("편집본 미리보기")).toBeVisible({ timeout: 90_000 });
+  await page.waitForFunction(() => document.querySelector("video")?.readyState >= 2);
+  const rateSelect = () => page.getByLabel("재생 빠르기");
+  const videoState = () => page.evaluate(() => { const v = document.querySelector("video"); return { paused: v.paused, rate: v.playbackRate, defaultRate: v.defaultPlaybackRate }; });
+  const blur = () => page.evaluate(() => document.activeElement?.blur?.());
+  const pauseNow = () => page.evaluate(() => { window.__pb.harness = true; document.querySelector("video").pause(); window.__pb.harness = false; });
+
+  // 0.5배: 3회 잰다.
+  await rateSelect().selectOption("0.5");
+  expect((await videoState()).rate).toBe(0.5);
+  const half = [];
+  for (const startSec of [0, 6, 12]) half.push(await measurePlayback(page, { startSec, seconds: 8, start: "button" }));
+  console.log("PLAYBACK_0_5X", JSON.stringify(half));
+  for (const run of half) { expect(run.appSeeksWhilePlaying).toBe(0); expect(run.mediaTimeBackwardSteps).toBe(0); }
+  expect(median(half.map((r) => r.effectiveRate))).toBeGreaterThanOrEqual(0.45);
+  expect(median(half.map((r) => r.effectiveRate))).toBeLessThanOrEqual(0.55);
+  expect(median(half.map((r) => r.playheadGapP95))).toBeLessThanOrEqual(100);   // 실측 p95 18~19(절반 속도라 같은 픽셀이 두 배 머물러도 낮다)
+
+  // L: 멈춰 있으면 지금 빠르기(0.5)로 재생만 한다. K: 멈춘다(빠르기 그대로).
+  await pauseNow(); await blur();
+  await page.keyboard.press("l");
+  await page.waitForTimeout(300);
+  let state = await videoState();
+  expect(state.paused).toBe(false); expect(state.rate).toBe(0.5);
+  await page.keyboard.press("k");
+  await page.waitForTimeout(200);
+  state = await videoState();
+  expect(state.paused).toBe(true); expect(state.rate).toBe(0.5);
+  expect(await rateSelect().inputValue()).toBe("0.5");
+
+  // 재생 중 L 두 번: 0.5 -> 0.75 -> 1 ... 에서 올라간다. 2배까지 L로 올린다.
+  await rateSelect().selectOption("1");
+  await pauseNow(); await blur();
+  await page.keyboard.press("l");              // 멈춰 있었으니 재생만
+  await page.waitForTimeout(300);
+  await page.keyboard.press("l");              // 1 -> 1.5
+  await page.keyboard.press("l");              // 1.5 -> 2
+  await page.waitForTimeout(200);
+  state = await videoState();
+  expect(state.rate).toBe(2); expect(state.defaultRate).toBe(2);
+  expect(await rateSelect().inputValue()).toBe("2");
+  await pauseNow();
+
+  // 2배: 3회 잰다.
+  const double = [];
+  for (const startSec of [0, 6, 12]) double.push(await measurePlayback(page, { startSec, seconds: 8, start: "button" }));
+  console.log("PLAYBACK_2X", JSON.stringify(double));
+  for (const run of double) { expect(run.appSeeksWhilePlaying).toBe(0); expect(run.mediaTimeBackwardSteps).toBe(0); }
+  expect(median(double.map((r) => r.effectiveRate))).toBeGreaterThanOrEqual(1.8);
+  expect(median(double.map((r) => r.effectiveRate))).toBeLessThanOrEqual(2.1);
+  expect(median(double.map((r) => r.playheadGapP95))).toBeLessThanOrEqual(100);
+
+  // 다시 열어도 기억한다(localStorage).
+  await page.reload();
+  await expect(page.getByLabel("편집본 미리보기")).toBeVisible({ timeout: 90_000 });
+  await page.waitForFunction(() => document.querySelector("video")?.readyState >= 1);
+  expect(await rateSelect().inputValue()).toBe("2");
+  await expect.poll(async () => (await videoState()).rate).toBe(2);
+
+  // J로 1배까지 내려 놓는다: 2 -> 1.5 -> 1. 화살표는 멈추고 한 프레임.
+  await blur();
+  await page.keyboard.press("j"); await page.keyboard.press("j");
+  expect(await rateSelect().inputValue()).toBe("1");
+  await pauseNow(); await blur();
+  const t0 = await page.evaluate(() => document.querySelector("video").currentTime);
+  await page.keyboard.press("ArrowRight");
+  await page.waitForTimeout(300);
+  const t1 = await page.evaluate(() => document.querySelector("video").currentTime);
+  expect(t1 - t0).toBeGreaterThan(0.02);
+  expect(t1 - t0).toBeLessThan(0.1);
+  await page.keyboard.press("ArrowLeft");
+  await page.waitForTimeout(300);
+  const t2 = await page.evaluate(() => document.querySelector("video").currentTime);
+  expect(Math.abs(t2 - t0)).toBeLessThan(0.02);
+});

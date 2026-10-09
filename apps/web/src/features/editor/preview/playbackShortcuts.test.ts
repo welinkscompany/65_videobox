@@ -53,3 +53,42 @@ describe("playbackShortcutFor", () => {
     expect(isTypingTarget(null)).toBe(false);
   });
 });
+
+describe("playbackShortcutFor J/K/L와 화살표", () => {
+  const body = () => document.body;
+  const inTimeline = () => el("<div data-timeline-surface='true'><button id=t></button></div>", "#t");
+  it.each([
+    ["k -> 멈춤", () => key(body(), { key: "k" }), { type: "pause" }],
+    ["l -> 빠르게", () => key(body(), { key: "l" }), { type: "faster" }],
+    ["j -> 느리게", () => key(body(), { key: "j" }), { type: "slower" }],
+    ["L(shift) -> 빠르게", () => key(body(), { key: "L", shiftKey: true }), { type: "faster" }],
+    ["J(shift) -> 느리게", () => key(body(), { key: "J", shiftKey: true }), { type: "slower" }],
+    ["K(대문자) -> 멈춤", () => key(body(), { key: "K" }), { type: "pause" }],
+    ["l 단추 위에서도 받는다", () => key(el("<button id=t></button>", "#t"), { key: "l" }), { type: "faster" }],
+    ["l 타임라인 안 단추", () => key(inTimeline(), { key: "l" }), { type: "faster" }],
+    ["l 입력칸 -> null", () => key(el("<input id=t>", "#t"), { key: "l" }), null],
+    ["l select -> null", () => key(el("<select id=t></select>", "#t"), { key: "l" }), null],
+    ["l ctrl -> null", () => key(body(), { key: "l", ctrlKey: true }), null],
+    ["l 꾹 누름 -> null", () => key(body(), { key: "l", repeat: true }), null],
+    ["l 모달 안 -> null", () => key(el("<div aria-modal='true'><button id=t></button></div>", "#t"), { key: "l" }), null],
+    ["ArrowRight 본문 -> +1", () => key(body(), { key: "ArrowRight" }), { type: "step", frames: 1 }],
+    ["ArrowLeft 본문 -> -1", () => key(body(), { key: "ArrowLeft" }), { type: "step", frames: -1 }],
+    ["ArrowRight 단추 위 -> +1", () => key(el("<button id=t></button>", "#t"), { key: "ArrowRight" }), { type: "step", frames: 1 }],
+    ["ArrowRight 미리보기 판 -> +1", () => key(el("<section tabindex='0' id=t></section>", "#t"), { key: "ArrowRight" }), { type: "step", frames: 1 }],
+    ["ArrowRight 타임라인 면 안 -> null", () => key(inTimeline(), { key: "ArrowRight" }), null],
+    ["ArrowLeft slider -> null", () => key(el("<div role='slider' id=t></div>", "#t"), { key: "ArrowLeft" }), null],
+    ["ArrowRight separator -> null", () => key(el("<div role='separator' id=t></div>", "#t"), { key: "ArrowRight" }), null],
+    ["ArrowRight spinbutton -> null", () => key(el("<div role='spinbutton' id=t></div>", "#t"), { key: "ArrowRight" }), null],
+    ["ArrowRight radio -> null", () => key(el("<div role='radio' id=t></div>", "#t"), { key: "ArrowRight" }), null],
+    ["ArrowRight tab -> null", () => key(el("<div role='tab' id=t></div>", "#t"), { key: "ArrowRight" }), null],
+    ["ArrowRight menuitem -> null", () => key(el("<div role='menuitem' id=t></div>", "#t"), { key: "ArrowRight" }), null],
+    ["ArrowRight option -> null", () => key(el("<div role='option' id=t></div>", "#t"), { key: "ArrowRight" }), null],
+    ["ArrowRight select -> null", () => key(el("<select id=t></select>", "#t"), { key: "ArrowRight" }), null],
+    ["ArrowRight 입력칸 -> null", () => key(el("<input id=t>", "#t"), { key: "ArrowRight" }), null],
+    ["Shift+ArrowRight -> null", () => key(body(), { key: "ArrowRight", shiftKey: true }), null],
+    ["ArrowRight ctrl -> null", () => key(body(), { key: "ArrowRight", ctrlKey: true }), null],
+    ["ArrowRight 이미 막힘 -> null", () => key(body(), { key: "ArrowRight", defaultPrevented: true }), null],
+  ] as const)("%s", (_name, make, expected) => {
+    expect(playbackShortcutFor(make())).toEqual(expected);
+  });
+});
