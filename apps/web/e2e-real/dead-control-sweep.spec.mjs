@@ -273,7 +273,18 @@ test("편집기 조작 전부를 진짜 백엔드에서 눌러 죽은 단추를 
     if (!edits.length) return false;
     restoreChecked = Date.now();
     // 서버가 열어 둔 파일이 있어 폴더째 지우면 윈도우가 거절한다. 시드 파일을 위에 덮어쓴다(편집이 쓰는 것은 세션·편집판 JSON).
-    cpSync(pristineDir, projectDir(), { recursive: true, force: true, filter: (source) => !/\.(mp4|wav|png|jpe?g)$/i.test(source) });
+    // 서버가 sqlite를 잡고 있으면 가끔 EPIPE로 거절한다 -- 몇 번 다시 해 보고, 그래도 안 되면 DB 파일만 빼고 덮어쓴다.
+    const copyFilter = (skipDb) => (source) => !/\.(mp4|wav|png|jpe?g)$/i.test(source) && !(skipDb && /\.sqlite(-wal|-shm)?$/i.test(source));
+    let copied = false;
+    for (let attempt = 0; attempt < 6 && !copied; attempt += 1) {
+      try {
+        cpSync(pristineDir, projectDir(), { recursive: true, force: true, filter: copyFilter(false) });
+        copied = true;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    }
+    if (!copied) cpSync(pristineDir, projectDir(), { recursive: true, force: true, filter: copyFilter(true) });
     restores.push({ at: new Date().toISOString(), revisionAfterRestore: await sessionRevision() });
     return true;
   }
@@ -460,6 +471,8 @@ test("편집기 조작 전부를 진짜 백엔드에서 눌러 죽은 단추를 
         sinceOpen += 1;
         if (result.newControls.length) children.push({ item, result });
         await page.keyboard.press("Escape").catch(() => {});
+        // 머리 없는 브라우저에서는 Esc로 전체화면이 안 풀려 영상이 뒤 단추를 다 덮는다(진짜 결함이 아니라 재는 쪽 문제).
+        await page.evaluate(() => (document.fullscreenElement ? document.exitFullscreen() : null)).catch(() => {});
         await page.waitForTimeout(150);
         const stillOpen = await page.evaluate(() => window.__census.overlays()).catch(() => 99);
         if (result.reaction.urlChanged || result.pageErrors.length || stillOpen > 0) needReopen = true;
