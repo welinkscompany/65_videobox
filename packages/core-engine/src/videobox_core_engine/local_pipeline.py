@@ -81,6 +81,10 @@ _logger = logging.getLogger(__name__)
 
 #: 미리보기 렌더 시도 횟수 상한(첫 시도 포함). 오디오 조기 종료 하나에만 쓴다.
 _EXACT_PREVIEW_MAX_RENDER_ATTEMPTS = 2
+# 미리보기 렌더(ffmpeg)는 동시에 하나만 돈다. 편집 한 번마다 미리보기 요청이 하나씩 나가고 요청마다 스레드가
+# 하나씩 떠서, 편집을 몰아치면 ffmpeg가 겹겹이 쌓여 API 컨테이너 CPU 200%·메모리 한도(2GiB)까지 올랐다
+# (2026-10-10 실측: 저장 1.6초 -> 9.7초). 기다리는 사이 낡아진 요청은 아래 claim에서 바로 버려진다.
+_EXACT_PREVIEW_RENDER_SLOTS = threading.BoundedSemaphore(1)
 
 # 실패 이유를 자산에 붙여 둔다. 로그는 흘러가지만 이건 남아서, 어떤 자산이 왜
 # 정보 없이 등록됐는지 나중에 찾을 수 있다.
@@ -652,6 +656,11 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         )
 
     def run_exact_preview(self, *, project_id: str, generation_id: str) -> None:
+        # 자리를 먼저 얻고 나서 claim한다 -- 기다리는 동안 더 새 편집이 낡게 만든 요청은 claim이 거절해 렌더 없이 끝난다.
+        with _EXACT_PREVIEW_RENDER_SLOTS:
+            self._run_exact_preview_in_slot(project_id=project_id, generation_id=generation_id)
+
+    def _run_exact_preview_in_slot(self, *, project_id: str, generation_id: str) -> None:
         record = self.store.get_exact_preview(project_id=project_id, generation_id=generation_id)
         owner_token = f"exact-preview-worker:{self.store.exact_preview_process_epoch}:{uuid.uuid4().hex}"
         attempts = 0
