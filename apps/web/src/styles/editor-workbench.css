@@ -10,6 +10,8 @@
 .vb-editor-workbench__toolbar, .vb-editor-workbench__timeline, .vb-editor-workbench__dock, .vb-editor-workbench__preview { border: 1px solid var(--border); border-radius: var(--vb-radius-md); background: var(--card); }
 .vb-editor-workbench__toolbar { display: flex; justify-content: space-between; align-items: center; gap: var(--vb-space-3); padding: var(--vb-space-3) var(--vb-space-4); }
 .vb-editor-workbench__toolbar div { display: flex; gap: var(--vb-space-2); }
+/* 접힌 머리(2026-10-02): 위아래 여백만 줄이고 단추는 오른쪽에 둔다. */
+.vb-editor-workbench__toolbar[data-collapsed="true"] { padding: var(--vb-space-1) var(--vb-space-3); justify-content: flex-end; }
 
 /* **툴바 단추를 캡컷 크기로 줄인다(owner 지시 2026-08-22).**
    > "지금 설명하는 문장이나 글자크기가 커서 버튼 자체가 크잖아"
@@ -449,7 +451,8 @@
   border-top: 1px solid var(--border);
   background: var(--card);
 }
-.vb-editor-variants[data-collapsed="true"] { max-height: none; padding: var(--vb-space-2) var(--vb-space-5); }
+.vb-editor-variants[data-collapsed="true"] { max-height: none; padding: var(--vb-space-1) var(--vb-space-4); }
+.vb-editor-variants[data-collapsed="true"] .vb-editor-variants__header h2 { margin: 0; }
 .vb-editor-variants__header, .vb-editor-variants__pane header {
   display: flex;
   align-items: center;

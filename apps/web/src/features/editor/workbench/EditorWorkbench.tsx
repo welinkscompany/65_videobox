@@ -1,7 +1,7 @@
 import { type CSSProperties, type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { api, type OutputVariant, type OutputVariantPatch } from "../../../api";
-import { ChevronsLeftRight, Copy, PanelRight, Redo2, Scissors, Trash2, Undo2, Upload } from "lucide-react";
+import { ChevronDown, ChevronUp, ChevronsLeftRight, Copy, PanelRight, Redo2, Scissors, Trash2, Undo2, Upload } from "lucide-react";
 
 import { Button } from "../../../components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../../../components/ui/resizable";
@@ -22,7 +22,7 @@ import { isVideoAssetUri } from "../assetKind";
 import { EditorWorkbenchReadOnlyAdapters } from "./editorWorkbenchReadOnlyAdapters";
 import { YujinPanel } from "./YujinPanel";
 import { resolveEditorWorkbenchLayout, timelineHeightLimitsRem, type EditorWorkbenchPersistedState } from "./editorWorkbenchLayout";
-import { hasLegacyEditorUiState, readEditorUiState, readVariantsCollapsed, writeEditorUiState, writeVariantsCollapsed } from "./editorUiState";
+import { hasLegacyEditorUiState, readEditorUiState, readToolbarCollapsedPreference, readVariantsCollapsed, writeEditorUiState, writeToolbarCollapsed, writeVariantsCollapsed } from "./editorUiState";
 import type { RightDockCandidate, RightDockDirector } from "./rightDockTypes";
 import { VariantCompare } from "../variants/VariantCompare";
 import { cutToolbarState, EMPTY_CUT_TOOLS, type CutToolbarState } from "./cutToolbar";
@@ -192,6 +192,8 @@ function EditorWorkbenchInstance({
   // 캡컷처럼 **목적지를 먼저** 보여 주고, 자세한 것은 한 겹 뒤에 둔다.
   const [exportDetails, setExportDetails] = useState(false);
   const [variantsCollapsed, setVariantsCollapsed] = useState(() => readVariantsCollapsed(view.projectId));
+  // 처음 값: 저장된 선택이 있으면 그것, 없으면 낮은 화면(<760px)만 접은 채 시작한다(2026-10-08 §3-9).
+  const [toolbarCollapsed, setToolbarCollapsed] = useState(() => readToolbarCollapsedPreference() ?? window.innerHeight < 760);
   // 위 띠의 화면 비율 자리는 **이 줄이 채운다**(`features/shell/shellCanvas.tsx`).
   // 껍데기가 직접 물어보게 하지 않는 이유는 그쪽 주석에 적었다. 편집기를 떠나면
   // 저절로 지워지므로, 다른 화면에서 남은 값이 보일 일은 없다.
@@ -511,6 +513,7 @@ function EditorWorkbenchInstance({
       };
     });
   };
+  const toggleToolbarCollapsed = () => setToolbarCollapsed((current) => { const next = !current; writeToolbarCollapsed(next); return next; });
   const toggleVariantsCollapsed = () => setVariantsCollapsed((current) => { const next = !current; writeVariantsCollapsed(view.projectId, next); return next; });
   const openManualEditing = () => setUi((current) => layout.mode === "drawer" ? { ...current, activeDrawer: "left" } : { ...current, leftOpen: true });
   const rightDirector = director ? { ...director, onManualEdit: () => { director.onManualEdit(); openManualEditing(); }, onPreviewCandidate: previewDirectorCandidate } : undefined;
@@ -630,7 +633,7 @@ function EditorWorkbenchInstance({
     {/* `현재 편집본`을 뺐다(owner 지시 2026-08-22: 설명 문장을 키워드로).
         늘 같은 글자라 아무것도 말해 주지 않으면서 툴바 자리만 먹었다.
         캡컷 편집기 툴바에는 이런 이름표가 없다 -- 연장만 있다. */}
-    <header className="vb-editor-workbench__toolbar"><strong>편집 작업판</strong><div>
+    <header className="vb-editor-workbench__toolbar" data-collapsed={toolbarCollapsed}><strong className={toolbarCollapsed ? "sr-only" : undefined}>편집 작업판</strong><div>
       {/* 승인 기록 2026-08-20 항목 2: 큰 주황 알약 여덟 개가 줄지어 있던 자리다.
           채운 주황은 이 저장소에서 **강조**를 뜻하므로(활성 메뉴·선택된 항목·주요 단추)
           도구가 전부 그 색이면 강조가 강조를 못 한다. 도구는 조용한 `outline`으로 내리고,
@@ -679,6 +682,9 @@ function EditorWorkbenchInstance({
           부른다 -- 검토 로직을 여기서 새로 적지 않는다. `/review`·`/output`
           라우트는 그대로 남아 있어 주소를 직접 열면 여전히 같은 화면이 뜬다. */}
       <Button type="button" variant="outline" size="icon" title="내보내기 — 완성본 만들기" onClick={() => setExportOpen(true)}><Upload aria-hidden="true" /><span className="sr-only">내보내기</span></Button>
+      {/* 머리를 접으면 이름표만 숨고 단추는 그대로다(2026-10-02). 58px 머리가
+          미리보기 줄 높이를 먹고 있었다. 단추 크기(32px)는 owner 결정이라 안 줄인다. */}
+      <Button type="button" variant="outline" size="icon" title={toolbarCollapsed ? "도구줄 펼치기" : "도구줄 접기"} aria-expanded={!toolbarCollapsed} onClick={toggleToolbarCollapsed}>{toolbarCollapsed ? <ChevronDown aria-hidden="true" /> : <ChevronUp aria-hidden="true" />}<span className="sr-only">{toolbarCollapsed ? "도구줄 펼치기" : "도구줄 접기"}</span></Button>
     </div></header>
     <div ref={bodyRef} className="vb-editor-workbench__body" data-scroll-owner="panels">
       {/* **왼쪽 세로 아이콘 띠(계획서 3단계).** 예전엔 이 탭들이 위쪽 도구줄에

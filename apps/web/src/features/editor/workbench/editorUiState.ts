@@ -133,3 +133,29 @@ export function writeVariantsCollapsed(projectId: string, collapsed: boolean): v
     // UI persistence is best-effort and never editing-data authority.
   }
 }
+
+// 편집 작업판 머리를 접었는지. 화면 크기에 대한 선호라 프로젝트마다가 아니라
+// 이 기기에 하나만 둔다(2026-10-02).
+const toolbarCollapsedStorageKey = "videobox.editor-workbench.toolbar-collapsed";
+
+/** 저장된 선택. 한 번도 안 골랐거나 저장소가 막혔으면 null. */
+export function readToolbarCollapsedPreference(): boolean | null {
+  try {
+    const raw = window.localStorage.getItem(toolbarCollapsedStorageKey);
+    return raw === null ? null : raw === "true";
+  } catch {
+    return null;
+  }
+}
+
+export function readToolbarCollapsed(): boolean {
+  return readToolbarCollapsedPreference() === true;
+}
+
+export function writeToolbarCollapsed(collapsed: boolean): void {
+  try {
+    window.localStorage.setItem(toolbarCollapsedStorageKey, String(collapsed));
+  } catch {
+    // UI persistence is best-effort and never editing-data authority.
+  }
+}
