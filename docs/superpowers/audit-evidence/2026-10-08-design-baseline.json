@@ -1,0 +1,7103 @@
+{
+ "measuredAt": "2026-10-10T02:43:41.103Z",
+ "harness": "e2e-real (진짜 FastAPI + 임시 고정 프로젝트, Vite 개발 서버, Chromium)",
+ "viewport": "1440x900",
+ "pages": [
+  {
+   "requested": "/projects",
+   "summary": {
+    "path": "/projects",
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "overflowX": 0,
+    "controlCount": 12,
+    "controlHeights": {
+     "32": 9,
+     "36": 2,
+     "80": 1
+    },
+    "controlFonts": {
+     "Arial": 9,
+     "Pretendard": 3
+    },
+    "controlFontSizes": {
+     "14": 12
+    },
+    "controlRadii": {
+     "8px": 8,
+     "6px": 1,
+     "10px": 3
+    },
+    "filledPrimaryButtons": 2,
+    "disabledWithoutReason": 0,
+    "textFontSizes": {
+     "10": 2,
+     "12": 6,
+     "14": 19,
+     "16": 6,
+     "24": 5,
+     "40": 1
+    },
+    "textFontWeights": {
+     "400": 9,
+     "500": 8,
+     "600": 2,
+     "650": 2,
+     "700": 17,
+     "750": 1
+    },
+    "textFontFamilies": {
+     "Pretendard": 31,
+     "Arial": 8
+    }
+   },
+   "inventory": {
+    "path": "/projects",
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "docScrollWidth": 1440,
+    "docClientWidth": 1440,
+    "controls": [
+     {
+      "name": "작업 상태",
+      "tag": "button",
+      "role": null,
+      "h": 36,
+      "w": 93.9,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "header.vb-top-bar > div.vb-top-bar__end > button[data-slot=dialog-trigger]"
+     },
+     {
+      "name": "설정",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 159,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "6px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-product-body > nav.vb-side-nav > button[data-slot=button].vb-side-nav__item.vb-side-nav__item--settings"
+     },
+     {
+      "name": "+ 새로 만들기",
+      "tag": "button",
+      "role": null,
+      "h": 80,
+      "w": 1120,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 650,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "main.vb-catalog > div.vb-catalog-quick-start > button[data-slot=button].vb-catalog-create"
+     },
+     {
+      "name": "프로젝트 이름으로 찾기",
+      "tag": "input",
+      "role": null,
+      "h": 36,
+      "w": 320,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "8px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-catalog-controls > label.vb-catalog-search > input[data-slot=input]"
+     },
+     {
+      "name": "격자로 보기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 32,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 650,
+      "radius": "10px",
+      "variant": "default",
+      "size": "icon",
+      "disabled": false,
+      "hasReason": true,
+      "primary": false,
+      "selector": "div.vb-catalog-controls > div.vb-catalog-view-toggle > button[data-slot=button]"
+     },
+     {
+      "name": "줄로 보기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 32,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "icon",
+      "disabled": false,
+      "hasReason": true,
+      "primary": false,
+      "selector": "div.vb-catalog-controls > div.vb-catalog-view-toggle > button[data-slot=button]"
+     },
+     {
+      "name": "보관함 보기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 32,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "ghost",
+      "size": "icon",
+      "disabled": false,
+      "hasReason": true,
+      "primary": false,
+      "selector": "main.vb-catalog > div.vb-catalog-controls > button[data-slot=button].vb-catalog-archive-toggle"
+     },
+     {
+      "name": "내레이션 없는 프로젝트 재현 관리",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 228,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-catalog-grid > article.vb-catalog-card > button[data-slot=button].vb-catalog-card__more"
+     },
+     {
+      "name": "단축키 시험 관리",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 228,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-catalog-grid > article.vb-catalog-card > button[data-slot=button].vb-catalog-card__more"
+     },
+     {
+      "name": "겹친 오버레이 재현 관리",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 228,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-catalog-grid > article.vb-catalog-card > button[data-slot=button].vb-catalog-card__more"
+     },
+     {
+      "name": "재생 매끄러움 시험 관리",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 228,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-catalog-grid > article.vb-catalog-card > button[data-slot=button].vb-catalog-card__more"
+     },
+     {
+      "name": "편집 실사용 시험 관리",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 228,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-catalog-grid > article.vb-catalog-card > button[data-slot=button].vb-catalog-card__more"
+     }
+    ],
+    "texts": [
+     {
+      "fontSize": 14,
+      "fontWeight": 750,
+      "fontFamily": "Pretendard",
+      "sample": "VideoBox"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "프로젝트"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "이 기기에서 작업"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "작업 상태"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 600,
+      "fontFamily": "Pretendard",
+      "sample": "프로젝트"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "자료실"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "촬영본 정리"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 600,
+      "fontFamily": "Pretendard",
+      "sample": "내 자산"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내 영상"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "음악·효과음"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내 목소리"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "설정"
+     },
+     {
+      "fontSize": 40,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "프로젝트"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 650,
+      "fontFamily": "Pretendard",
+      "sample": "+ 새로 만들기"
+     },
+     {
+      "fontSize": 16,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "최근 프로젝트"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "프로젝트 검색"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 650,
+      "fontFamily": "Pretendard",
+      "sample": "격자로 보기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "줄로 보기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "보관함 보기"
+     },
+     {
+      "fontSize": 24,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "내레이션 없는 프로젝트 재현"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "마지막 확인 중 · 방금 편집 · 완성본 0개"
+     },
+     {
+      "fontSize": 16,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "검토하기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "···"
+     },
+     {
+      "fontSize": 24,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "단축키 시험"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "마지막 확인 중 · 방금 편집 · 완성본 0개"
+     },
+     {
+      "fontSize": 16,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "검토하기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "···"
+     },
+     {
+      "fontSize": 24,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "겹친 오버레이 재현"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "마지막 확인 중 · 방금 편집 · 완성본 0개"
+     },
+     {
+      "fontSize": 16,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "검토하기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "···"
+     },
+     {
+      "fontSize": 24,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "재생 매끄러움 시험"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "마지막 확인 중 · 방금 편집 · 완성본 0개"
+     },
+     {
+      "fontSize": 16,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "검토하기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "···"
+     },
+     {
+      "fontSize": 24,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "편집 실사용 시험"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "마지막 확인 중 · 방금 편집 · 완성본 0개"
+     },
+     {
+      "fontSize": 16,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "검토하기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "···"
+     }
+    ]
+   }
+  },
+  {
+   "requested": "/library",
+   "summary": {
+    "path": "/library",
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "overflowX": 0,
+    "controlCount": 14,
+    "controlHeights": {
+     "32": 2,
+     "36": 1,
+     "40": 11
+    },
+    "controlFonts": {
+     "Arial": 3,
+     "Pretendard": 11
+    },
+    "controlFontSizes": {
+     "10": 1,
+     "14": 13
+    },
+    "controlRadii": {
+     "8px": 2,
+     "6px": 12
+    },
+    "filledPrimaryButtons": 0,
+    "disabledWithoutReason": 0,
+    "textFontSizes": {
+     "10": 12,
+     "12": 6,
+     "14": 23,
+     "16": 2
+    },
+    "textFontWeights": {
+     "400": 29,
+     "500": 2,
+     "600": 2,
+     "650": 4,
+     "700": 5,
+     "750": 1
+    },
+    "textFontFamilies": {
+     "Pretendard": 41,
+     "Arial": 2
+    }
+   },
+   "inventory": {
+    "path": "/library",
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "docScrollWidth": 1440,
+    "docClientWidth": 1440,
+    "controls": [
+     {
+      "name": "이전 화면",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 32,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "outline",
+      "size": "icon-sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-product-shell > header.vb-top-bar > button[data-slot=tooltip-trigger].vb-top-bar__compact-control"
+     },
+     {
+      "name": "작업 상태",
+      "tag": "button",
+      "role": null,
+      "h": 36,
+      "w": 93.9,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "header.vb-top-bar > div.vb-top-bar__end > button[data-slot=dialog-trigger]"
+     },
+     {
+      "name": "설정",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 159,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "6px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-product-body > nav.vb-side-nav > button[data-slot=button].vb-side-nav__item.vb-side-nav__item--settings"
+     },
+     {
+      "name": "전체 0",
+      "tag": "button",
+      "role": null,
+      "h": 40,
+      "w": 174,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 650,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "ul.vb-library-filter-list > li > button"
+     },
+     {
+      "name": "영상 0",
+      "tag": "button",
+      "role": null,
+      "h": 40,
+      "w": 174,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "ul.vb-library-filter-list > li > button"
+     },
+     {
+      "name": "음악·효과음 0",
+      "tag": "button",
+      "role": null,
+      "h": 40,
+      "w": 174,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "ul.vb-library-filter-list > li > button"
+     },
+     {
+      "name": "음악 0",
+      "tag": "button",
+      "role": null,
+      "h": 40,
+      "w": 174,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "ul.vb-library-filter-list > li > button"
+     },
+     {
+      "name": "효과음 0",
+      "tag": "button",
+      "role": null,
+      "h": 40,
+      "w": 174,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "ul.vb-library-filter-list > li > button"
+     },
+     {
+      "name": "그림 0",
+      "tag": "button",
+      "role": null,
+      "h": 40,
+      "w": 174,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "ul.vb-library-filter-list > li > button"
+     },
+     {
+      "name": "즐겨찾기 0",
+      "tag": "button",
+      "role": null,
+      "h": 40,
+      "w": 174,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "ul.vb-library-filter-list > li > button"
+     },
+     {
+      "name": "휴지통 0",
+      "tag": "button",
+      "role": null,
+      "h": 40,
+      "w": 174,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "ul.vb-library-filter-list > li > button"
+     },
+     {
+      "name": "파일 추가",
+      "tag": "button",
+      "role": null,
+      "h": 40,
+      "w": 77.3,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 650,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-library-dropzone > div.vb-library-dropzone__actions > button"
+     },
+     {
+      "name": "폴더 추가",
+      "tag": "button",
+      "role": null,
+      "h": 40,
+      "w": 77.3,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 650,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-library-dropzone > div.vb-library-dropzone__actions > button"
+     },
+     {
+      "name": "파일명·장면·분위기",
+      "tag": "input",
+      "role": null,
+      "h": 40,
+      "w": 240,
+      "fontFamily": "Pretendard",
+      "fontSize": 10,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "header.vb-library-results__header > label.vb-library-search > input"
+     }
+    ],
+    "texts": [
+     {
+      "fontSize": 14,
+      "fontWeight": 750,
+      "fontFamily": "Pretendard",
+      "sample": "VideoBox"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "프로젝트"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "자료실"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "이 기기에서 작업"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "작업 상태"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "프로젝트"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 600,
+      "fontFamily": "Pretendard",
+      "sample": "자료실"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "촬영본 정리"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 600,
+      "fontFamily": "Pretendard",
+      "sample": "내 자산"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내 영상"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "음악·효과음"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내 목소리"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "설정"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "자료실"
+     },
+     {
+      "fontSize": 16,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "자료실"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "모든 프로젝트 공용"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 650,
+      "fontFamily": "Pretendard",
+      "sample": "전체"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 650,
+      "fontFamily": "Pretendard",
+      "sample": "0"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "음악·효과음"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "음악"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "효과음"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "그림"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "즐겨찾기"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "휴지통"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "분석 상태"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "이상 없음"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "미디어 추가"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상·음악·효과음·그림을 파일이나 폴더째 끌어다 놓으세요."
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 650,
+      "fontFamily": "Pretendard",
+      "sample": "파일 추가"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 650,
+      "fontFamily": "Pretendard",
+      "sample": "폴더 추가"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "미디어"
+     },
+     {
+      "fontSize": 16,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "전체 미디어"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "검색"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "아직 등록한 미디어가 없어요."
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "미디어를 선택하면 미리볼 수 있어요."
+     }
+    ]
+   }
+  },
+  {
+   "requested": "/library?kind=audio",
+   "summary": {
+    "path": "/library?kind=audio",
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "overflowX": 0,
+    "controlCount": 14,
+    "controlHeights": {
+     "32": 2,
+     "36": 1,
+     "40": 11
+    },
+    "controlFonts": {
+     "Arial": 3,
+     "Pretendard": 11
+    },
+    "controlFontSizes": {
+     "10": 1,
+     "14": 13
+    },
+    "controlRadii": {
+     "8px": 2,
+     "6px": 12
+    },
+    "filledPrimaryButtons": 0,
+    "disabledWithoutReason": 0,
+    "textFontSizes": {
+     "10": 12,
+     "12": 6,
+     "14": 23,
+     "16": 2
+    },
+    "textFontWeights": {
+     "400": 29,
+     "500": 2,
+     "600": 2,
+     "650": 4,
+     "700": 5,
+     "750": 1
+    },
+    "textFontFamilies": {
+     "Pretendard": 41,
+     "Arial": 2
+    }
+   },
+   "inventory": {
+    "path": "/library?kind=audio",
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "docScrollWidth": 1440,
+    "docClientWidth": 1440,
+    "controls": [
+     {
+      "name": "이전 화면",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 32,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "outline",
+      "size": "icon-sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-product-shell > header.vb-top-bar > button[data-slot=tooltip-trigger].vb-top-bar__compact-control"
+     },
+     {
+      "name": "작업 상태",
+      "tag": "button",
+      "role": null,
+      "h": 36,
+      "w": 93.9,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "header.vb-top-bar > div.vb-top-bar__end > button[data-slot=dialog-trigger]"
+     },
+     {
+      "name": "설정",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 159,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "6px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-product-body > nav.vb-side-nav > button[data-slot=button].vb-side-nav__item.vb-side-nav__item--settings"
+     },
+     {
+      "name": "전체 0",
+      "tag": "button",
+      "role": null,
+      "h": 40,
+      "w": 174,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "ul.vb-library-filter-list > li > button"
+     },
+     {
+      "name": "영상 0",
+      "tag": "button",
+      "role": null,
+      "h": 40,
+      "w": 174,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "ul.vb-library-filter-list > li > button"
+     },
+     {
+      "name": "음악·효과음 0",
+      "tag": "button",
+      "role": null,
+      "h": 40,
+      "w": 174,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 650,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "ul.vb-library-filter-list > li > button"
+     },
+     {
+      "name": "음악 0",
+      "tag": "button",
+      "role": null,
+      "h": 40,
+      "w": 174,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "ul.vb-library-filter-list > li > button"
+     },
+     {
+      "name": "효과음 0",
+      "tag": "button",
+      "role": null,
+      "h": 40,
+      "w": 174,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "ul.vb-library-filter-list > li > button"
+     },
+     {
+      "name": "그림 0",
+      "tag": "button",
+      "role": null,
+      "h": 40,
+      "w": 174,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "ul.vb-library-filter-list > li > button"
+     },
+     {
+      "name": "즐겨찾기 0",
+      "tag": "button",
+      "role": null,
+      "h": 40,
+      "w": 174,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "ul.vb-library-filter-list > li > button"
+     },
+     {
+      "name": "휴지통 0",
+      "tag": "button",
+      "role": null,
+      "h": 40,
+      "w": 174,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "ul.vb-library-filter-list > li > button"
+     },
+     {
+      "name": "파일 추가",
+      "tag": "button",
+      "role": null,
+      "h": 40,
+      "w": 77.3,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 650,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-library-dropzone > div.vb-library-dropzone__actions > button"
+     },
+     {
+      "name": "폴더 추가",
+      "tag": "button",
+      "role": null,
+      "h": 40,
+      "w": 77.3,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 650,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-library-dropzone > div.vb-library-dropzone__actions > button"
+     },
+     {
+      "name": "파일명·장면·분위기",
+      "tag": "input",
+      "role": null,
+      "h": 40,
+      "w": 240,
+      "fontFamily": "Pretendard",
+      "fontSize": 10,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "header.vb-library-results__header > label.vb-library-search > input"
+     }
+    ],
+    "texts": [
+     {
+      "fontSize": 14,
+      "fontWeight": 750,
+      "fontFamily": "Pretendard",
+      "sample": "VideoBox"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "프로젝트"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "자료실"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "이 기기에서 작업"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "작업 상태"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "프로젝트"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "자료실"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "촬영본 정리"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 600,
+      "fontFamily": "Pretendard",
+      "sample": "내 자산"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내 영상"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 600,
+      "fontFamily": "Pretendard",
+      "sample": "음악·효과음"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내 목소리"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "설정"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "자료실"
+     },
+     {
+      "fontSize": 16,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "자료실"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "모든 프로젝트 공용"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "전체"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 650,
+      "fontFamily": "Pretendard",
+      "sample": "음악·효과음"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 650,
+      "fontFamily": "Pretendard",
+      "sample": "0"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "음악"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "효과음"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "그림"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "즐겨찾기"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "휴지통"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "분석 상태"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "이상 없음"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "미디어 추가"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상·음악·효과음·그림을 파일이나 폴더째 끌어다 놓으세요."
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 650,
+      "fontFamily": "Pretendard",
+      "sample": "파일 추가"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 650,
+      "fontFamily": "Pretendard",
+      "sample": "폴더 추가"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "미디어"
+     },
+     {
+      "fontSize": 16,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "음악·효과음"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "검색"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "아직 등록한 미디어가 없어요."
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "미디어를 선택하면 미리볼 수 있어요."
+     }
+    ]
+   }
+  },
+  {
+   "requested": "/footage",
+   "summary": {
+    "path": "/footage",
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "overflowX": 0,
+    "controlCount": 24,
+    "controlHeights": {
+     "32": 22,
+     "36": 2
+    },
+    "controlFonts": {
+     "Arial": 4,
+     "Pretendard": 20
+    },
+    "controlFontSizes": {
+     "10": 6,
+     "14": 18
+    },
+    "controlRadii": {
+     "8px": 2,
+     "6px": 3,
+     "10px": 18,
+     "0px": 1
+    },
+    "filledPrimaryButtons": 3,
+    "disabledWithoutReason": 7,
+    "textFontSizes": {
+     "10": 19,
+     "12": 10,
+     "14": 25,
+     "16": 5,
+     "28": 1
+    },
+    "textFontWeights": {
+     "400": 40,
+     "500": 2,
+     "600": 2,
+     "650": 3,
+     "700": 12,
+     "750": 1
+    },
+    "textFontFamilies": {
+     "Pretendard": 58,
+     "Arial": 2
+    }
+   },
+   "inventory": {
+    "path": "/footage",
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "docScrollWidth": 1440,
+    "docClientWidth": 1440,
+    "controls": [
+     {
+      "name": "이전 화면",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 32,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "outline",
+      "size": "icon-sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-product-shell > header.vb-top-bar > button[data-slot=tooltip-trigger].vb-top-bar__compact-control"
+     },
+     {
+      "name": "작업 상태",
+      "tag": "button",
+      "role": null,
+      "h": 36,
+      "w": 93.9,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "header.vb-top-bar > div.vb-top-bar__end > button[data-slot=dialog-trigger]"
+     },
+     {
+      "name": "설정",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 159,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "6px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-product-body > nav.vb-side-nav > button[data-slot=button].vb-side-nav__item.vb-side-nav__item--settings"
+     },
+     {
+      "name": "재생",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 41.3,
+      "fontFamily": "Pretendard",
+      "fontSize": 10,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-footage-pane.vb-footage-preview > div.vb-footage-transport > button[data-slot=button]"
+     },
+     {
+      "name": "음소거",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 49.9,
+      "fontFamily": "Pretendard",
+      "fontSize": 10,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-footage-pane.vb-footage-preview > div.vb-footage-transport > button[data-slot=button]"
+     },
+     {
+      "name": "1프레임 뒤로",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 38,
+      "fontFamily": "Pretendard",
+      "fontSize": 10,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-footage-pane.vb-footage-preview > div.vb-footage-transport > button[data-slot=button]"
+     },
+     {
+      "name": "1프레임 앞으로",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 38,
+      "fontFamily": "Pretendard",
+      "fontSize": 10,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-footage-pane.vb-footage-preview > div.vb-footage-transport > button[data-slot=button]"
+     },
+     {
+      "name": "프레임 간격",
+      "tag": "input",
+      "role": null,
+      "h": 36,
+      "w": 39.3,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-footage-transport > label > input[data-slot=input]"
+     },
+     {
+      "name": "정리 요청",
+      "tag": "input",
+      "role": null,
+      "h": 32,
+      "w": 233,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "aside.vb-footage-pane.vb-footage-suggestions > label.vb-footage-request > input[data-slot=input].vb-footage-request__input"
+     },
+     {
+      "name": "유진에게 제안 요청",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 233,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": true,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-footage-grid > aside.vb-footage-pane.vb-footage-suggestions > button[data-slot=button].vb-footage-yujin-request"
+     },
+     {
+      "name": "장면 변화로 나누기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 127.8,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-yujin-starters.vb-footage-starters > div.vb-yujin-starters__list > button[data-slot=button]"
+     },
+     {
+      "name": "출근 과정만 고르기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 127.8,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-yujin-starters.vb-footage-starters > div.vb-yujin-starters__list > button[data-slot=button]"
+     },
+     {
+      "name": "흔들린 구간 찾기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 115.7,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-yujin-starters.vb-footage-starters > div.vb-yujin-starters__list > button[data-slot=button]"
+     },
+     {
+      "name": "짧은 영상 묶기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 103.6,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-yujin-starters.vb-footage-starters > div.vb-yujin-starters__list > button[data-slot=button]"
+     },
+     {
+      "name": "세로 장면 고르기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 115.7,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-yujin-starters.vb-footage-starters > div.vb-yujin-starters__list > button[data-slot=button]"
+     },
+     {
+      "name": "30초 묶음 만들기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 120.6,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-yujin-starters.vb-footage-starters > div.vb-yujin-starters__list > button[data-slot=button]"
+     },
+     {
+      "name": "다른 예시",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 53.5,
+      "fontFamily": "Pretendard",
+      "fontSize": 10,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": "ghost",
+      "size": "sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-yujin-starters.vb-footage-starters > div.vb-yujin-starters__controls > button[data-slot=button]"
+     },
+     {
+      "name": "간단히 보기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 62.1,
+      "fontFamily": "Pretendard",
+      "fontSize": 10,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": "ghost",
+      "size": "sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-yujin-starters.vb-footage-starters > div.vb-yujin-starters__controls > button[data-slot=button]"
+     },
+     {
+      "name": "분석 시작",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 201,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 650,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": true,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-footage-grid > aside.vb-footage-pane.vb-footage-actions > button[data-slot=button].vb-footage-primary"
+     },
+     {
+      "name": "제안 미리보기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 201,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": true,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-footage-grid > aside.vb-footage-pane.vb-footage-actions > button[data-slot=button]"
+     },
+     {
+      "name": "제안 취소",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 201,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": true,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-footage-grid > aside.vb-footage-pane.vb-footage-actions > button[data-slot=button]"
+     },
+     {
+      "name": "제안 적용",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 201,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 650,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": true,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-footage-grid > aside.vb-footage-pane.vb-footage-actions > button[data-slot=button].vb-footage-apply"
+     },
+     {
+      "name": "선택 장면으로 가상 묶음 만들기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 201,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": true,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-footage-grid > aside.vb-footage-pane.vb-footage-actions > button[data-slot=button]"
+     },
+     {
+      "name": "새 클립 파일로 만들기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 201,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 650,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": true,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-footage-grid > aside.vb-footage-pane.vb-footage-actions > button[data-slot=button].vb-footage-apply"
+     }
+    ],
+    "texts": [
+     {
+      "fontSize": 14,
+      "fontWeight": 750,
+      "fontFamily": "Pretendard",
+      "sample": "VideoBox"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "자료실"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "촬영본 정리"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "이 기기에서 작업"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "작업 상태"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "프로젝트"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "자료실"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 600,
+      "fontFamily": "Pretendard",
+      "sample": "촬영본 정리"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 600,
+      "fontFamily": "Pretendard",
+      "sample": "내 자산"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내 영상"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "음악·효과음"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내 목소리"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "설정"
+     },
+     {
+      "fontSize": 28,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "촬영본 정리"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "원본은 그대로 두고 장면을 나누고 묶어요."
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "적용을 누르기 전에는 저장되지 않아요."
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "가져온 것"
+     },
+     {
+      "fontSize": 16,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "촬영본"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "준비된 촬영본이 없어요."
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "보고 있는 것"
+     },
+     {
+      "fontSize": 16,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "촬영본을 골라 주세요"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0:00.0"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "선택한 촬영본의 미리보기가 여기에 표시돼요."
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "재생"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "음소거"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "−1f"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "+1f"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "프레임 간격"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0.03"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "재생 위치"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "나눈 결과"
+     },
+     {
+      "fontSize": 16,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "장면 타임라인"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "분석 전"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "분석을 시작하면 장면 경계가 표시돼요."
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "유진 도움"
+     },
+     {
+      "fontSize": 16,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "정리 도우미"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "정리 요청"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "유진에게 제안 요청"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "빠른 시작"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "예시를 누르면 입력창에 채워져요."
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "장면 변화로 나누기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "출근 과정만 고르기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "흔들린 구간 찾기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "짧은 영상 묶기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "세로 장면 고르기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "30초 묶음 만들기"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "다른 예시"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "간단히 보기"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "제안은 원본을 바꾸지 않아요. 결과를 확인한 뒤 적용할 수 있어요."
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "할 일"
+     },
+     {
+      "fontSize": 16,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "검토와 적용"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 650,
+      "fontFamily": "Pretendard",
+      "sample": "분석 시작"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "제안 미리보기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "제안 취소"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 650,
+      "fontFamily": "Pretendard",
+      "sample": "제안 적용"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "선택 장면으로 가상 묶음 만들기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 650,
+      "fontFamily": "Pretendard",
+      "sample": "새 클립 파일로 만들기"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "적용을 눌러야 검색에 반영돼요."
+     }
+    ]
+   }
+  },
+  {
+   "requested": "/voices",
+   "summary": {
+    "path": "/voices",
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "overflowX": 0,
+    "controlCount": 3,
+    "controlHeights": {
+     "32": 2,
+     "36": 1
+    },
+    "controlFonts": {
+     "Arial": 3
+    },
+    "controlFontSizes": {
+     "14": 3
+    },
+    "controlRadii": {
+     "8px": 2,
+     "6px": 1
+    },
+    "filledPrimaryButtons": 0,
+    "disabledWithoutReason": 0,
+    "textFontSizes": {
+     "10": 2,
+     "12": 1,
+     "14": 11,
+     "28": 1
+    },
+    "textFontWeights": {
+     "400": 9,
+     "500": 2,
+     "600": 2,
+     "700": 1,
+     "750": 1
+    },
+    "textFontFamilies": {
+     "Pretendard": 13,
+     "Arial": 2
+    }
+   },
+   "inventory": {
+    "path": "/voices",
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "docScrollWidth": 1440,
+    "docClientWidth": 1440,
+    "controls": [
+     {
+      "name": "이전 화면",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 32,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "outline",
+      "size": "icon-sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-product-shell > header.vb-top-bar > button[data-slot=tooltip-trigger].vb-top-bar__compact-control"
+     },
+     {
+      "name": "작업 상태",
+      "tag": "button",
+      "role": null,
+      "h": 36,
+      "w": 93.9,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "header.vb-top-bar > div.vb-top-bar__end > button[data-slot=dialog-trigger]"
+     },
+     {
+      "name": "설정",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 159,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "6px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-product-body > nav.vb-side-nav > button[data-slot=button].vb-side-nav__item.vb-side-nav__item--settings"
+     }
+    ],
+    "texts": [
+     {
+      "fontSize": 14,
+      "fontWeight": 750,
+      "fontFamily": "Pretendard",
+      "sample": "VideoBox"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "프로젝트"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "이 기기에서 작업"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "작업 상태"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "프로젝트"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "자료실"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "촬영본 정리"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 600,
+      "fontFamily": "Pretendard",
+      "sample": "내 자산"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내 영상"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "음악·효과음"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 600,
+      "fontFamily": "Pretendard",
+      "sample": "내 목소리"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "설정"
+     },
+     {
+      "fontSize": 28,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "내 목소리"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "프로젝트마다 녹음한 목소리를 모았어요. 들어 보고 이름을 붙이거나 지울 "
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "아직 녹음한 목소리가 없어요. 편집기 왼쪽 `오디오`에서 녹음하면 여기에"
+     }
+    ]
+   }
+  },
+  {
+   "requested": "/settings/appearance",
+   "summary": {
+    "path": "/settings/appearance",
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "overflowX": 0,
+    "controlCount": 14,
+    "controlHeights": {
+     "32": 13,
+     "36": 1
+    },
+    "controlFonts": {
+     "Arial": 4,
+     "Pretendard": 10
+    },
+    "controlFontSizes": {
+     "14": 14
+    },
+    "controlRadii": {
+     "8px": 3,
+     "10px": 10,
+     "6px": 1
+    },
+    "filledPrimaryButtons": 1,
+    "disabledWithoutReason": 0,
+    "textFontSizes": {
+     "10": 3,
+     "12": 2,
+     "14": 22,
+     "40": 1
+    },
+    "textFontWeights": {
+     "400": 20,
+     "500": 2,
+     "600": 2,
+     "650": 1,
+     "700": 2,
+     "750": 1
+    },
+    "textFontFamilies": {
+     "Pretendard": 25,
+     "Arial": 3
+    }
+   },
+   "inventory": {
+    "path": "/settings/appearance",
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "docScrollWidth": 1440,
+    "docClientWidth": 1440,
+    "controls": [
+     {
+      "name": "이전 화면",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 32,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "outline",
+      "size": "icon-sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-product-shell > header.vb-top-bar > button[data-slot=tooltip-trigger].vb-top-bar__compact-control"
+     },
+     {
+      "name": "내레이션 없는 프로젝트 재현",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 205.7,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "outline",
+      "size": "sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "header.vb-top-bar > div.vb-top-bar__project > button[data-slot=tooltip-trigger].vb-top-bar__compact-control"
+     },
+     {
+      "name": "이야기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 84.3,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "header.vb-top-bar > nav.vb-top-bar__stages > button[data-slot=button].vb-top-bar__compact-control"
+     },
+     {
+      "name": "편집",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 72.2,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "header.vb-top-bar > nav.vb-top-bar__stages > button[data-slot=button].vb-top-bar__compact-control"
+     },
+     {
+      "name": "확인과 내보내기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 136.2,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "header.vb-top-bar > nav.vb-top-bar__stages > button[data-slot=button].vb-top-bar__compact-control"
+     },
+     {
+      "name": "작업 상태",
+      "tag": "button",
+      "role": null,
+      "h": 36,
+      "w": 93.9,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "header.vb-top-bar > div.vb-top-bar__end > button[data-slot=dialog-trigger]"
+     },
+     {
+      "name": "설정",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 159,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 600,
+      "radius": "6px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-product-body > nav.vb-side-nav > button[data-slot=button].vb-side-nav__item.vb-side-nav__item--settings"
+     },
+     {
+      "name": "화면",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 48.2,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 650,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-settings > div.vb-settings-nav > button[data-slot=button]"
+     },
+     {
+      "name": "AI·개인정보",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 88.4,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-settings > div.vb-settings-nav > button[data-slot=button]"
+     },
+     {
+      "name": "내 목소리",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 75.9,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-settings > div.vb-settings-nav > button[data-slot=button]"
+     },
+     {
+      "name": "출력",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 48.2,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-settings > div.vb-settings-nav > button[data-slot=button]"
+     },
+     {
+      "name": "유진 대화",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 75.9,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-settings > div.vb-settings-nav > button[data-slot=button]"
+     },
+     {
+      "name": "조밀한 화면: 꺼짐",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 119.3,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-product-content > section.vb-settings > button[data-slot=button].vb-setting-control"
+     },
+     {
+      "name": "움직임 줄이기: 꺼짐",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 131.4,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-product-content > section.vb-settings > button[data-slot=button].vb-setting-control"
+     }
+    ],
+    "texts": [
+     {
+      "fontSize": 14,
+      "fontWeight": 750,
+      "fontFamily": "Pretendard",
+      "sample": "VideoBox"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "프로젝트"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "설정"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "내레이션 없는 프로젝트 재현"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "이야기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "편집"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "확인과 내보내기"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "이 기기에서 작업"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "작업 상태"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "프로젝트"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "자료실"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "촬영본 정리"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 600,
+      "fontFamily": "Pretendard",
+      "sample": "내 자산"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내 영상"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "음악·효과음"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내 목소리"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 600,
+      "fontFamily": "Arial",
+      "sample": "설정"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "설정"
+     },
+     {
+      "fontSize": 40,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "화면"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 650,
+      "fontFamily": "Pretendard",
+      "sample": "화면"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "AI·개인정보"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내 목소리"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "출력"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "유진 대화"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "화면과 작업 환경 설정"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "설정은 이 기기에만 저장돼요."
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "조밀한 화면"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "움직임 줄이기"
+     }
+    ]
+   }
+  },
+  {
+   "requested": "/projects/project-eb51ef1e/editor?session_id=editing_session_001",
+   "summary": {
+    "path": "/projects/project-eb51ef1e/editor?session_id=editing_session_001",
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "overflowX": 0,
+    "controlCount": 138,
+    "controlHeights": {
+     "24": 20,
+     "27": 3,
+     "30": 15,
+     "32": 78,
+     "36": 15,
+     "40": 6,
+     "216": 1
+    },
+    "controlFonts": {
+     "Arial": 60,
+     "Pretendard": 78
+    },
+    "controlFontSizes": {
+     "12": 82,
+     "14": 36,
+     "13.3333": 20
+    },
+    "controlRadii": {
+     "8px": 18,
+     "10px": 63,
+     "6px": 10,
+     "0px": 42,
+     "999px": 5
+    },
+    "filledPrimaryButtons": 26,
+    "disabledWithoutReason": 0,
+    "textFontSizes": {
+     "10": 37,
+     "12": 110,
+     "14": 57,
+     "21": 1,
+     "13.3333": 6,
+     "16.38": 1,
+     "11.6667": 1
+    },
+    "textFontWeights": {
+     "400": 117,
+     "500": 80,
+     "650": 1,
+     "700": 14,
+     "750": 1
+    },
+    "textFontFamilies": {
+     "Pretendard": 184,
+     "Arial": 29
+    }
+   },
+   "inventory": {
+    "path": "/projects/project-eb51ef1e/editor?session_id=editing_session_001",
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "docScrollWidth": 1440,
+    "docClientWidth": 1440,
+    "controls": [
+     {
+      "name": "이전 화면",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 32,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "outline",
+      "size": "icon-sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-product-shell > header.vb-top-bar > button[data-slot=tooltip-trigger].vb-top-bar__compact-control"
+     },
+     {
+      "name": "편집 실사용 시험",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 131.8,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "outline",
+      "size": "sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "header.vb-top-bar > div.vb-top-bar__project > button[data-slot=tooltip-trigger].vb-top-bar__compact-control"
+     },
+     {
+      "name": "이야기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 84.3,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "header.vb-top-bar > nav.vb-top-bar__stages > button[data-slot=button].vb-top-bar__compact-control"
+     },
+     {
+      "name": "편집",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 72.2,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 650,
+      "radius": "10px",
+      "variant": "default",
+      "size": "sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "header.vb-top-bar > nav.vb-top-bar__stages > button[data-slot=button].vb-top-bar__compact-control"
+     },
+     {
+      "name": "확인과 내보내기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 136.2,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "header.vb-top-bar > nav.vb-top-bar__stages > button[data-slot=button].vb-top-bar__compact-control"
+     },
+     {
+      "name": "작업 상태",
+      "tag": "button",
+      "role": null,
+      "h": 36,
+      "w": 93.9,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "header.vb-top-bar > div.vb-top-bar__end > button[data-slot=dialog-trigger]"
+     },
+     {
+      "name": "전체 메뉴",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 32,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "outline",
+      "size": "icon-sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-top-bar__end > div.vb-top-bar__menu > button[data-slot=tooltip-trigger].vb-top-bar__compact-control"
+     },
+     {
+      "name": "세부 정보 — 고른 장면의 속성",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 32,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "icon",
+      "disabled": false,
+      "hasReason": true,
+      "primary": false,
+      "selector": "header.vb-editor-workbench__toolbar > div > button[data-slot=button]"
+     },
+     {
+      "name": "내보내기 — 완성본 만들기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 32,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "icon",
+      "disabled": false,
+      "hasReason": true,
+      "primary": false,
+      "selector": "header.vb-editor-workbench__toolbar > div > button[data-slot=button]"
+     },
+     {
+      "name": "도구줄 접기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 32,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "icon",
+      "disabled": false,
+      "hasReason": true,
+      "primary": false,
+      "selector": "header.vb-editor-workbench__toolbar > div > button[data-slot=button]"
+     },
+     {
+      "name": "미디어",
+      "tag": "button",
+      "role": "tab",
+      "h": 40,
+      "w": 70,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-workbench__body > nav.vb-editor-workbench__rail > button[data-slot=button].vb-editor-workbench__rail-tab"
+     },
+     {
+      "name": "오디오",
+      "tag": "button",
+      "role": "tab",
+      "h": 40,
+      "w": 70,
+      "fontFamily": "Arial",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "6px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-workbench__body > nav.vb-editor-workbench__rail > button[data-slot=button].vb-editor-workbench__rail-tab"
+     },
+     {
+      "name": "텍스트",
+      "tag": "button",
+      "role": "tab",
+      "h": 40,
+      "w": 70,
+      "fontFamily": "Arial",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "6px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-workbench__body > nav.vb-editor-workbench__rail > button[data-slot=button].vb-editor-workbench__rail-tab"
+     },
+     {
+      "name": "캡션",
+      "tag": "button",
+      "role": "tab",
+      "h": 40,
+      "w": 70,
+      "fontFamily": "Arial",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "6px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-workbench__body > nav.vb-editor-workbench__rail > button[data-slot=button].vb-editor-workbench__rail-tab"
+     },
+     {
+      "name": "대본",
+      "tag": "button",
+      "role": "tab",
+      "h": 40,
+      "w": 70,
+      "fontFamily": "Arial",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "6px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-workbench__body > nav.vb-editor-workbench__rail > button[data-slot=button].vb-editor-workbench__rail-tab"
+     },
+     {
+      "name": "전환",
+      "tag": "button",
+      "role": "tab",
+      "h": 40,
+      "w": 70,
+      "fontFamily": "Arial",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "6px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-workbench__body > nav.vb-editor-workbench__rail > button[data-slot=button].vb-editor-workbench__rail-tab"
+     },
+     {
+      "name": "파일 추가",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 60.4,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-assets__add-row > div.vb-add-media > button[data-slot=button]"
+     },
+     {
+      "name": "내레이션",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 70.5,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-assets__controls > div.vb-editor-assets__add-row > button[data-slot=button].vb-editor-assets__narration"
+     },
+     {
+      "name": "촬영본",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 60.1,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-assets__controls > div.vb-editor-assets__add-row > button[data-slot=button].vb-editor-assets__footage"
+     },
+     {
+      "name": "인포그래픽",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 119.5,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-assets__controls > div.vb-editor-assets__add-row > button[data-slot=button].vb-editor-assets__infographic"
+     },
+     {
+      "name": "모션",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 88.5,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-assets__controls > div.vb-editor-assets__add-row > button[data-slot=button].vb-editor-assets__motion"
+     },
+     {
+      "name": "자료실에서 가져오기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 212,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-assets__controls > div.vb-editor-assets__add-row > button[data-slot=button].vb-editor-assets__library"
+     },
+     {
+      "name": "미디어 검색",
+      "tag": "input",
+      "role": null,
+      "h": 36,
+      "w": 212,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-assets__controls > label.vb-editor-assets__search-label > input[data-slot=input].vb-editor-assets__search"
+     },
+     {
+      "name": "전체",
+      "tag": "button",
+      "role": "tab",
+      "h": 32,
+      "w": 40,
+      "fontFamily": "Arial",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "0px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-assets__narrow > div.vb-editor-assets__tabs > button[data-slot=button].vb-editor-assets__tab"
+     },
+     {
+      "name": "영상",
+      "tag": "button",
+      "role": "tab",
+      "h": 32,
+      "w": 40,
+      "fontFamily": "Arial",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "0px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-assets__narrow > div.vb-editor-assets__tabs > button[data-slot=button].vb-editor-assets__tab"
+     },
+     {
+      "name": "그림",
+      "tag": "button",
+      "role": "tab",
+      "h": 32,
+      "w": 40,
+      "fontFamily": "Arial",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "0px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-assets__narrow > div.vb-editor-assets__tabs > button[data-slot=button].vb-editor-assets__tab"
+     },
+     {
+      "name": "모든 방향",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 69.3,
+      "fontFamily": "Arial",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "999px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-assets__narrow > div.vb-editor-assets__filters > button[data-slot=button].vb-editor-assets__filter"
+     },
+     {
+      "name": "가로",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 42,
+      "fontFamily": "Arial",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "999px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-assets__narrow > div.vb-editor-assets__filters > button[data-slot=button].vb-editor-assets__filter"
+     },
+     {
+      "name": "세로",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 42,
+      "fontFamily": "Arial",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "999px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-assets__narrow > div.vb-editor-assets__filters > button[data-slot=button].vb-editor-assets__filter"
+     },
+     {
+      "name": "격자로 보기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 81.3,
+      "fontFamily": "Arial",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "999px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-assets__narrow > div.vb-editor-assets__filters > button[data-slot=button].vb-editor-assets__filter"
+     },
+     {
+      "name": "줄로 보기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 69.3,
+      "fontFamily": "Arial",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "999px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-assets__narrow > div.vb-editor-assets__filters > button[data-slot=button].vb-editor-assets__filter"
+     },
+     {
+      "name": "자료 1 항상 쓰기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 60.4,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "article.vb-editor-assets__card > div.vb-editor-assets__taste > button[data-slot=button].vb-editor-assets__filter"
+     },
+     {
+      "name": "자료 1 쓰지 않기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 60.4,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "article.vb-editor-assets__card > div.vb-editor-assets__taste > button[data-slot=button].vb-editor-assets__filter"
+     },
+     {
+      "name": "자료 1 원본 미리보기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 81.2,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "article.vb-editor-assets__card > div.vb-editor-assets__actions > button[data-slot=button]"
+     },
+     {
+      "name": "자료 1 적용",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 36.8,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "article.vb-editor-assets__card > div.vb-editor-assets__actions > button[data-slot=button]"
+     },
+     {
+      "name": "자료 1 얹은 것 바꾸기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 84.1,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "article.vb-editor-assets__card > div.vb-editor-assets__actions > button[data-slot=button]"
+     },
+     {
+      "name": "자료 2 항상 쓰기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 60.4,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "article.vb-editor-assets__card > div.vb-editor-assets__taste > button[data-slot=button].vb-editor-assets__filter"
+     },
+     {
+      "name": "자료 2 쓰지 않기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 60.4,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "article.vb-editor-assets__card > div.vb-editor-assets__taste > button[data-slot=button].vb-editor-assets__filter"
+     },
+     {
+      "name": "자료 2 원본 미리보기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 81.2,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "article.vb-editor-assets__card > div.vb-editor-assets__actions > button[data-slot=button]"
+     },
+     {
+      "name": "자료 2 적용",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 36.8,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "article.vb-editor-assets__card > div.vb-editor-assets__actions > button[data-slot=button]"
+     },
+     {
+      "name": "자료 2 얹은 것 바꾸기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 84.1,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "article.vb-editor-assets__card > div.vb-editor-assets__actions > button[data-slot=button]"
+     },
+     {
+      "name": "자료 3 항상 쓰기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 60.4,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "article.vb-editor-assets__card > div.vb-editor-assets__taste > button[data-slot=button].vb-editor-assets__filter"
+     },
+     {
+      "name": "자료 3 쓰지 않기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 60.4,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "article.vb-editor-assets__card > div.vb-editor-assets__taste > button[data-slot=button].vb-editor-assets__filter"
+     },
+     {
+      "name": "자료 3 원본 미리보기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 81.2,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "article.vb-editor-assets__card > div.vb-editor-assets__actions > button[data-slot=button]"
+     },
+     {
+      "name": "자료 3 적용",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 36.8,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "article.vb-editor-assets__card > div.vb-editor-assets__actions > button[data-slot=button]"
+     },
+     {
+      "name": "자료 3 얹은 것 바꾸기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 84.1,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "article.vb-editor-assets__card > div.vb-editor-assets__actions > button[data-slot=button]"
+     },
+     {
+      "name": "자료 4 항상 쓰기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 60.4,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "article.vb-editor-assets__card > div.vb-editor-assets__taste > button[data-slot=button].vb-editor-assets__filter"
+     },
+     {
+      "name": "자료 4 쓰지 않기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 60.4,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "article.vb-editor-assets__card > div.vb-editor-assets__taste > button[data-slot=button].vb-editor-assets__filter"
+     },
+     {
+      "name": "자료 4 원본 미리보기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 81.2,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "article.vb-editor-assets__card > div.vb-editor-assets__actions > button[data-slot=button]"
+     },
+     {
+      "name": "자료 4 적용",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 36.8,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "article.vb-editor-assets__card > div.vb-editor-assets__actions > button[data-slot=button]"
+     },
+     {
+      "name": "자료 4 얹은 것 바꾸기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 84.1,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "article.vb-editor-assets__card > div.vb-editor-assets__actions > button[data-slot=button]"
+     },
+     {
+      "name": "내레이션 · 1번째 장면 원본 열기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 116.3,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-editor-workbench__sources > div > button[data-slot=button]"
+     },
+     {
+      "name": "내레이션 · 2번째 장면 원본 열기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 118.1,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-editor-workbench__sources > div > button[data-slot=button]"
+     },
+     {
+      "name": "내레이션 · 3번째 장면 원본 열기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 118.4,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-editor-workbench__sources > div > button[data-slot=button]"
+     },
+     {
+      "name": "내레이션 · 4번째 장면 원본 열기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 118.5,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-editor-workbench__sources > div > button[data-slot=button]"
+     },
+     {
+      "name": "영상 · 1번째 장면 원본 열기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 95.6,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-editor-workbench__sources > div > button[data-slot=button]"
+     },
+     {
+      "name": "영상 · 2번째 장면 원본 열기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 97.3,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-editor-workbench__sources > div > button[data-slot=button]"
+     },
+     {
+      "name": "영상 · 3번째 장면 원본 열기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 97.7,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-editor-workbench__sources > div > button[data-slot=button]"
+     },
+     {
+      "name": "영상 · 4번째 장면 원본 열기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 97.8,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-editor-workbench__sources > div > button[data-slot=button]"
+     },
+     {
+      "name": "이전 프레임",
+      "tag": "button",
+      "role": null,
+      "h": 24,
+      "w": 42.7,
+      "fontFamily": "Arial",
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": true,
+      "primary": false,
+      "selector": "div.vb-preview-stage__playback > div.vb-preview-stage__transport > button"
+     },
+     {
+      "name": "재생 또는 일시정지",
+      "tag": "button",
+      "role": null,
+      "h": 24,
+      "w": 107.1,
+      "fontFamily": "Arial",
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": true,
+      "primary": false,
+      "selector": "div.vb-preview-stage__playback > div.vb-preview-stage__transport > button"
+     },
+     {
+      "name": "다음 프레임",
+      "tag": "button",
+      "role": null,
+      "h": 24,
+      "w": 42.7,
+      "fontFamily": "Arial",
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": true,
+      "primary": false,
+      "selector": "div.vb-preview-stage__playback > div.vb-preview-stage__transport > button"
+     },
+     {
+      "name": "음소거",
+      "tag": "button",
+      "role": null,
+      "h": 24,
+      "w": 56,
+      "fontFamily": "Arial",
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-preview-stage__playback > div.vb-preview-stage__transport > button"
+     },
+     {
+      "name": "선택한 장면 반복",
+      "tag": "button",
+      "role": null,
+      "h": 24,
+      "w": 42.7,
+      "fontFamily": "Arial",
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-preview-stage__playback > div.vb-preview-stage__transport > button"
+     },
+     {
+      "name": "미리보기 전체화면",
+      "tag": "button",
+      "role": null,
+      "h": 24,
+      "w": 69.3,
+      "fontFamily": "Arial",
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-preview-stage__playback > div.vb-preview-stage__transport > button"
+     },
+     {
+      "name": "재생 빠르기",
+      "tag": "select",
+      "role": null,
+      "h": 24,
+      "w": 74,
+      "fontFamily": "Arial",
+      "fontSize": 12,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-preview-stage__transport > label.vb-preview-stage__rate > select[data-slot=native-select]"
+     },
+     {
+      "name": "단축키",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 52,
+      "fontFamily": "Arial",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "ghost",
+      "size": "sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-preview-stage__playback > div.vb-preview-stage__transport > button[data-slot=button]"
+     },
+     {
+      "name": "속도",
+      "tag": "input",
+      "role": null,
+      "h": 36,
+      "w": 222,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "8px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-speed-field > label.vb-speed-field__row > input[data-slot=input]"
+     },
+     {
+      "name": "기간",
+      "tag": "input",
+      "role": null,
+      "h": 36,
+      "w": 222,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "8px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-speed-field > label.vb-speed-field__row > input[data-slot=input]"
+     },
+     {
+      "name": "선택 구간 미리보기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 294,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-editor-workbench__summary > div.vb-editor-right-dock__inspector > button[data-slot=button]"
+     },
+     {
+      "name": "영상·소리",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 60.7,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-right-dock__inspector > div > button[data-slot=button]"
+     },
+     {
+      "name": "캡션",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 36.8,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-right-dock__inspector > div > button[data-slot=button]"
+     },
+     {
+      "name": "화면 요소",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 60.4,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-right-dock__inspector > div > button[data-slot=button]"
+     },
+     {
+      "name": "편집 대상",
+      "tag": "select",
+      "role": null,
+      "h": 36,
+      "w": 294,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "8px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-right-dock__inspector > label > select[data-slot=native-select]"
+     },
+     {
+      "name": "구간 중간에서 분할",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 104.8,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section > div > button[data-slot=button]"
+     },
+     {
+      "name": "다음 구간과 합치기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 104.8,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section > div > button[data-slot=button]"
+     },
+     {
+      "name": "선택 구간 처리",
+      "tag": "select",
+      "role": null,
+      "h": 36,
+      "w": 294,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "8px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section > label > select[data-slot=native-select]"
+     },
+     {
+      "name": "컷 저장",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 50,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-editor-right-dock__inspector > section > button[data-slot=button]"
+     },
+     {
+      "name": "승인한 음성 불러오기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 115.2,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section > fieldset > button[data-slot=button]"
+     },
+     {
+      "name": "먼저 승인한 음성을 골라 주세요.",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 94.5,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": true,
+      "hasReason": true,
+      "primary": false,
+      "selector": "section > fieldset > button[data-slot=button]"
+     },
+     {
+      "name": "화면",
+      "tag": "button",
+      "role": "tab",
+      "h": 32,
+      "w": 40,
+      "fontFamily": "Arial",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "0px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "fieldset > div.vb-inspector-tabs > button[data-slot=button].vb-inspector-tabs__tab"
+     },
+     {
+      "name": "소리",
+      "tag": "button",
+      "role": "tab",
+      "h": 32,
+      "w": 40,
+      "fontFamily": "Arial",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "0px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "fieldset > div.vb-inspector-tabs > button[data-slot=button].vb-inspector-tabs__tab"
+     },
+     {
+      "name": "속도",
+      "tag": "button",
+      "role": "tab",
+      "h": 32,
+      "w": 40,
+      "fontFamily": "Arial",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "0px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "fieldset > div.vb-inspector-tabs > button[data-slot=button].vb-inspector-tabs__tab"
+     },
+     {
+      "name": "보정",
+      "tag": "button",
+      "role": "tab",
+      "h": 32,
+      "w": 40,
+      "fontFamily": "Arial",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "0px",
+      "variant": "ghost",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "fieldset > div.vb-inspector-tabs > button[data-slot=button].vb-inspector-tabs__tab"
+     },
+     {
+      "name": "0",
+      "tag": "input",
+      "role": null,
+      "h": 36,
+      "w": 265,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "8px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "fieldset > label > input[data-slot=input]"
+     },
+     {
+      "name": "0",
+      "tag": "input",
+      "role": null,
+      "h": 36,
+      "w": 265,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "8px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "fieldset > label > input[data-slot=input]"
+     },
+     {
+      "name": "0",
+      "tag": "input",
+      "role": null,
+      "h": 36,
+      "w": 265,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "8px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "fieldset > label > input[data-slot=input]"
+     },
+     {
+      "name": "0",
+      "tag": "input",
+      "role": null,
+      "h": 36,
+      "w": 265,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "8px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "fieldset > label > input[data-slot=input]"
+     },
+     {
+      "name": "영상 화면 맞춤",
+      "tag": "select",
+      "role": null,
+      "h": 36,
+      "w": 265,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "8px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "fieldset > label > select[data-slot=native-select]"
+     },
+     {
+      "name": "1",
+      "tag": "input",
+      "role": null,
+      "h": 36,
+      "w": 265,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "8px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "fieldset > label > input[data-slot=input]"
+     },
+     {
+      "name": "0",
+      "tag": "input",
+      "role": null,
+      "h": 36,
+      "w": 265,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "8px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "fieldset > label > input[data-slot=input]"
+     },
+     {
+      "name": "0",
+      "tag": "input",
+      "role": null,
+      "h": 36,
+      "w": 265,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "8px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "fieldset > label > input[data-slot=input]"
+     },
+     {
+      "name": "0",
+      "tag": "input",
+      "role": null,
+      "h": 36,
+      "w": 265,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "8px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "fieldset > label > input[data-slot=input]"
+     },
+     {
+      "name": "영상 설정 저장",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 84.1,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section > fieldset > button[data-slot=button]"
+     },
+     {
+      "name": "영상 지우기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 70.8,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section > fieldset > button[data-slot=button]"
+     },
+     {
+      "name": "",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 294,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "details.vb-inspector-fold > fieldset > button[data-slot=button]"
+     },
+     {
+      "name": "먼저 \"재생성 범위 미리보기\"를 눌러 바뀌는 범위를 확인해 주세요.",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 294,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": true,
+      "hasReason": true,
+      "primary": false,
+      "selector": "details.vb-inspector-fold > fieldset > button[data-slot=button]"
+     },
+     {
+      "name": "열 수 있는 이전 결과가 아직 없어요.",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 294,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": true,
+      "hasReason": true,
+      "primary": false,
+      "selector": "details.vb-inspector-fold > fieldset > button[data-slot=button]"
+     },
+     {
+      "name": "유진",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 60.8,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "default",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-editor-workbench > div.vb-editor-workbench__body > button[data-slot=button].vb-yujin-panel__toggle"
+     },
+     {
+      "name": "가로·세로 비교 펼치기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 118.4,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "section.vb-editor-variants > div.vb-editor-variants__header > button[data-slot=button]"
+     },
+     {
+      "name": "실행 취소 — 되돌릴 편집이 아직 없어요.",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 32,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "icon",
+      "disabled": true,
+      "hasReason": true,
+      "primary": false,
+      "selector": "div.vb-editor-workbench__timeline-head > span.vb-timeline-edit-toolbar > button[data-slot=button]"
+     },
+     {
+      "name": "다시 실행 — 다시 할 편집이 아직 없어요.",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 32,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "icon",
+      "disabled": true,
+      "hasReason": true,
+      "primary": false,
+      "selector": "div.vb-editor-workbench__timeline-head > span.vb-timeline-edit-toolbar > button[data-slot=button]"
+     },
+     {
+      "name": "분할 — 재생 위치를 고른 장면 안으로 옮겨 주세요. 그 자리에서 나눠요.",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 32,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "icon",
+      "disabled": true,
+      "hasReason": true,
+      "primary": false,
+      "selector": "span.vb-timeline-edit-toolbar > span.vb-cut-tool > button[data-slot=button]"
+     },
+     {
+      "name": "앞과 붙이기 — 첫 장면이라 붙일 앞 장면이 없어요.",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 32,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "icon",
+      "disabled": true,
+      "hasReason": true,
+      "primary": false,
+      "selector": "span.vb-timeline-edit-toolbar > span.vb-cut-tool > button[data-slot=button]"
+     },
+     {
+      "name": "빼기 — 고른 장면 빼기 (Delete) · 실행 취소로 되돌리기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 32,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "icon",
+      "disabled": false,
+      "hasReason": true,
+      "primary": false,
+      "selector": "span.vb-timeline-edit-toolbar > span.vb-cut-tool > button[data-slot=button]"
+     },
+     {
+      "name": "다음 장면에도 — 이 장면의 재료를 다음 장면에도 그대로 쓰기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 32,
+      "fontFamily": "Pretendard",
+      "fontSize": 12,
+      "fontWeight": 500,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "icon",
+      "disabled": false,
+      "hasReason": true,
+      "primary": false,
+      "selector": "span.vb-timeline-edit-toolbar > span.vb-cut-tool > button[data-slot=button]"
+     },
+     {
+      "name": "타임라인 축소",
+      "tag": "button",
+      "role": null,
+      "h": 26.8,
+      "w": 28,
+      "fontFamily": "Arial",
+      "fontSize": 12,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": true,
+      "hasReason": true,
+      "primary": false,
+      "selector": "div.vb-editor-workbench__timeline-head > span.vb-editor-workbench__timeline-zoom > button"
+     },
+     {
+      "name": "타임라인 확대",
+      "tag": "button",
+      "role": null,
+      "h": 26.8,
+      "w": 28,
+      "fontFamily": "Arial",
+      "fontSize": 12,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": true,
+      "primary": false,
+      "selector": "div.vb-editor-workbench__timeline-head > span.vb-editor-workbench__timeline-zoom > button"
+     },
+     {
+      "name": "타임라인 전체 보기",
+      "tag": "button",
+      "role": null,
+      "h": 26.8,
+      "w": 42,
+      "fontFamily": "Arial",
+      "fontSize": 12,
+      "fontWeight": 400,
+      "radius": "6px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": true,
+      "primary": false,
+      "selector": "div.vb-editor-workbench__timeline-head > span.vb-editor-workbench__timeline-zoom > button"
+     },
+     {
+      "name": "내레이션 트랙 잠금",
+      "tag": "button",
+      "role": null,
+      "h": 24,
+      "w": 24,
+      "fontFamily": "Arial",
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div > button"
+     },
+     {
+      "name": "내레이션 트랙 음소거",
+      "tag": "button",
+      "role": null,
+      "h": 24,
+      "w": 24,
+      "fontFamily": "Arial",
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div > button"
+     },
+     {
+      "name": "영상 트랙 잠금",
+      "tag": "button",
+      "role": null,
+      "h": 24,
+      "w": 24,
+      "fontFamily": "Arial",
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div > button"
+     },
+     {
+      "name": "영상 트랙 숨기기",
+      "tag": "button",
+      "role": null,
+      "h": 24,
+      "w": 24,
+      "fontFamily": "Arial",
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div > button"
+     },
+     {
+      "name": "영상 트랙 음소거",
+      "tag": "button",
+      "role": null,
+      "h": 24,
+      "w": 24,
+      "fontFamily": "Arial",
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div > button"
+     },
+     {
+      "name": "배경 음악 트랙 잠금",
+      "tag": "button",
+      "role": null,
+      "h": 24,
+      "w": 24,
+      "fontFamily": "Arial",
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div > button"
+     },
+     {
+      "name": "배경 음악 트랙 음소거",
+      "tag": "button",
+      "role": null,
+      "h": 24,
+      "w": 24,
+      "fontFamily": "Arial",
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div > button"
+     },
+     {
+      "name": "효과음 트랙 잠금",
+      "tag": "button",
+      "role": null,
+      "h": 24,
+      "w": 24,
+      "fontFamily": "Arial",
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div > button"
+     },
+     {
+      "name": "효과음 트랙 음소거",
+      "tag": "button",
+      "role": null,
+      "h": 24,
+      "w": 24,
+      "fontFamily": "Arial",
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div > button"
+     },
+     {
+      "name": "오버레이 트랙 잠금",
+      "tag": "button",
+      "role": null,
+      "h": 24,
+      "w": 24,
+      "fontFamily": "Arial",
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div > button"
+     },
+     {
+      "name": "오버레이 트랙 숨기기",
+      "tag": "button",
+      "role": null,
+      "h": 24,
+      "w": 24,
+      "fontFamily": "Arial",
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div > button"
+     },
+     {
+      "name": "캡션 트랙 잠금",
+      "tag": "button",
+      "role": null,
+      "h": 24,
+      "w": 24,
+      "fontFamily": "Arial",
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div > button"
+     },
+     {
+      "name": "캡션 트랙 숨기기",
+      "tag": "button",
+      "role": null,
+      "h": 24,
+      "w": 24,
+      "fontFamily": "Arial",
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div > button"
+     },
+     {
+      "name": "내레이션 1번째 장면, 0초부터",
+      "tag": "button",
+      "role": null,
+      "h": 30,
+      "w": 77.3,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div.vb-timeline-clip > button.vb-timeline-clip__select"
+     },
+     {
+      "name": "내레이션 2번째 장면, 1초부터",
+      "tag": "button",
+      "role": null,
+      "h": 30,
+      "w": 31.7,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div.vb-timeline-clip > button.vb-timeline-clip__select"
+     },
+     {
+      "name": "내레이션 3번째 장면, 2초부터",
+      "tag": "button",
+      "role": null,
+      "h": 30,
+      "w": 59.2,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div.vb-timeline-clip > button.vb-timeline-clip__select"
+     },
+     {
+      "name": "내레이션 4번째 장면, 3초부터",
+      "tag": "button",
+      "role": null,
+      "h": 30,
+      "w": 47,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div.vb-timeline-clip > button.vb-timeline-clip__select"
+     },
+     {
+      "name": "영상 1번째 장면, 0초부터",
+      "tag": "button",
+      "role": null,
+      "h": 30,
+      "w": 77.3,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div.vb-timeline-clip > button.vb-timeline-clip__select"
+     },
+     {
+      "name": "영상 2번째 장면, 1초부터",
+      "tag": "button",
+      "role": null,
+      "h": 30,
+      "w": 31.7,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div.vb-timeline-clip > button.vb-timeline-clip__select"
+     },
+     {
+      "name": "영상 3번째 장면, 2초부터",
+      "tag": "button",
+      "role": null,
+      "h": 30,
+      "w": 59.2,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div.vb-timeline-clip > button.vb-timeline-clip__select"
+     },
+     {
+      "name": "영상 4번째 장면, 3초부터",
+      "tag": "button",
+      "role": null,
+      "h": 30,
+      "w": 47,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div.vb-timeline-clip > button.vb-timeline-clip__select"
+     },
+     {
+      "name": "오버레이 1 · 그림, 0초부터",
+      "tag": "button",
+      "role": null,
+      "h": 30,
+      "w": 77.3,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div.vb-timeline-clip > button.vb-timeline-clip__select"
+     },
+     {
+      "name": "오버레이 2 · 그림, 1초부터",
+      "tag": "button",
+      "role": null,
+      "h": 30,
+      "w": 31.7,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div.vb-timeline-clip > button.vb-timeline-clip__select"
+     },
+     {
+      "name": "오버레이 3 · 그림, 2초부터",
+      "tag": "button",
+      "role": null,
+      "h": 30,
+      "w": 59.2,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div.vb-timeline-clip > button.vb-timeline-clip__select"
+     },
+     {
+      "name": "캡션 1 · 첫 장면, 0초부터",
+      "tag": "button",
+      "role": null,
+      "h": 30,
+      "w": 77.3,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div.vb-timeline-clip > button.vb-timeline-clip__select"
+     },
+     {
+      "name": "캡션 2 · 둘째 장면, 1초부터",
+      "tag": "button",
+      "role": null,
+      "h": 30,
+      "w": 31.7,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div.vb-timeline-clip > button.vb-timeline-clip__select"
+     },
+     {
+      "name": "캡션 3 · 셋째 장면, 2초부터",
+      "tag": "button",
+      "role": null,
+      "h": 30,
+      "w": 59.2,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div.vb-timeline-clip > button.vb-timeline-clip__select"
+     },
+     {
+      "name": "캡션 4 · 넷째 장면, 3초부터",
+      "tag": "button",
+      "role": null,
+      "h": 30,
+      "w": 47,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div > div.vb-timeline-clip > button.vb-timeline-clip__select"
+     },
+     {
+      "name": "재생 위치 끌기",
+      "tag": "button",
+      "role": null,
+      "h": 216,
+      "w": 14.4,
+      "fontFamily": "Arial",
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "radius": "0px",
+      "variant": null,
+      "size": null,
+      "disabled": false,
+      "hasReason": true,
+      "primary": false,
+      "selector": "div.vb-timeline-lanes-viewport > div.vb-timeline-playhead > button.vb-timeline-playhead__handle"
+     }
+    ],
+    "texts": [
+     {
+      "fontSize": 14,
+      "fontWeight": 750,
+      "fontFamily": "Pretendard",
+      "sample": "VideoBox"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "프로젝트"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "편집 실사용 시험"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "편집"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "편집 실사용 시험"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "이야기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 650,
+      "fontFamily": "Pretendard",
+      "sample": "편집"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "확인과 내보내기"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "가로 16:9"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "이 기기에서 작업"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "작업 상태"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "편집 작업판"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "세부 정보"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "내보내기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "도구줄 접기"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "미디어"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "오디오"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "텍스트"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "캡션"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "대본"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "전환"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "파일 추가"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "내레이션"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "촬영본"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "인포그래픽"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "모션"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "자료실에서 가져오기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "미디어 검색"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "전체"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "영상"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "그림"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "모든 방향"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "가로"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "세로"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "격자로 보기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "줄로 보기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "적용 구간: 0.00–1.33초"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "자료 1"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "가로"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "오디오 있음"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내 영상"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "직접 고른 미디어"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "적용 구간: 0.00–1.33초"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "유진 추천에 쓸지 정해 주세요."
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "항상 쓰기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "쓰지 않기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "원본 미리보기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "적용"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "얹은 것 바꾸기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "자료 2"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "가로"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "오디오 있음"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내 영상"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "직접 고른 미디어"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "적용 구간: 0.00–1.33초"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "유진 추천에 쓸지 정해 주세요."
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "항상 쓰기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "쓰지 않기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "원본 미리보기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "적용"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "얹은 것 바꾸기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "자료 3"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "가로"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "오디오 있음"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내 영상"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "직접 고른 미디어"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "적용 구간: 0.00–1.33초"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "유진 추천에 쓸지 정해 주세요."
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "항상 쓰기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "쓰지 않기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "원본 미리보기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "적용"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "얹은 것 바꾸기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "자료 4"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "가로"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "오디오 있음"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내 영상"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "직접 고른 미디어"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "적용 구간: 0.00–1.33초"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "유진 추천에 쓸지 정해 주세요."
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "항상 쓰기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "쓰지 않기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "원본 미리보기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "적용"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "얹은 것 바꾸기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "원본 확인"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "소스 확인"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "편집본은 그대로 두고 원본만 봐요."
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "내레이션 · 1번째 장면"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "내레이션 · 2번째 장면"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "내레이션 · 3번째 장면"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "내레이션 · 4번째 장면"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "영상 · 1번째 장면"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "영상 · 2번째 장면"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "영상 · 3번째 장면"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "영상 · 4번째 장면"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "미디어 분석"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "편집본 미리보기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "편집 결과"
+     },
+     {
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "fontFamily": "Arial",
+      "sample": "◀｜"
+     },
+     {
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "fontFamily": "Arial",
+      "sample": "재생 / 일시정지"
+     },
+     {
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "fontFamily": "Arial",
+      "sample": "｜▶"
+     },
+     {
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "fontFamily": "Arial",
+      "sample": "음소거"
+     },
+     {
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "fontFamily": "Arial",
+      "sample": "반복"
+     },
+     {
+      "fontSize": 13.3333,
+      "fontWeight": 400,
+      "fontFamily": "Arial",
+      "sample": "전체화면"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "재생 빠르기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "빠르게 보려면 L 키를 눌러요"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "단축키"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "타임라인"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0.0"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "현재 캡션: 첫 장면"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "캡션도 함께 재생돼요. 현재 편집 내용이 반영된 영상이에요. 타임라인 0"
+     },
+     {
+      "fontSize": 21,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "편집 항목"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0.00"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "속도"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "x"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "기간"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "s"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "선택 구간 미리보기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "영상·소리"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "캡션"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "화면 요소"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "편집 대상"
+     },
+     {
+      "fontSize": 16.38,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "고른 장면"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "재생 위치가 이 장면 밖일 때 여기서 고쳐요."
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0.00–1.33초 구간"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "구간 중간에서 분할"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "다음 구간과 합치기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "선택 구간 처리"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "컷 저장"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내레이션 음성"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "청취 승인한 음성을 골라 적용해요."
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "승인한 음성 불러오기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "승인한 음성 적용"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "이 장면에 들어간 미디어예요."
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "화면"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "소리"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "속도"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "보정"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상 서서히 나타나기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상 서서히 사라지기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상 쓸 구간 시작"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상 쓸 구간 끝"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상 화면 맞춤"
+     },
+     {
+      "fontSize": 11.6667,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "세로 숏폼에서 좌우가 잘리면 전체 담기를 골라 주세요."
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상 크기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상 좌우 위치"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상 위아래 위치"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상 기울이기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "영상 설정 저장"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "영상 지우기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "부분 재생성"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "캡션"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "컷 판단"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "화면 요소"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "배경 음악"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "효과음"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내레이션 음성"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "재생성 범위 미리보기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "부분 재생성 실행"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "이전 결과 열기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "유진"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "가로·세로 비교"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "가로·세로 비교 펼치기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "타임라인"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "트랙"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "실행 취소"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "다시 실행"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "분할"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "앞과 붙이기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "빼기"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 500,
+      "fontFamily": "Pretendard",
+      "sample": "다음 장면에도"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Arial",
+      "sample": "−"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Arial",
+      "sample": "+"
+     },
+     {
+      "fontSize": 12,
+      "fontWeight": 400,
+      "fontFamily": "Arial",
+      "sample": "전체"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내레이션"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "배경 음악"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "효과음"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "오버레이"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "캡션"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0s"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "3s"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "6s"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "9s"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "12s"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "15s"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "18s"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내레이션 1"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내레이션 2"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내레이션 3"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "내레이션 4"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상 1"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상 2"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상 3"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "영상 4"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "오버레이 1 · 그림"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "오버레이 2 · 그림"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "오버레이 3 · 그림"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "캡션 1 · 첫 장면"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "캡션 2 · 둘째 장면"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "캡션 3 · 셋째 장면"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "캡션 4 · 넷째 장면"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "현재 캡션:"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "스냅:"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "0"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "초"
+     }
+    ]
+   }
+  },
+  {
+   "requested": "/projects/project-eb51ef1e/review",
+   "summary": {
+    "path": "/projects/project-eb51ef1e/review",
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "overflowX": 0,
+    "controlCount": 8,
+    "controlHeights": {
+     "32": 7,
+     "36": 1
+    },
+    "controlFonts": {
+     "Arial": 4,
+     "Pretendard": 4
+    },
+    "controlFontSizes": {
+     "14": 8
+    },
+    "controlRadii": {
+     "8px": 4,
+     "10px": 4
+    },
+    "filledPrimaryButtons": 1,
+    "disabledWithoutReason": 0,
+    "textFontSizes": {
+     "10": 4,
+     "14": 10,
+     "28": 1
+    },
+    "textFontWeights": {
+     "400": 9,
+     "500": 2,
+     "650": 2,
+     "700": 1,
+     "750": 1
+    },
+    "textFontFamilies": {
+     "Pretendard": 13,
+     "Arial": 2
+    }
+   },
+   "inventory": {
+    "path": "/projects/project-eb51ef1e/review",
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "docScrollWidth": 1440,
+    "docClientWidth": 1440,
+    "controls": [
+     {
+      "name": "이전 화면",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 32,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "outline",
+      "size": "icon-sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-product-shell > header.vb-top-bar > button[data-slot=tooltip-trigger].vb-top-bar__compact-control"
+     },
+     {
+      "name": "편집 실사용 시험",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 131.8,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "outline",
+      "size": "sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "header.vb-top-bar > div.vb-top-bar__project > button[data-slot=tooltip-trigger].vb-top-bar__compact-control"
+     },
+     {
+      "name": "이야기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 84.3,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "header.vb-top-bar > nav.vb-top-bar__stages > button[data-slot=button].vb-top-bar__compact-control"
+     },
+     {
+      "name": "편집",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 72.2,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "header.vb-top-bar > nav.vb-top-bar__stages > button[data-slot=button].vb-top-bar__compact-control"
+     },
+     {
+      "name": "확인과 내보내기",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 136,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 650,
+      "radius": "10px",
+      "variant": "default",
+      "size": "sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "header.vb-top-bar > nav.vb-top-bar__stages > button[data-slot=button].vb-top-bar__compact-control"
+     },
+     {
+      "name": "작업 상태",
+      "tag": "button",
+      "role": null,
+      "h": 36,
+      "w": 93.9,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "header.vb-top-bar > div.vb-top-bar__end > button[data-slot=dialog-trigger]"
+     },
+     {
+      "name": "전체 메뉴",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 32,
+      "fontFamily": "Arial",
+      "fontSize": 14,
+      "fontWeight": 500,
+      "radius": "8px",
+      "variant": "outline",
+      "size": "icon-sm",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-top-bar__end > div.vb-top-bar__menu > button[data-slot=tooltip-trigger].vb-top-bar__compact-control"
+     },
+     {
+      "name": "다시 확인",
+      "tag": "button",
+      "role": null,
+      "h": 32,
+      "w": 75.9,
+      "fontFamily": "Pretendard",
+      "fontSize": 14,
+      "fontWeight": 400,
+      "radius": "10px",
+      "variant": "outline",
+      "size": "default",
+      "disabled": false,
+      "hasReason": false,
+      "primary": false,
+      "selector": "div.vb-review-output > section > button[data-slot=button]"
+     }
+    ],
+    "texts": [
+     {
+      "fontSize": 14,
+      "fontWeight": 750,
+      "fontFamily": "Pretendard",
+      "sample": "VideoBox"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "프로젝트"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "편집 실사용 시험"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "확인과 내보내기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "편집 실사용 시험"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "이야기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "편집"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 650,
+      "fontFamily": "Pretendard",
+      "sample": "확인과 내보내기"
+     },
+     {
+      "fontSize": 10,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "이 기기에서 작업"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 500,
+      "fontFamily": "Arial",
+      "sample": "작업 상태"
+     },
+     {
+      "fontSize": 28,
+      "fontWeight": 700,
+      "fontFamily": "Pretendard",
+      "sample": "영상 검토"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "아직 검토할 편집본이 없어요. 편집 화면에서 장면을 채우고 저장하면 여기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 650,
+      "fontFamily": "Pretendard",
+      "sample": "편집으로 돌아가기"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "다시 확인"
+     },
+     {
+      "fontSize": 14,
+      "fontWeight": 400,
+      "fontFamily": "Pretendard",
+      "sample": "출력 상태를 불러오는 중이에요."
+     }
+    ]
+   }
+  }
+ ]
+}
