@@ -1,5 +1,7 @@
 # 편집기 핵심 수리 마감 — 계획 H Task 0~18 (2026-10-10)
 
+**대체됨:** 이 문서 뒤의 최신 인계는 `2026-10-10-pastel-accent-and-layout-rules.ko.md`입니다(포인트색 변경·구역 규칙 설계·연타 수정). 계획 H 마감 내용은 여전히 이 문서가 기록입니다.
+
 **이어받는 문서:** `2026-10-09-editor-faster-play-zoom-capcut-keys.ko.md` (계획 P2 마감 · H Task 13까지)
 계획서: `docs/superpowers/plans/2026-10-08-editor-core-repair-h.ko.md` (Task 0~18 전부 끝) · 점검 기준: `docs/superpowers/2026-10-08-editor-ui-audit.ko.md`, `docs/superpowers/2026-10-08-timeline-adoption-spike.ko.md`
 작업 장부: `.superpowers/sdd/2026-10-08-editor-core-repair-h.ko/progress.md`(Task별 `task-N-report.md`가 같은 폴더) · 마감 보고서: `.superpowers/sdd/h-closeout-2026-10-10.md`(원자료·스크립트는 `.superpowers/sdd/h-closeout/`) · 증거 그림: `docs/superpowers/audit-evidence/2026-10-08-editor-ui/after-h/`

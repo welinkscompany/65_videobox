@@ -55,7 +55,7 @@ PALETTE = {
     "border": "#2E2E33",
     "text": "#F2F2F3",
     "muted": "#A3A3AC",
-    "accent": "#EA580C",
+    "accent": "#9EC0F7",
     "success": "#4ADE80",
 }
 

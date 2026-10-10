@@ -67,7 +67,7 @@
 | 운영 규정 SSOT | `docs/development-fast-path.ko.md` `## 10` |
 | 최상위 구현 계획 | `docs/implementation-plan.ko.md` |
 | 디자인 승인 기록 | `docs/decisions/` |
-| **최신 세션 인계** | `docs/handoffs/2026-10-10-editor-core-repair-h.ko.md` |
+| **최신 세션 인계** | `docs/handoffs/2026-10-10-pastel-accent-and-layout-rules.ko.md` |
 
 지금 유효한 결정 목록은 `.claude/rules/current-decisions.md`(항상 읽힘). 전체는 `docs/decisions/`, 가장 나중 것부터 읽어라.
 

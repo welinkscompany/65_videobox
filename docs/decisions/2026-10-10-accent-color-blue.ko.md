@@ -25,8 +25,10 @@
 
 ## 범위 밖(일부러 안 바꿨다)
 
-- `packages/core-engine/.../infographic_brief.py`의 `accent: "#EA580C"`는 **영상 안 인포그래픽** 색이다.
-  화면 팔레트가 아니라서 이번에 건드리지 않았다. 바꿀지는 따로 정한다.
+- (정정) 처음엔 `infographic_brief.py`의 `accent`를 "영상 안 인포그래픽 색이라 범위 밖"이라고 적었으나 **틀렸다.**
+  `tests/test_infographic_brief.py::test_the_palette_matches_the_approved_one_on_screen`이 인포그래픽 팔레트가
+  화면 팔레트와 **같아야 한다**고 고정한다(두 벌을 두면 한 벌이 낡는다는 2026-08-21 교훈). 전체 pytest가 이것을 잡았고,
+  `accent`를 `#9EC0F7`로 함께 바꿨다(72건 통과). 앞으로 인포그래픽에 쓰는 강조색도 파스텔 파랑이다.
 - 글자 크기·간격·구역 구분 정리는 계획 I(`docs/superpowers/plans/2026-10-08-design-system-and-wiring-i.ko.md`)에서 한다.
 
 ## 같이 고친 곳
